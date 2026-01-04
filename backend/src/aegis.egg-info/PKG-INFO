@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: aegis
+Version: 1.0.0
+Summary: AEGIS AI Security Control Plane
+Author-email: Enterprise Engineering <engineering@aegis.security>
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic
+Requires-Dist: pydantic-settings
+Requires-Dist: cryptography
+Requires-Dist: python-multipart
+Requires-Dist: pyyaml
+Requires-Dist: requests

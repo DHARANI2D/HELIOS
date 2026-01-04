@@ -1,0 +1,25 @@
+[project]
+name = "aegis"
+version = "1.0.0"
+description = "AEGIS AI Security Control Plane"
+authors = [
+    { name = "Enterprise Engineering", email = "engineering@aegis.security" }
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "pyyaml",
+    "cryptography",
+    "requests",
+    "sqlmodel",
+    "aiosqlite"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
