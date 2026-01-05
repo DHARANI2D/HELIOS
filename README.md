@@ -222,10 +222,3 @@ docker compose up --build
 5. Submit a **Pull Request** with a clear description and screenshots (if UI changes).
 
 ---
-
-## License
-AEGIS is released under the **MIT License**. See `LICENSE` for details.
-
----
-
-*Happy hacking! 🎯*

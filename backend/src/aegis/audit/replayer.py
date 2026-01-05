@@ -17,19 +17,17 @@ class DecisionReplayer:
         if not target_log:
             return {"status": "ERROR", "reason": "Decision not found in ledger."}
             
-        data = target_log["data"]
         context = {
-            "ai_identity": {"id": data["ai_id"], "signature": data["ai_signature"]},
-            "intent": {"name": data["intent"]},
-            "environment": data.get("environment", "unknown") # Replay depends on contextual metadata
+            "ai_identity": {"id": target_log["ai_id"], "signature": target_log["signature"]},
+            "intent": {"name": target_log["intent"]},
+            "environment": "production" # Default for re-evaluation
         }
         
-        # Re-evaluate using current (or historical) engine
         reevaluation = self.policy_engine.evaluate(context)
         
         return {
-            "original_decision": data["decision"],
+            "original_decision": target_log["decision"],
             "reevaluated_decision": reevaluation["decision"],
             "reason": reevaluation["reason"],
-            "consistency": data["decision"] == reevaluation["decision"]
+            "consistency": target_log["decision"] == reevaluation["decision"]
         }

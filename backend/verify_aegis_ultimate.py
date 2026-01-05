@@ -8,9 +8,11 @@ from aegis.audit.ledger import AuditLedger
 from aegis.audit.replayer import DecisionReplayer
 from aegis.governance.trust import AdaptiveTrustEngine
 from aegis.governance.isolation import ProgressiveIsolationEngine
+from aegis.db import init_db
 import json
 
 def run_ultimate_simulation():
+    init_db()
     print("🛡️  AEGIS: STARTING EVOLUTION BLUEPRINT VERIFICATION\n")
     
     # Setup Advanced Infrastructure

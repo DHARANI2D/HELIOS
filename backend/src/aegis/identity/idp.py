@@ -38,27 +38,55 @@ class AIIdentity:
         except Exception:
             return False
 
-class TrustAuthority:
-    """The central authority for issuing and managing AI identities."""
+from sqlmodel import Session, select
+from aegis.db import engine, Agent
 
-    def __init__(self):
-        # In‑memory registry mapping ai_id -> public_key_bytes
-        self.registry: Dict[str, bytes] = {}
-    
+class TrustAuthority:
+    """The central authority for issuing and managing AI identities.
+    All identities are persisted in the SQLite database via Agent model.
+    """
+
     def issue_identity(self, ai_id: str) -> AIIdentity:
-        """Generates a new identity for an AI workload."""
+        """Generates a new identity for an AI workload and persists it."""
         private_key = ed25519.Ed25519PrivateKey.generate()
         identity = AIIdentity(ai_id, private_key)
         
-        # Register public key
-        self.registry[ai_id] = identity.public_key_bytes
+        with Session(engine) as session:
+            # Check if agent already exists
+            db_agent = session.get(Agent, ai_id)
+            if db_agent:
+                db_agent.public_key = identity.public_key_b64
+                db_agent.status = "Active"
+                db_agent.trust_score = 100.0
+            else:
+                db_agent = Agent(
+                    id=ai_id,
+                    public_key=identity.public_key_b64,
+                    trust_score=100.0,
+                    status="Active",
+                    level=10,
+                    mode="FULL_ACCESS"
+                )
+            session.add(db_agent)
+            session.commit()
+            
         return identity
 
     def get_public_key(self, ai_id: str) -> Optional[bytes]:
-        """Retrieve the public key for a given AI identity."""
-        return self.registry.get(ai_id)
+        """Retrieve the public key for a given AI identity from the DB."""
+        with Session(engine) as session:
+            agent = session.get(Agent, ai_id)
+            if agent and agent.public_key:
+                return base64.b64decode(agent.public_key)
+        return None
 
     def revoke_identity(self, ai_id: str):
-        """Revoke an AI identity by removing it from the registry."""
-        if ai_id in self.registry:
-            del self.registry[ai_id]
+        """Revoke an AI identity by updating its status in the DB."""
+        with Session(engine) as session:
+            agent = session.get(Agent, ai_id)
+            if agent:
+                agent.status = "REVOKED"
+                agent.level = 0
+                agent.mode = "ISOLATED"
+                session.add(agent)
+                session.commit()
