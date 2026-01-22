@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+playwright
+jinja2
+python-multipart
+pydantic
+beautifulsoup4
+aiofiles
+tldextract
+lxml
+dnspython
+aiohttp
+pydantic-settings
+olefile

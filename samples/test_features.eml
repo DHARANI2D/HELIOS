@@ -1,0 +1,19 @@
+MIME-Version: 1.0
+Subject: Customer Support Needed - Call Now
+From: "Support" <support@fake-bank-alert.com>
+To: victim@company.com
+Content-Type: multipart/mixed; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset="utf-8"
+
+Please call our support line immediately at +1-800-555-0199 to resolve this issue.
+Visit http://phishing-site.com/login for more info.
+
+--boundary123
+Content-Type: text/plain; name="malware.bat"
+Content-Disposition: attachment; filename="malware.bat"
+
+echo "This is a test malware file"
+
+--boundary123--

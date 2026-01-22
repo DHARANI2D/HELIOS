@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DESAS | SOC Analysis</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        .header {
+            grid-column: 1 / -1;
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .sidebar {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        .main-content {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            min-height: 500px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5em;
+        }
+
+        h3 {
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 5px;
+            color: #2c3e50;
+        }
+
+        .upload-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            width: 100%;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-top: 10px;
+        }
+
+        .upload-btn:hover {
+            background: #2980b9;
+        }
+
+        .verdict-box {
+            text-align: center;
+            padding: 20px;
+            border-radius: 5px;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .verdict-box.Malicious {
+            background: #e74c3c;
+        }
+
+        .verdict-box.Suspicious {
+            background: #f39c12;
+        }
+
+        .verdict-box.Benign {
+            background: #2ecc71;
+        }
+
+        .verdict-box.Pending {
+            background: #95a5a6;
+        }
+
+        .score-display {
+            font-size: 3em;
+            font-weight: bold;
+        }
+
+        .module-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .module-title {
+            font-weight: bold;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+
+        ul {
+            padding-left: 20px;
+            margin: 5px 0;
+        }
+
+        li {
+            margin-bottom: 5px;
+            color: #c0392b;
+        }
+
+        /* Default to red for risks */
+        .safe-li {
+            color: #2ecc71;
+        }
+
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin: 10px auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .screenshot-box img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header">
+        <h1>DESAS Investigation Station (v2.0)</h1>
+    </div>
+
+    <div class="container">
+        <!-- Sidebar: Controls & Verdict -->
+        <div class="sidebar">
+            <div id="verdictBox" class="verdict-box Pending">
+                <div>TOTAL RISK SCORE</div>
+                <div id="totalScore" class="score-display">0</div>
+                <div id="verdictText">Ready</div>
+            </div>
+
+            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                Analyze New Email (.eml)
+            </button>
+            <input type="file" id="fileInput" accept=".eml" style="display: none;" onchange="handleFile()">
+            <div id="loader" class="loader"></div>
+
+            <div style="margin-top: 20px;">
+                <h3>Block Actions</h3>
+                <ul id="blockActions" style="list-style: none; padding: 0;">
+                    <li style="color: #7f8c8d; font-style: italic;">No actions yet.</li>
+                </ul>
+            </div>
+
+            <div style="margin-top: 20px;">
+                <a href="/whitelist"
+                    style="font-size: 0.9em; color: #3498db; text-decoration: none; display: block; text-align: right;">Manage
+                    Whitelist ↗</a>
+            </div>
+        </div>
+
+        <!-- Main Content: Detailed Report -->
+        <div class="main-content" id="reportView">
+            <h3>1. Header Analysis</h3>
+            <div class="module-card">
+                <div class="module-title">Score: <span id="headerScore">0</span></div>
+                <ul id="headerReasons"></ul>
+
+                <!-- Auth Status Icons -->
+                <div id="headerAuthIcons"
+                    style="display: flex; gap: 15px; margin-top: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                    <!-- JS -->
+                </div>
+
+                <!-- Hops Table -->
+                <div style="margin-top: 15px;">
+                    <strong>Relay Information (Hops):</strong>
+                    <div style="overflow-x: auto; margin-top: 5px;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                            <thead>
+                                <tr style="background: #f1f1f1; text-align: left;">
+                                    <th style="padding: 5px; border: 1px solid #ddd;">Hop</th>
+                                    <th style="padding: 5px; border: 1px solid #ddd;">Delay</th>
+                                    <th style="padding: 5px; border: 1px solid #ddd;">From</th>
+                                    <th style="padding: 5px; border: 1px solid #ddd;">Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="headerHopsTableBody">
+                                <!-- JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Raw Headers -->
+                <div style="margin-top: 15px;">
+                    <strong>Raw Headers:</strong>
+                    <div
+                        style="max-height: 200px; overflow-y: auto; background: #fafafa; border: 1px solid #eee; padding: 5px; font-size: 0.8em; font-family: monospace;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <tbody id="headerRawHeadersBody">
+                                <!-- JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="mxToolboxSection"
+                    style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; display: none;">
+                    <strong>Reputation & Auth (MxToolbox):</strong>
+                    <strong>Reputation & Auth (MxToolbox):</strong>
+                    <div id="mxToolboxDetailed" style="margin-top: 10px;">
+                        <!-- Content rendered by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h3>2. Body & NLP Analysis</h3>
+        <div class="module-card">
+            <div class="module-title">Score: <span id="bodyScore">0</span></div>
+            <ul id="bodyReasons"></ul>
+
+            <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+                <strong>Suspicious Domains:</strong>
+                <ul id="suspiciousDomains" class="domain-list"></ul>
+            </div>
+
+            <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+                <strong>Extracted Links (VirusTotal):</strong>
+                <ul id="extractedUrls"></ul>
+            </div>
+
+            <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+                <strong>Attachments:</strong>
+                <div id="attachmentsList"></div>
+                <!-- Template for JS rendering -->
+            </div>
+        </div>
+
+        <h3>3. Dynamic Sandbox Execution</h3>
+        <div class="module-card">
+            <div class="module-title">Score: <span id="sandboxScore">0</span></div>
+            <p><strong>URL:</strong> <code id="sandboxedUrl">-</code></p>
+            <p><strong>Redirect Chain:</strong></p>
+            <ul id="redirectChain" style="color: #333;"></ul>
+            <p><strong>Network & DOM Indicators:</strong></p>
+            <ul id="sandboxReasons"></ul>
+
+            <div class="screenshot-box">
+                <strong>Screenshot:</strong><br>
+                <!-- Overlay Info -->
+                <div style="background: #eee; padding: 10px; margin-bottom: 5px; border-radius: 4px; font-size: 0.9em;">
+                    <div><strong>Sender Domain:</strong> <span id="overlaySender">-</span></div>
+                    <div><strong>Attachments:</strong> <span id="overlayAttachments">-</span></div>
+                </div>
+                <img id="screenshot" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
+                    alt="Sandbox Screenshot">
+            </div>
+        </div>
+
+        <!-- Whitelist Info (Hidden if empty) -->
+        <div id="whitelistSection" style="margin-top: 20px; color: #7f8c8d; font-size: 0.9em;">
+            <strong>Whitelisted Hits (Ignored):</strong> <span id="whitelistHits">None</span>
+        </div>
+    </div>
+    </div>
+    </div>
+
+    <script>
+        async function handleFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // UI Reset
+            document.getElementById('loader').style.display = 'block';
+            document.getElementById('verdictText').innerText = "Analyzing...";
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/analyze/email', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                renderReport(data);
+            } catch (err) {
+                alert("Error: " + err);
+            } finally {
+                document.getElementById('loader').style.display = 'none';
+            }
+        }
+
+        function renderReport(data) {
+            // Verdict
+            const vbox = document.getElementById('verdictBox');
+            vbox.className = `verdict-box ${data.verdict}`;
+            document.getElementById('totalScore').innerText = data.total_score;
+            document.getElementById('verdictText').innerText = data.verdict.toUpperCase();
+
+            // Header Section
+            document.getElementById('headerScore').innerText = data.header_score;
+            fillList('headerReasons', data.header_reasons);
+
+            // Auth Icons
+            const authDiv = document.getElementById('headerAuthIcons');
+            if (authDiv) {
+                authDiv.innerHTML = '';
+                if (data.auth_results) {
+                    const makeIcon = (label, status) => {
+                        // Status normalized to lower: pass, fail, none
+                        const isPass = status === 'pass';
+                        const isFail = status === 'fail' || status === 'softfail';
+                        const color = isPass ? '#2ecc71' : (isFail ? '#e74c3c' : '#95a5a6');
+                        const icon = isPass ? '✓' : (isFail ? '⚠' : '?');
+                        return `
+                        <div style="text-align: center;">
+                            <div style="font-size: 1.5em; color: ${color};">${icon}</div>
+                            <div style="font-size: 0.8em; font-weight: bold; color: #555;">${label}</div>
+                            <div style="font-size: 0.7em; color: #777;">${status.toUpperCase()}</div>
+                        </div>
+                    `;
+                    };
+
+                    authDiv.innerHTML += makeIcon('SPF', data.auth_results.spf?.status || 'none');
+                    authDiv.innerHTML += makeIcon('DKIM', data.auth_results.dkim?.status || 'none');
+                    authDiv.innerHTML += makeIcon('DMARC', data.auth_results.dmarc?.status || 'none');
+                }
+            }
+
+            // Hops Table
+            const hopsBody = document.getElementById('headerHopsTableBody');
+            if (hopsBody) {
+                hopsBody.innerHTML = '';
+                if (data.hops && data.hops.length > 0) {
+                    data.hops.forEach(hop => {
+                        hopsBody.innerHTML += `
+                            <tr style="border-bottom: 1px solid #eee;">
+                                <td style="padding: 5px;">${hop.hop}</td>
+                                <td style="padding: 5px; color: ${parseInt(hop.delay) > 10 ? 'red' : 'inherit'};">${hop.delay}</td>
+                                <td style="padding: 5px; word-break: break-all;">${hop.from}</td>
+                                <td style="padding: 5px; font-size: 0.8em;">${hop.time}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    hopsBody.innerHTML = '<tr><td colspan="4" style="padding: 5px; text-align: center; color: #999;">No Relay Hops Found</td></tr>';
+                }
+            }
+
+            // Raw Headers
+            const rhBody = document.getElementById('headerRawHeadersBody');
+            if (rhBody) {
+                rhBody.innerHTML = '';
+                if (data.all_headers && data.all_headers.length > 0) {
+                    data.all_headers.forEach(h => {
+                        rhBody.innerHTML += `
+                            <tr style="border-bottom: 1px solid #eee;">
+                                <td style="padding: 2px 5px; font-weight: bold; color: #444; width: 30%; vertical-align: top;">${h.name}</td>
+                                <td style="padding: 2px 5px; color: #666; word-break: break-all;">${h.value}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    rhBody.innerHTML = '<tr><td colspan="2" style="padding: 5px; text-align: center;">No headers available</td></tr>';
+                }
+            }
+
+            // MxToolbox Render
+            const mx = data.mxtoolbox_analysis;
+            const mxSection = document.getElementById('mxToolboxSection');
+
+            if (mx && (mx.blacklist || mx.smtp)) {
+                mxSection.style.display = 'block';
+                const container = document.getElementById('mxToolboxDetailed');
+                container.innerHTML = ''; // Clear previous
+
+                const monitors = [
+                    { key: 'blacklist', label: 'Blacklist' },
+                    { key: 'smtp', label: 'SMTP' },
+                    { key: 'spf', label: 'SPF' },
+                    { key: 'dmarc', label: 'DMARC' },
+                    { key: 'dkim', label: 'DKIM' },
+                    { key: 'dns', label: 'DNS' }
+                ];
+
+                monitors.forEach(m => {
+                    const data = mx[m.key];
+                    if (!data) return;
+                    if (m.key === 'dkim' && !data.checked) return; // Skip unchecked DKIM
+
+                    // Create Section
+                    const sec = document.createElement('div');
+                    sec.style.marginBottom = '15px';
+
+                    // Header
+                    const color = data.passed ? '#155724' : '#721c24';
+                    const bg = data.passed ? '#d4edda' : '#f8d7da';
+                    const icon = data.passed ? '✓' : '✗';
+
+                    let html = `
+                        <div style="background: ${bg}; color: ${color}; padding: 5px 10px; border-radius: 4px; font-weight: bold; font-size: 0.9em; margin-bottom: 5px;">
+                            ${icon} ${m.label} Check
+                        </div>
+                    `;
+
+                    // Details Table
+                    if (data.details && data.details.length > 0) {
+                        html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">`;
+                        data.details.forEach(row => {
+                            const statusColor = row.status === 'PASS' ? 'green' : (row.status === 'FAIL' ? 'red' : '#666');
+                            html += `
+                                <tr style="border-bottom: 1px solid #eee;">
+                                    <td style="padding: 4px; font-weight: bold; width: 150px;">${row.name}</td>
+                                    <td style="padding: 4px; color: ${statusColor}; font-weight: bold; width: 50px;">${row.status}</td>
+                                    <td style="padding: 4px; color: #555; word-break: break-all;">${row.info}</td>
+                                </tr>
+                            `;
+                        });
+                        html += `</table>`;
+                    } else {
+                        html += `<div style="font-size: 0.85em; padding: 4px; color: #666;">No details available.</div>`;
+                    }
+
+                    sec.innerHTML = html;
+                    container.appendChild(sec);
+                });
+
+            } else {
+                mxSection.style.display = 'none';
+            }
+
+            // Body Section
+            document.getElementById('bodyScore').innerText = data.body_score;
+            fillList('bodyReasons', data.body_reasons);
+            fillList('suspiciousDomains', data.suspicious_domains, '#c0392b');
+
+            // Extracted URLs
+            const urlList = document.getElementById('extractedUrls');
+            urlList.innerHTML = '';
+            if (data.extracted_urls && data.extracted_urls.length > 0) {
+                data.extracted_urls.forEach(url => {
+                    const li = document.createElement('li');
+                    const encodedUrl = encodeURIComponent(url);
+                    const vtLink = `https://www.virustotal.com/gui/search/${encodedUrl}`;
+                    li.innerHTML = `<a href="${vtLink}" target="_blank" style="color: #3498db; text-decoration: none;">${url} ↗</a>`;
+                    urlList.appendChild(li);
+                });
+            } else {
+                urlList.innerHTML = '<li class="safe-li">No links extracted.</li>';
+            }
+
+            // Attachments
+            // Attachments Render
+            const attDiv = document.getElementById('attachmentsList');
+            attDiv.innerHTML = '';
+            if (data.attachments && data.attachments.length > 0) {
+                data.attachments.forEach(att => {
+                    const div = document.createElement('div');
+                    div.style.border = "1px solid #eee";
+                    div.style.padding = "8px";
+                    div.style.marginBottom = "5px";
+                    div.style.borderRadius = "4px";
+                    div.style.background = "#fff";
+
+                    // Risk Label
+                    const riskColor = att.risk === 'Clean' ? 'green' : (att.risk === 'Malicious' ? 'red' : 'orange');
+
+                    let html = `
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong>${att.filename}</strong>
+                                <span style="font-size: 0.8em; color: ${riskColor}; border: 1px solid ${riskColor}; padding: 0 4px; border-radius: 3px; margin-left: 5px;">${att.risk}</span>
+                            </div>
+                    `;
+
+                    // VT Stats Badge
+                    if (att.vt_stats) {
+                        const [malicious, total] = att.vt_stats.split('/').map(Number);
+                        const vtColor = malicious > 0 ? '#e74c3c' : '#2ecc71';
+                        html += `
+                            <div style="font-size: 0.8em;">
+                                <span style="background: ${vtColor}; color: white; padding: 2px 6px; border-radius: 4px;" title="VirusTotal Detection Ratio">VT: ${att.vt_stats}</span>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
+
+                    html += `<div style="font-size: 0.8em; color: #666; margin-top: 2px; word-break: break-all;">MD5: ${att.md5}</div>`;
+
+                    // Signature Details
+                    if (att.signature) {
+                        const s = att.signature;
+                        html += `
+                            <div style="margin-top: 5px; font-size: 0.8em; background: #f8f9fa; padding: 5px; border-left: 2px solid #3498db;">
+                                <div><strong>Signed By:</strong> ${s.product} (${s.verified})</div>
+                                <div><strong>Copyright:</strong> ${s.copyright}</div>
+                                <div><strong>Original Name:</strong> ${s.original_name}</div>
+                            </div>
+                        `;
+                    }
+
+                    div.innerHTML = html;
+                    attDiv.appendChild(div);
+                });
+            } else {
+                attDiv.innerHTML = '<span class="safe-li" style="margin-left: 20px;">No attachments.</span>';
+            }
+
+            // Sandbox Section
+            document.getElementById('sandboxScore').innerText = data.sandbox_score;
+            document.getElementById('sandboxedUrl').innerText = data.url || "None";
+            fillList('sandboxReasons', data.sandbox_reasons);
+            fillList('redirectChain', data.redirect_chain, 'black');
+
+            if (data.screenshot_path) {
+                document.getElementById('screenshot').src = "/" + data.screenshot_path + "?t=" + new Date().getTime();
+            }
+
+            // Overlay Info (Sender Domain)
+            const sender = data.sender || "";
+            let senderDomain = "-";
+            if (sender.includes("@")) {
+                senderDomain = sender.split("@")[1].replace(">", "").trim();
+            }
+            document.getElementById('overlaySender').innerText = senderDomain;
+
+            // Overlay Info (Attachments)
+            if (data.attachments && data.attachments.length > 0) {
+                const names = data.attachments.map(a => a.filename).join(", ");
+                document.getElementById('overlayAttachments').innerText = names;
+            } else {
+                document.getElementById('overlayAttachments').innerText = "None";
+            }
+
+            // Whitelist
+            if (data.whitelisted_domains && data.whitelisted_domains.length > 0) {
+                document.getElementById('whitelistHits').innerText = data.whitelisted_domains.join(", ");
+            } else {
+                document.getElementById('whitelistHits').innerText = "None";
+            }
+
+            // Block Recs
+            const blockList = document.getElementById('blockActions');
+            blockList.innerHTML = '';
+            data.block_recommendations.forEach(rec => {
+                const item = document.createElement('li');
+                item.style.color = "#c0392b";
+                item.style.fontWeight = "bold";
+                item.innerText = "🚫 " + rec;
+                blockList.appendChild(item);
+            });
+        }
+
+        async function addDomain(domain) {
+            if (!confirm(`Add ${domain} to whitelist?`)) return;
+            try {
+                const res = await fetch('/api/whitelist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain: domain })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert('Domain added!');
+                    location.reload();
+                }
+            } catch (e) {
+                alert("Error adding domain");
+            }
+        }
+
+        function fillList(id, items, color) {
+            const ul = document.getElementById(id);
+            ul.innerHTML = '';
+            if (!items || items.length === 0) {
+                ul.innerHTML = '<li class="safe-li">No issues detected.</li>';
+                return;
+            }
+            items.forEach(txt => {
+                const li = document.createElement('li');
+
+                // If it's the suspicious domains list, try to extract just the domain part if possible? 
+                // Or if the item IS the domain (suspicious_domains list passed here is just strings)
+                if (id === 'suspiciousDomains') {
+                    li.innerHTML = `
+                        ${txt} 
+                        <button onclick="addDomain('${txt}')" style="margin-left:5px; font-size: 0.7em; padding: 2px 5px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px;">⊕ Whitelist</button>
+                    `;
+                } else {
+                    li.innerText = txt;
+                }
+
+                if (color) li.style.color = color;
+                ul.appendChild(li);
+            });
+        }
+    </script>
+
+</body>
+
+</html>

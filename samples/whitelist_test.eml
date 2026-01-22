@@ -1,0 +1,18 @@
+MIME-Version: 1.0
+Subject: Project Proposal on Drive
+From: "Colleague" <alice@company.com>
+To: bob@company.com
+Content-Type: multipart/alternative; boundary="boundary456"
+
+--boundary456
+Content-Type: text/plain; charset="utf-8"
+
+Hi,
+
+Please review the proposal here: https://docs.google.com/document/d/12345
+Also check https://azure.com for updates.
+Ignore this: http://suspicious-tld.xyz/login
+
+Thanks.
+
+--boundary456--

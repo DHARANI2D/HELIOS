@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DESAS | Whitelist Manager</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: #f8f9fa;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+
+        h1 {
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            color: #2c3e50;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #3498db;
+            text-decoration: none;
+        }
+
+        .add-form {
+            margin-bottom: 20px;
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+        }
+
+        input {
+            padding: 8px;
+            width: 300px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        button {
+            padding: 8px 15px;
+            background: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #219150;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <a href="/" class="back-link">← Back to Dashboard</a>
+        <h1>Whitelist Manager</h1>
+
+        <div class="add-form">
+            <strong>Add Domain:</strong>
+            <input type="text" id="newDomain" placeholder="example.com">
+            <button onclick="addDomain()">Add</button>
+        </div>
+
+        <h3>Active Whitelisted Domains</h3>
+        <ul id="whitelist">
+            {% for domain in whitelist %}
+            <li>
+                <span style="color: #27ae60; font-weight: bold;">✓ {{ domain }}</span>
+                <button onclick="removeDomain('{{ domain }}')"
+                    style="background: #e74c3c; padding: 5px 10px; font-size: 0.8em; color: white; border: none; border-radius: 4px; cursor: pointer;">🗑
+                    Remove</button>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <script>
+        async function addDomain() {
+            const input = document.getElementById('newDomain');
+            const domain = input.value.trim();
+            if (!domain) return;
+
+            try {
+                const res = await fetch('/api/whitelist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain: domain })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    location.reload();
+                }
+            } catch (e) {
+                alert("Error adding domain");
+            }
+        }
+
+        async function removeDomain(domain) {
+            if (!confirm(`Remove ${domain} from whitelist?`)) return;
+
+            try {
+                const res = await fetch('/api/whitelist', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ domain: domain })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    location.reload();
+                }
+            } catch (e) {
+                alert("Error removing domain");
+            }
+        }
+    </script>
+</body>
+
+</html>
