@@ -49,6 +49,30 @@ DESAS is built as a robust **Electron-based Desktop Application** for seamless a
 
 ---
 
+## 📸 Screenshots
+
+### Main Analysis Interface
+![Main Analysis](./screenshots/main_analysis.png)
+*Comprehensive email analysis with header forensics, content analysis, and sandbox detonation*
+
+### Forensic Toolkit
+![Forensic Toolkit](./screenshots/forensic_toolkit.png)
+*Standalone tools for rapid domain intelligence, URL sandbox, and attachment analysis*
+
+### Sandbox Detonation
+![Sandbox Detonation](./screenshots/sandbox_detonation.png)
+*Real-time URL detonation with screenshot evidence and behavioral indicators*
+
+### Settings & Whitelist Management
+![Settings](./screenshots/settings_whitelist.png)
+*API configuration and dynamic domain whitelisting*
+
+### Malicious Email Detection
+![Malicious Detection](./screenshots/malicious_detection.png)
+*Advanced threat detection with SPF/DKIM/DMARC validation and routing hop analysis*
+
+---
+
 ## 📂 Project Structure
 
 ```
