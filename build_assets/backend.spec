@@ -1,14 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
+# Get the project root directory (parent of build_assets)
+spec_root = os.path.abspath(SPECPATH)
+project_root = os.path.dirname(spec_root)
+
 block_cipher = None
 
 a = Analysis(
-    ['run_server.py'],
-    pathex=['.'],
+    [os.path.join(spec_root, 'run_server.py')],
+    pathex=[project_root],
     binaries=[],
     datas=[
-        ('app/templates', 'app/templates'),
-        ('app/static', 'app/static'),
+        (os.path.join(project_root, 'app', 'templates'), 'app/templates'),
+        (os.path.join(project_root, 'app', 'static'), 'app/static'),
     ],
     hiddenimports=[
         'uvicorn.logging',
@@ -26,6 +32,10 @@ a = Analysis(
         'extract_msg',
         'pypdf',
         'docx',
+        'reportlab',
+        'reportlab.pdfgen',
+        'reportlab.lib',
+        'reportlab.platypus',
     ],
     hookspath=[],
     hooksconfig={},
@@ -36,6 +46,7 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
@@ -52,7 +63,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # Set to True for debugging in this stage
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

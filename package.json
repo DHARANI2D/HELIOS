@@ -1,20 +1,28 @@
 {
   "name": "desas",
   "version": "1.0.0",
-  "description": "![Status](https://img.shields.io/badge/Status-Analyst--Ready-green) ![Security](https://img.shields.io/badge/Security-Isolated--Sandbox-red) ![Architecture](https://img.shields.io/badge/Platform-Proxmox%20VM-blue)",
+  "description": "Dynamic Email Sandbox Analysis System - Professional forensic workstation for SOC analysts",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
     "dist": "electron-builder"
   },
-  "keywords": [],
+  "keywords": [
+    "security",
+    "email-analysis",
+    "forensics",
+    "sandbox",
+    "phishing"
+  ],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "wait-on": "^9.0.3"
+  },
   "devDependencies": {
     "electron": "^40.0.0",
-    "electron-builder": "^26.4.0",
-    "wait-on": "^9.0.3"
+    "electron-builder": "^26.4.0"
   },
   "build": {
     "appId": "com.desas.analyzer",
@@ -22,10 +30,20 @@
     "directories": {
       "output": "release"
     },
+    "files": [
+      "main.js",
+      "app/**/*",
+      "icon.png",
+      "!app/static/*.png",
+      "!app/static/*.pdf"
+    ],
     "extraResources": [
       {
-        "from": "dist/backend_server",
-        "to": "backend_server"
+        "from": "dist/backend_server${/*}",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
