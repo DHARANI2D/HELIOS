@@ -1,5 +1,7 @@
 # DESAS — Dynamic Email Sandbox Analysis System
 
+![DESAS Banner](./banner.png)
+
 ![Status](https://img.shields.io/badge/Status-Production--Ready-green)
 ![Security](https://img.shields.io/badge/Security-Isolated--Sandbox-red)
 ![Platform](https://img.shields.io/badge/Platform-Electron--Desktop-orange)
