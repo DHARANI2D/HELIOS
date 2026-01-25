@@ -59,6 +59,14 @@ def parse_auth_results(headers: dict) -> dict:
     
     return results
 
+def parse_headers_from_text(text: str) -> tuple[dict, list]:
+    """
+    Parses raw header text block into a dictionary and list of tuples.
+    """
+    from email.parser import Parser
+    msg = Parser().parsestr(text)
+    return dict(msg.items()), list(msg.items())
+
 def analyze_headers(headers: dict, raw_headers_list: list = None) -> tuple[int, list[str], str | None, list[dict], dict]:
     """
     Analyzes email headers.
@@ -161,13 +169,19 @@ def analyze_headers(headers: dict, raw_headers_list: list = None) -> tuple[int, 
         except Exception:
             pass # Date parse fail
             
+        # Regex for IPv4
+        ip_match = re.search(r'\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]', r)
+        if not ip_match:
+            ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', r)
+        
+        hop_ip = ip_match.group(1) if ip_match else "unknown"
+
         hops.append({
             "hop": i + 1,
-            "from": r.split()[1] if len(r.split()) > 1 else "unknown", # Simple extract
-            "by": "...", # Parsing "by" is complex regex
+            "from": r.split()[1] if len(r.split()) > 1 else "unknown",
+            "ip": hop_ip,
             "time": timestamp_str,
             "delay": f"{delay}s" if i > 0 else "*"
         })
-
 
     return score, reasons, dkim_selector, hops, auth_results

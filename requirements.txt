@@ -12,3 +12,5 @@ dnspython
 aiohttp
 pydantic-settings
 olefile
+pypdf
+python-docx

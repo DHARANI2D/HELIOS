@@ -1,0 +1,46 @@
+{
+  "name": "desas",
+  "version": "1.0.0",
+  "description": "![Status](https://img.shields.io/badge/Status-Analyst--Ready-green) ![Security](https://img.shields.io/badge/Security-Isolated--Sandbox-red) ![Architecture](https://img.shields.io/badge/Platform-Proxmox%20VM-blue)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dist": "electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^40.0.0",
+    "electron-builder": "^26.4.0",
+    "wait-on": "^9.0.3"
+  },
+  "build": {
+    "appId": "com.desas.analyzer",
+    "productName": "DESAS",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "dist/backend_server",
+        "to": "backend_server"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": [
+        "dmg"
+      ],
+      "icon": "icon.png"
+    },
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "icon.png"
+    }
+  }
+}

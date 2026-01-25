@@ -1,0 +1,23 @@
+Subject: Investigation Report
+From: soc@company.com
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============4269910616298580329=="
+
+--===============4269910616298580329==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Please see the potential phish attached.
+
+--===============4269910616298580329==
+Content-Type: application/octet-stream
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="potential phish 123.eml"
+MIME-Version: 1.0
+
+U3ViamVjdDogTmVzdGVkIFBoaXNoIFN1YmplY3QKRnJvbTogYXR0YWNrZXJAZXZpbC5jb20KQ29u
+dGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFyc2V0PSJ1dGYtOCIKQ29udGVudC1UcmFuc2Zlci1F
+bmNvZGluZzogN2JpdApNSU1FLVZlcnNpb246IDEuMAoKQ2xpY2sgaGVyZTogaHR0cDovL25lc3Rl
+ZC1ldmlsLmNvbQo=
+
+--===============4269910616298580329==--

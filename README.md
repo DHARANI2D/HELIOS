@@ -2,38 +2,55 @@
 
 ![Status](https://img.shields.io/badge/Status-Analyst--Ready-green)
 ![Security](https://img.shields.io/badge/Security-Isolated--Sandbox-red)
-![Architecture](https://img.shields.io/badge/Platform-Proxmox%20VM-blue)
+![Desktop](https://img.shields.io/badge/Platform-Electron--Desktop-orange)
+![Reports](https://img.shields.io/badge/Reports-Professional%20PDF-blue)
 
-DESAS is a specialized workstation designed for SOC analysts to safely investigate and detonate suspicious emails. It provides a controlled sandbox environment to observe real-world malicious behavior and generate actionable, block-ready intelligence.
+DESAS is a specialized workstation designed for SOC analysts to safely investigate and detonate suspicious emails. It provides a controlled playground to observe malicious behavior, analyze headers, and generate actionable intelligence—now available as a standalone desktop application with professional reporting.
 
 ## 🚀 Key Features
-- **Isolated Detonation**: Run suspicious URLs in a secure, ephemeral browser context.
-- **Runtime DOM Monitoring**: Detect "hidden" phishing forms injected via JavaScript after initial page load.
-- **Network Traffic Analysis**: Monitor redirect chains and external POST requests.
-- **Explainable Scoring**: Deterministic, rule-based verdicts mapped to MITRE ATT&CK.
-- **Block-Ready Intelligence**: Instantly copy-pasteable URLs, domains, and hashes for your security controls.
+- **Professional PDF Reporting**: Instantly generate forensic-grade PDF reports including email screenshots, VirusTotal reputation, and Sandbox evidence.
+- **Isolated Detonation**: Run suspicious URLs in a secure, ephemeral browser context with Playwright.
+- **API Quota Tracking**: Real-time visibility into VirusTotal and MxToolbox API token usage directly in the sidebar.
+- **Forensic Toolkit**: Dedicated standalone tools for rapid domain intelligence and attachment scrutiny.
+- **Header Analysis**: Automated parsing of SPF, DKIM, and DMARC records to detect spoofing and impersonation.
+- **Whitelist Management**: Integrated domain whitelisting to filter known-safe infrastructure.
+
+## 🖥 Desktop Application
+DESAS is a robust **Electron-based Desktop Application**.
+- **Integrated Backend**: Seamlessly spawns the Python FastAPI analysis engine on startup.
+- **Visual Evidence**: Automated capturing of email body and sandbox screenshots for forensic reporting.
+- **Custom Branding**: Professional shield-themed identity for SOC environments.
+
+## 📂 Directory Structure
+```
+DESAS/
+├── app/                # Core Application Logic
+│   ├── analyzer/       # Email & Header Parsing Modules
+│   ├── core/           # Schemas, Config, Whitelist Management
+│   ├── sandbox/        # Playwright Detonation logic
+│   ├── templates/      # Electron/Web UI (HTML/CSS/JS)
+│   └── static/         # Generated evidence (screenshots)
+├── icon.png            # Application Icon
+├── main.js             # Electron Main Process
+├── package.json        # Node dependencies & Build Config
+├── requirements.txt    # Python dependencies
+└── docs/               # Advanced documentation suite
+```
+
+## 🛠 Tech Stack
+- **Frontend**: Electron (Vanilla CSS & JS for high-performance UI)
+- **Backend API**: FastAPI (Python 3.10+)
+- **Detonation**: Playwright (Headless Chromium)
+- **Reporting**: ReportLab (Professional PDF Generation)
+- **Intelligence**: VirusTotal API, MxToolbox API, IP-API
 
 ## 📂 Documentation Suite
-For a deep dive into the project, please refer to the following guidebooks:
-
-| Document | Audience | Purpose |
-|----------|----------|---------|
-| [**DESIGN.md**](./DESIGN.md) | Security Architects | Technical architecture, component diagrams, and isolation principles. |
-| [**SUMMARY.md**](./SUMMARY.md) | SOC Managers | High-level value proposition and strategic fit within security operations. |
-| [**WALKTHROUGH.md**](./WALKTHROUGH.md) | Analysts | Step-by-step demo script for investigating a stealth phishing email. |
-| [**ARCH_REVIEW.md**](./ARCH_REVIEW.md) | Review Panels | Preparation for technical reviews and common architectural questions. |
-
-## 🛠 Project Components
-- **Backend**: FastAPI (Python)
-- **Sandbox**: Playwright with Headless Chromium
-- **Isolation**: Proxmox Virtualization
-- **Reporting**: JSON/Markdown evidence reports
-
-## 🛡 Security Isolation
-DESAS is designed to run in a dedicated Proxmox VM with:
-- No internal network access.
-- Controlled internet egress.
-- Disposable snapshots (reset after every run).
+| Document | Purpose |
+|----------|---------|
+| [**DESIGN.md**](./DESIGN.md) | Technical architecture and isolation principles. |
+| [**SUMMARY.md**](./SUMMARY.md) | Strategic fit within security operations. |
+| [**WALKTHROUGH.md**](./WALKTHROUGH.md) | Step-by-step forensic demo scenario. |
+| [**WINDOWS_BUILD_GUIDE.md**](./WINDOWS_BUILD_GUIDE.md) | Instructions for building the `.exe` installer. |
 
 ---
-*DESAS: From "Suspicious" to "Confirmed" in 2 minutes.*
+*DESAS: Transforming suspicious emails into actionable forensic intelligence.*

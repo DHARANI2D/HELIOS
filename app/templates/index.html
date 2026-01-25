@@ -4,146 +4,206 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DESAS | SOC Analysis</title>
+    <title>DESAS</title>
     <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --danger: #dc2626;
+            --warning: #f59e0b;
+            --success: #10b981;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
-            color: #333;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            line-height: 1.5;
+        }
+
+        .navbar {
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.025em;
+            color: var(--primary);
         }
 
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: 300px 1fr;
-            gap: 20px;
-        }
-
-        .header {
-            grid-column: 1 / -1;
-            background: #2c3e50;
-            color: white;
-            padding: 20px;
-            border-radius: 8px;
-        }
-
-        .sidebar {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-        }
-
-        .main-content {
-            background: white;
-            padding: 25px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-            min-height: 500px;
-        }
-
-        h1 {
-            margin: 0;
-            font-size: 1.5em;
-        }
-
-        h3 {
-            border-bottom: 2px solid #ecf0f1;
-            padding-bottom: 5px;
-            color: #2c3e50;
-        }
-
-        .upload-btn {
-            background: #3498db;
-            color: white;
-            border: none;
-            padding: 10px 20px;
             width: 100%;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1em;
-            margin-top: 10px;
+            max-width: 100%;
+            margin: 24px 0;
+            padding: 0 40px;
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 24px;
+            box-sizing: border-box;
         }
 
-        .upload-btn:hover {
-            background: #2980b9;
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
 
-        .verdict-box {
+        .sidebar-sticky {
+            position: sticky;
+            top: 80px;
+        }
+
+        .verdict-banner {
             text-align: center;
-            padding: 20px;
-            border-radius: 5px;
-            color: white;
-            margin-bottom: 20px;
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            transition: all 0.3s ease;
         }
 
-        .verdict-box.Malicious {
-            background: #e74c3c;
+        .verdict-banner.Malicious {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
         }
 
-        .verdict-box.Suspicious {
-            background: #f39c12;
+        .verdict-banner.Suspicious {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
         }
 
-        .verdict-box.Benign {
-            background: #2ecc71;
+        .verdict-banner.Benign {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
         }
 
-        .verdict-box.Pending {
-            background: #95a5a6;
+        .verdict-banner.Pending {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #e5e7eb;
         }
 
-        .score-display {
-            font-size: 3em;
-            font-weight: bold;
+        .score-val {
+            font-size: 3.5rem;
+            font-weight: 900;
+            margin: 8px 0;
         }
 
-        .module-card {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 5px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }
-
-        .module-title {
-            font-weight: bold;
-            color: #7f8c8d;
-            font-size: 0.9em;
+        .verdict-label {
+            font-weight: 700;
             text-transform: uppercase;
-            margin-bottom: 10px;
+            letter-spacing: 0.05em;
         }
 
-        ul {
-            padding-left: 20px;
-            margin: 5px 0;
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            width: 100%;
+            gap: 8px;
         }
 
-        li {
-            margin-bottom: 5px;
-            color: #c0392b;
+        .btn-primary {
+            background: var(--primary);
+            color: white;
         }
 
-        /* Default to red for risks */
-        .safe-li {
-            color: #2ecc71;
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            margin-top: 12px;
+        }
+
+        .btn-outline:hover {
+            background: #f9fafb;
+        }
+
+        h2 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin: 0 0 16px 0;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .module-grid {
+            display: grid;
+            gap: 24px;
+        }
+
+        .indicator-item {
+            padding: 12px;
+            border-radius: 8px;
+            background: #f9fafb;
+            border: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+
+        .risk-text {
+            color: var(--danger);
+            font-weight: 500;
+        }
+
+        .safe-text {
+            color: var(--success);
+            font-weight: 500;
         }
 
         .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #e5e7eb;
+            border-bottom-color: var(--primary);
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
             display: none;
-            margin: 10px auto;
+            animation: rotation 1s linear infinite;
+            margin: 16px auto;
         }
 
-        @keyframes spin {
+        @keyframes rotation {
             0% {
                 transform: rotate(0deg);
             }
@@ -153,178 +213,609 @@
             }
         }
 
-        .screenshot-box img {
-            max-width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            margin-top: 10px;
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .table-container {
+            width: 100%;
+            overflow-x: auto;
+            margin-top: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            min-width: 600px;
+            border-collapse: separate;
+            border-spacing: 0;
+            table-layout: fixed;
+        }
+
+        th,
+        td {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        th {
+            background: #f9fafb;
+            padding: 10px;
+            text-align: left;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #f3f4f6;
+            font-size: 0.875rem;
+        }
+
+        .screenshot-container {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            margin-top: 16px;
+        }
+
+        .screenshot-container img {
+            width: 100%;
+            display: block;
+        }
+
+        .overlay-meta {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            max-width: 80%;
+        }
+
+        /* Toolkit Styles */
+        .toolkit-container {
+            display: none;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        .tool-card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .tool-card h3 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 1rem;
+        }
+
+        .toolkit-nav {
+            display: flex;
+            gap: 12px;
+            margin-right: auto;
+            margin-left: 24px;
+        }
+
+        .toolkit-nav a {
+            text-decoration: none;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.875rem;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .toolkit-nav a.active {
+            color: var(--primary);
+            background: #eff6ff;
+        }
+
+        .standalone-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            margin-bottom: 12px;
+            resize: vertical;
+        }
+
+        /* Drag & Drop Visuals */
+        #drop-zone {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            pointer-events: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            color: white;
+            transition: all 0.2s ease;
+        }
+
+        #drop-zone.active {
+            display: flex;
+        }
+
+        .drop-zone-content {
+            border: 3px dashed rgba(255, 255, 255, 0.8);
+            border-radius: 24px;
+            padding: 48px;
+            text-align: center;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .drop-area-box {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            color: var(--text-muted);
+            background: #f9fafb;
+            margin-bottom: 24px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .drop-area-box:hover {
+            border-color: var(--primary);
+            background: #eff6ff;
+            color: var(--primary);
+        }
+
+        .drop-area-box.dragover {
+            border-color: var(--primary);
+            background: #eff6ff;
+            transform: scale(1.02);
         }
     </style>
 </head>
 
 <body>
-
-    <div class="header">
-        <h1>DESAS Investigation Station (v2.0)</h1>
-    </div>
-
-    <div class="container">
-        <!-- Sidebar: Controls & Verdict -->
-        <div class="sidebar">
-            <div id="verdictBox" class="verdict-box Pending">
-                <div>TOTAL RISK SCORE</div>
-                <div id="totalScore" class="score-display">0</div>
-                <div id="verdictText">Ready</div>
-            </div>
-
-            <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
-                Analyze New Email (.eml)
-            </button>
-            <input type="file" id="fileInput" accept=".eml" style="display: none;" onchange="handleFile()">
-            <div id="loader" class="loader"></div>
-
-            <div style="margin-top: 20px;">
-                <h3>Block Actions</h3>
-                <ul id="blockActions" style="list-style: none; padding: 0;">
-                    <li style="color: #7f8c8d; font-style: italic;">No actions yet.</li>
-                </ul>
-            </div>
-
-            <div style="margin-top: 20px;">
-                <a href="/whitelist"
-                    style="font-size: 0.9em; color: #3498db; text-decoration: none; display: block; text-align: right;">Manage
-                    Whitelist ↗</a>
-            </div>
+    <div id="drop-zone">
+        <div class="drop-zone-content">
+            <div style="font-size: 5rem; margin-bottom: 20px;">📂</div>
+            <div style="font-size: 1.5rem; font-weight: 800;">Drop Email File Here</div>
+            <div style="font-size: 1rem; opacity: 0.8; margin-top: 8px;">Supports .eml and .msg formats</div>
         </div>
+    </div>
+    <nav class="navbar">
+        <h1>DESAS</h1>
+        <div class="toolkit-nav">
+            <a href="#" id="navAnalysis" class="active" onclick="showSection('analysis')">Full Analysis</a>
+            <a href="#" id="navToolkit" onclick="showSection('toolkit')">Forensic Toolkit</a>
+        </div>
+        <div style="display: flex; gap: 12px;">
+            <button class="btn btn-outline" style="width: auto; margin: 0;" onclick="downloadReport()" id="downloadBtn"
+                disabled>
+                <span>📥</span> Download Report
+            </button>
+            <a href="/settings" class="btn btn-outline" style="width: auto; margin: 0; text-decoration: none;">
+                <span>⚙️</span> Settings & Whitelist
+            </a>
+        </div>
+    </nav>
 
-        <!-- Main Content: Detailed Report -->
-        <div class="main-content" id="reportView">
-            <h3>1. Header Analysis</h3>
-            <div class="module-card">
-                <div class="module-title">Score: <span id="headerScore">0</span></div>
-                <ul id="headerReasons"></ul>
-
-                <!-- Auth Status Icons -->
-                <div id="headerAuthIcons"
-                    style="display: flex; gap: 15px; margin-top: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
-                    <!-- JS -->
+    <div class="container" id="analysisSection">
+        <aside class="sidebar-sticky">
+            <div class="card" style="padding: 0; overflow: hidden;">
+                <div id="verdictBox" class="verdict-banner Pending">
+                    <div class="verdict-label">Analysis Score</div>
+                    <div id="totalScore" class="score-val">0</div>
+                    <div id="verdictText" class="verdict-label">Ready</div>
+                    <div id="threatBadge" class="badge" style="margin-top: 12px; display: none;"></div>
                 </div>
 
-                <!-- Hops Table -->
-                <div style="margin-top: 15px;">
-                    <strong>Relay Information (Hops):</strong>
-                    <div style="overflow-x: auto; margin-top: 5px;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                <div style="padding: 24px;">
+                    <div class="drop-area-box" id="sidebarDropArea"
+                        onclick="document.getElementById('fileInput').click()">
+                        <div style="font-size: 2rem; margin-bottom: 8px;">📥</div>
+                        <div style="font-weight: 700; font-size: 0.875rem;">Click to upload</div>
+                        <div style="font-size: 0.75rem; opacity: 0.7;">or Drag & Drop email here</div>
+                    </div>
+
+                    <input type="file" id="fileInput" accept=".eml,.msg" style="display: none;" onchange="handleFile()">
+                    <div id="loader" class="loader"></div>
+
+                    <div style="margin-top: 32px; border-top: 1px solid var(--border); padding-top: 24px;">
+                        <h3
+                            style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px;">
+                            Email Metadata</h3>
+                        <div style="font-size: 0.8125rem; margin-bottom: 8px;">
+                            <strong>Sender:</strong> <span id="overlaySender">Unknown</span>
+                        </div>
+                        <div style="font-size: 0.8125rem;">
+                            <strong>Attachments:</strong> <span id="overlayAttachments">0</span>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 32px; border-top: 1px solid var(--border); padding-top: 24px;">
+                        <h3
+                            style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px;">
+                            🛡️ Block List</h3>
+                        <ul id="blockActions" style="list-style: none; padding: 0; margin: 0;">
+                            <li style="color: var(--text-muted); font-style: italic; font-size: 0.8125rem;">No
+                                recommendations yet.</li>
+                        </ul>
+                    </div>
+                    <div id="apiQuotaBox" style="margin-top: 32px; display: none;"></div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="module-grid">
+            <!-- 1. Headers -->
+            <section class="card">
+                <div class="section-header">
+                    <h2><span>📧</span> Header Forensics</h2>
+                    <span class="badge" id="headerScoreBadge" style="background: #f3f4f6; color: #374151;">Score: <span
+                            id="headerScore">0</span></span>
+                </div>
+
+                <div id="headerAuthIcons" style="display: flex; gap: 24px; margin-bottom: 24px;">
+                    <!-- JS Icons -->
+                </div>
+
+                <ul id="headerReasons" style="margin-bottom: 24px;"></ul>
+
+                <div style="margin-top: 24px;">
+                    <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">Routing Hops</h3>
+                    <div class="table-container">
+                        <table id="hopsTable">
                             <thead>
-                                <tr style="background: #f1f1f1; text-align: left;">
-                                    <th style="padding: 5px; border: 1px solid #ddd;">Hop</th>
-                                    <th style="padding: 5px; border: 1px solid #ddd;">Delay</th>
-                                    <th style="padding: 5px; border: 1px solid #ddd;">From</th>
-                                    <th style="padding: 5px; border: 1px solid #ddd;">Time</th>
+                                <tr>
+                                    <th style="width: 60px;">Hop</th>
+                                    <th style="width: 80px;">Delay</th>
+                                    <th>Source / IP</th>
+                                    <th style="width: 120px;">Security Intel</th>
+                                    <th style="width: 200px;">Timestamp</th>
                                 </tr>
                             </thead>
-                            <tbody id="headerHopsTableBody">
-                                <!-- JS -->
-                            </tbody>
+                            <tbody id="headerHopsTableBody"></tbody>
                         </table>
                     </div>
                 </div>
 
-                <!-- Raw Headers -->
-                <div style="margin-top: 15px;">
-                    <strong>Raw Headers:</strong>
-                    <div
-                        style="max-height: 200px; overflow-y: auto; background: #fafafa; border: 1px solid #eee; padding: 5px; font-size: 0.8em; font-family: monospace;">
-                        <table style="width: 100%; border-collapse: collapse;">
-                            <tbody id="headerRawHeadersBody">
-                                <!-- JS -->
-                            </tbody>
-                        </table>
+                <div id="mxToolboxSection" style="margin-top: 32px; display: none;">
+                    <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">External Reputation
+                        (MxToolbox)</h3>
+                    <div id="mxToolboxDetailed" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;"></div>
+                </div>
+            </section>
+
+            <!-- 2. Content -->
+            <section class="card">
+                <div class="section-header">
+                    <h2><span>📝</span> Content & NLP</h2>
+                    <span class="badge" id="bodyScoreBadge" style="background: #f3f4f6; color: #374151;">Score: <span
+                            id="bodyScore">0</span></span>
+                </div>
+
+                <ul id="bodyReasons" style="margin-bottom: 24px;"></ul>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                    <div>
+                        <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">Analyzed Domains
+                        </h3>
+                        <ul id="suspiciousDomains" style="list-style: none; padding: 0;"></ul>
+                    </div>
+                    <div>
+                        <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">Extracted URLs
+                        </h3>
+                        <ul id="extractedUrls" style="list-style: none; padding: 0;"></ul>
                     </div>
                 </div>
 
-                <div id="mxToolboxSection"
-                    style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; display: none;">
-                    <strong>Reputation & Auth (MxToolbox):</strong>
-                    <strong>Reputation & Auth (MxToolbox):</strong>
-                    <div id="mxToolboxDetailed" style="margin-top: 10px;">
-                        <!-- Content rendered by JS -->
-                    </div>
+                <div style="margin-top: 32px;">
+                    <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">File Analysis</h3>
+                    <div id="attachmentsList"></div>
+                </div>
+            </section>
+
+            <section class="card" id="vtRadarSection" style="display: none;">
+                <div class="section-header">
+                    <h2><span>🚀</span> VT Reputation Radar</h2>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Target URL / Domain</th>
+                                <th style="width: 100px;">Age</th>
+                                <th style="width: 100px;">VT Hits</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vtRadarTableBody"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- 3. Sandbox Container -->
+            <div id="sandboxContainer">
+                <div class="section-header" style="margin-bottom: 16px;">
+                    <h2><span>🔬</span> Sandbox Detonation</h2>
+                </div>
+                <!-- Dynamic cards injected here -->
+                <div id="sandboxResultsGrid" style="display: flex; flex-direction: column; gap: 24px;"></div>
+                <div id="noSandboxMsg"
+                    style="padding: 32px; text-align: center; background: #f9fafb; border-radius: 8px; border: 1px dashed var(--border); color: var(--text-muted); display: none;">
+                    No URLs found to detonate.
                 </div>
             </div>
+        </main>
+    </div>
+
+    <!-- Forensic Toolkit Section -->
+    <div class="container toolkit-container" id="toolkitSection" style="margin-top: 32px; padding:0 32px 32px 32px;">
+        <div class="tool-card">
+            <h3><span>📧</span> Header Analyzer</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Paste raw email headers for
+                deep routing and auth analysis.</p>
+            <textarea id="standaloneHeaderInput" class="standalone-input" rows="8"
+                placeholder="Authentication-Results: ...&#10;Received: from ..."></textarea>
+            <button class="btn btn-primary" onclick="analyzeStandalone('header')">Analyze Headers</button>
         </div>
 
-        <h3>2. Body & NLP Analysis</h3>
-        <div class="module-card">
-            <div class="module-title">Score: <span id="bodyScore">0</span></div>
-            <ul id="bodyReasons"></ul>
-
-            <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
-                <strong>Suspicious Domains:</strong>
-                <ul id="suspiciousDomains" class="domain-list"></ul>
-            </div>
-
-            <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
-                <strong>Extracted Links (VirusTotal):</strong>
-                <ul id="extractedUrls"></ul>
-            </div>
-
-            <div style="margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
-                <strong>Attachments:</strong>
-                <div id="attachmentsList"></div>
-                <!-- Template for JS rendering -->
-            </div>
+        <div class="tool-card">
+            <h3><span>🔗</span> URL Sandbox</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Detonate a URL in our browser
+                sandbox to check for redirects and credentials.</p>
+            <input type="text" id="standaloneUrlInput" class="standalone-input"
+                placeholder="https://suspicious-link.com/login">
+            <button class="btn btn-primary" onclick="analyzeStandalone('url')">Detonate URL</button>
         </div>
 
-        <h3>3. Dynamic Sandbox Execution</h3>
-        <div class="module-card">
-            <div class="module-title">Score: <span id="sandboxScore">0</span></div>
-            <p><strong>URL:</strong> <code id="sandboxedUrl">-</code></p>
-            <p><strong>Redirect Chain:</strong></p>
-            <ul id="redirectChain" style="color: #333;"></ul>
-            <p><strong>Network & DOM Indicators:</strong></p>
-            <ul id="sandboxReasons"></ul>
-
-            <div class="screenshot-box">
-                <strong>Screenshot:</strong><br>
-                <!-- Overlay Info -->
-                <div style="background: #eee; padding: 10px; margin-bottom: 5px; border-radius: 4px; font-size: 0.9em;">
-                    <div><strong>Sender Domain:</strong> <span id="overlaySender">-</span></div>
-                    <div><strong>Attachments:</strong> <span id="overlayAttachments">-</span></div>
-                </div>
-                <img id="screenshot" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
-                    alt="Sandbox Screenshot">
-            </div>
+        <div class="tool-card">
+            <h3><span>🌐</span> Domain Intelligence</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Check domain age, reputation,
+                and active DNS records.</p>
+            <input type="text" id="standaloneDomainInput" class="standalone-input" placeholder="evil-domain.cc">
+            <button class="btn btn-primary" onclick="analyzeStandalone('domain')">Check Domain</button>
         </div>
 
-        <!-- Whitelist Info (Hidden if empty) -->
-        <div id="whitelistSection" style="margin-top: 20px; color: #7f8c8d; font-size: 0.9em;">
-            <strong>Whitelisted Hits (Ignored):</strong> <span id="whitelistHits">None</span>
+        <div class="tool-card">
+            <h3><span>📎</span> File Analysis</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Upload an attachment to check
+                for macros, signatures, and known malware hashes.</p>
+
+            <div class="drop-area-box" id="toolkitDropArea"
+                onclick="document.getElementById('standaloneAttachmentInput').click()">
+                <div style="font-size: 1.5rem; margin-bottom: 8px;">📎</div>
+                <div style="font-weight: 700; font-size: 0.8125rem;">Drop attachment here</div>
+                <div style="font-size: 0.7rem; opacity: 0.7;">or click to browse</div>
+            </div>
+
+            <input type="file" id="standaloneAttachmentInput" style="display: none;"
+                onchange="analyzeStandalone('attachment')">
+        </div>
+
+        <div id="toolkitResults" class="card" style="grid-column: span 2; display: none; margin-top: 24px;">
+            <div class="section-header">
+                <h2>Toolkit Result</h2>
+                <button class="btn btn-outline" style="width:auto; padding: 4px 12px; margin:0;"
+                    onclick="document.getElementById('toolkitResults').style.display='none'">Clear</button>
+            </div>
+            <div id="toolkitResultsContent"></div>
         </div>
     </div>
-    </div>
+
+    <!-- Whitelist Info (Hidden if empty) -->
+    <div id="whitelistSection"
+        style="max-width: 1200px; margin: 20px auto; padding: 0 32px; color: #7f8c8d; font-size: 0.9em;">
+        <strong>Whitelisted Hits (Ignored):</strong> <span id="whitelistHits">None</span>
     </div>
 
     <script>
+        let currentAnalysisData = null;
+
+        function showSection(section) {
+            if (section === 'analysis') {
+                document.getElementById('analysisSection').style.display = 'flex';
+                document.getElementById('toolkitSection').style.display = 'none';
+                document.getElementById('navAnalysis').classList.add('active');
+                document.getElementById('navToolkit').classList.remove('active');
+            } else {
+                document.getElementById('analysisSection').style.display = 'none';
+                document.getElementById('toolkitSection').style.display = 'grid';
+                document.getElementById('navAnalysis').classList.remove('active');
+                document.getElementById('navToolkit').classList.add('active');
+            }
+        }
+
+        async function analyzeStandalone(type) {
+            const resultsDiv = document.getElementById('toolkitResults');
+            const content = document.getElementById('toolkitResultsContent');
+            resultsDiv.style.display = 'block';
+            content.innerHTML = '<div class="loader" style="display:block;"></div>';
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+
+            try {
+                let res, data;
+                if (type === 'header') {
+                    res = await fetch('/api/analyze/header', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ headers: document.getElementById('standaloneHeaderInput').value })
+                    });
+                } else if (type === 'url') {
+                    res = await fetch('/api/analyze/url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: document.getElementById('standaloneUrlInput').value })
+                    });
+                } else if (type === 'domain') {
+                    res = await fetch('/api/analyze/domain', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ domain: document.getElementById('standaloneDomainInput').value })
+                    });
+                } else if (type === 'attachment') {
+                    const file = document.getElementById('standaloneAttachmentInput').files[0];
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    res = await fetch('/api/analyze/attachment', { method: 'POST', body: formData });
+                }
+
+                data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Analysis failed');
+                renderToolkitResult(type, data);
+            } catch (e) {
+                content.innerHTML = `<div class="indicator-item" style="color: var(--danger); font-weight: 600;">Error: ${e.message}</div>`;
+            }
+        }
+
+        function renderToolkitResult(type, data) {
+            const content = document.getElementById('toolkitResultsContent');
+            content.innerHTML = '';
+            if (type === 'header') {
+                content.innerHTML = `
+                    <h4 style="margin:0 0 24px 0;">Header Analysis (Score: ${data.score})</h4>
+                    <ul style="margin-bottom: 24px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+                    <h5>Routing Hops</h5>
+                    <div class="table-container"><table><thead><tr><th>Hop</th><th>Delay</th><th>Source / IP</th><th>Security Intel</th><th>Timestamp</th></tr></thead>
+                    <tbody>${renderHops(data.hops, data.ip_intel)}</tbody></table></div>
+                `;
+            } else if (type === 'url') {
+                content.innerHTML = `
+                    <h4 style="margin:0 0 24px 0;">Sandbox Finished (Score: ${data.score})</h4>
+                    <ul style="margin-bottom: 24px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+                    <div style="font-size: 0.875rem;"><strong>Final URL:</strong> <span style="font-family: monospace;">${data.expanded_url}</span></div>
+                    <div class="screenshot-container"><img src="/${data.screenshot_path}"></div>
+                `;
+            } else if (type === 'domain') {
+                const isWhitelisted = data.whitelisted;
+                content.innerHTML = `
+                    <h4 style="margin:0 0 24px 0;">Domain Intelligence: ${data.domain} ${isWhitelisted ? '<span class="badge" style="background:#10b981; color:white; vertical-align:middle; margin-left:8px;">Whitelisted</span>' : ''}</h4>
+                    <div class="indicator-item" style="background: ${isWhitelisted ? '#f0fdf4' : (data.score > 0 ? '#fef2f2' : '#f0fdf4')}">
+                        <strong>Score: ${data.score}</strong> - ${data.reason || 'No malicious indicators found'}
+                        <div style="font-size: 0.875rem; color: var(--text-muted); margin-top: 4px;">Age: ${data.age_days || 'Unknown'} days</div>
+                    </div>
+                    ${renderDNSInfo(data.intel)}
+                `;
+            } else if (type === 'attachment') {
+                content.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                        <h4 style="margin:0;">File Scan Results</h4>
+                        <span class="badge" style="background: ${data.attachment.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${data.attachment.risk}</span>
+                    </div>
+                    <ul style="margin-bottom: 24px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+                    <div class="indicator-item">
+                        <strong>Filename:</strong> ${data.attachment.filename}<br>
+                        <strong>MD5:</strong> <span style="font-family: monospace;">${data.attachment.md5}</span><br>
+                        <strong>VT Detection:</strong> ${data.attachment.vt_stats || 'Not scanned/No hits'}
+                    </div>
+                `;
+            }
+        }
+
+        function renderHops(hops, ipIntel) {
+            return hops.map(hop => {
+                const intel = ipIntel?.[hop.ip];
+                let repHtml = "-";
+                if (intel && intel.reputation?.abuse_score !== undefined) {
+                    const score = intel.reputation.abuse_score;
+                    const color = score > 50 ? 'var(--danger)' : (score > 10 ? 'var(--warning)' : 'var(--success)');
+                    repHtml = `<div style="color: ${color}; font-weight: 800;">${score}%</div>`;
+                    if (intel.geo?.country) repHtml += `<div style="font-size: 0.625rem; color: var(--text-muted);">${intel.geo.city || ''}, ${intel.geo.country}</div>`;
+                }
+                return `<tr><td style="font-weight: 600;">#${hop.hop}</td><td>${hop.delay}</td><td style="word-break: break-all;"><div>${hop.from}</div><small>${hop.ip}</small></td><td>${repHtml}</td><td style="font-size: 0.75rem;">${hop.time}</td></tr>`;
+            }).join('');
+        }
+
+        function renderDNSInfo(intel) {
+            if (!intel) return '';
+            let html = `<div style="font-size: 0.75rem; background: #fff; padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin-top:16px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                    <span><strong>Registrar:</strong> ${intel.registrar || 'N/A'}</span>
+                    <span><strong>VT Reputation:</strong> <span style="color:${intel.reputation < 0 ? 'red' : 'green'}">${intel.reputation}</span></span>
+                </div>`;
+            if (intel.records && intel.records.length > 0) {
+                html += `<div class="table-container"><table><thead><tr><th>Type</th><th>Value</th><th>TTL</th></tr></thead><tbody>`;
+                intel.records.forEach(r => {
+                    html += `<tr><td>${r.type}</td><td style="word-break: break-all;">${r.value}</td><td>${r.ttl}</td></tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+            html += `</div>`;
+            return html;
+        }
+
         async function handleFile() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             if (!file) return;
 
-            // UI Reset
             document.getElementById('loader').style.display = 'block';
             document.getElementById('verdictText').innerText = "Analyzing...";
+            document.getElementById('downloadBtn').disabled = true;
 
             const formData = new FormData();
             formData.append('file', file);
 
             try {
-                const response = await fetch('/api/analyze/email', {
-                    method: 'POST',
-                    body: formData
-                });
+                // Phase 1: Fast Email Analysis
+                const response = await fetch('/api/analyze/email', { method: 'POST', body: formData });
                 const data = await response.json();
-                renderReport(data);
+                currentAnalysisData = data;
+                await renderReport(data);
+
+                // Phase 2: Async Sandbox Detonations
+                if (data.extracted_urls && data.extracted_urls.length > 0) {
+                    const uniqueUrls = [...new Set(data.extracted_urls)].slice(0, 5);
+                    currentAnalysisData.sandbox_results = uniqueUrls.map(url => ({ url: url, status: 'pending', score: 0, reasons: [], redirect_chain: [], screenshot_chain: [] }));
+                    renderSandboxSection(currentAnalysisData.sandbox_results);
+
+                    uniqueUrls.map(async (url, idx) => {
+                        try {
+                            const sbRes = await fetch('/api/analyze/url', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ url: url })
+                            });
+                            const result = await sbRes.json();
+                            currentAnalysisData.sandbox_results[idx] = result;
+                            updateSandboxCard(idx, result);
+                            recalculateTotalVerdict();
+                        } catch (err) {
+                            console.error(`Detonation failed for ${url}:`, err);
+                            const errorResult = { url: url, status: 'error', score: 0, reasons: ['Sandbox Failed: Network error'], redirect_chain: [], screenshot_chain: [] };
+                            currentAnalysisData.sandbox_results[idx] = errorResult;
+                            updateSandboxCard(idx, errorResult);
+                        }
+                    });
+                } else {
+                    document.getElementById('noSandboxMsg').style.display = 'block';
+                }
+                document.getElementById('downloadBtn').disabled = false;
             } catch (err) {
                 alert("Error: " + err);
             } finally {
@@ -332,312 +823,335 @@
             }
         }
 
-        function renderReport(data) {
-            // Verdict
+        async function renderReport(data) {
+            // Verdict Initial
             const vbox = document.getElementById('verdictBox');
-            vbox.className = `verdict-box ${data.verdict}`;
+            vbox.className = `verdict-banner ${data.verdict}`;
             document.getElementById('totalScore').innerText = data.total_score;
             document.getElementById('verdictText').innerText = data.verdict.toUpperCase();
 
-            // Header Section
+            // Threat Badge
+            const badge = document.getElementById('threatBadge');
+            if (data.threat_type !== "Unknown") {
+                badge.innerText = `${data.threat_type} | ${data.threat_category}`;
+                badge.style.display = 'inline-block';
+                badge.style.background = data.verdict === 'Malicious' ? '#dc2626' : '#f59e0b';
+                badge.style.color = '#fff';
+            } else { badge.style.display = 'none'; }
+
             document.getElementById('headerScore').innerText = data.header_score;
             fillList('headerReasons', data.header_reasons);
 
-            // Auth Icons
             const authDiv = document.getElementById('headerAuthIcons');
             if (authDiv) {
                 authDiv.innerHTML = '';
                 if (data.auth_results) {
                     const makeIcon = (label, status) => {
-                        // Status normalized to lower: pass, fail, none
-                        const isPass = status === 'pass';
-                        const isFail = status === 'fail' || status === 'softfail';
-                        const color = isPass ? '#2ecc71' : (isFail ? '#e74c3c' : '#95a5a6');
-                        const icon = isPass ? '✓' : (isFail ? '⚠' : '?');
-                        return `
-                        <div style="text-align: center;">
-                            <div style="font-size: 1.5em; color: ${color};">${icon}</div>
-                            <div style="font-size: 0.8em; font-weight: bold; color: #555;">${label}</div>
-                            <div style="font-size: 0.7em; color: #777;">${status.toUpperCase()}</div>
-                        </div>
-                    `;
+                        const s = (status || '').toLowerCase();
+                        const isPass = s === 'pass';
+                        const isFail = s.includes('fail');
+                        const color = isPass ? 'var(--success)' : (isFail ? 'var(--danger)' : 'var(--text-muted)');
+                        return `<div style="text-align:center; background:#f9fafb; padding:12px; border-radius:8px; border:1px solid var(--border); min-width:80px;">
+                            <div style="font-size:1.25rem; font-weight:bold; color:${color};">${isPass ? '✓' : (isFail ? '⚠' : '?')}</div>
+                            <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-top:4px;">${label}</div>
+                            <div style="font-size:0.625rem; color:${color}; font-weight:800;">${(status || 'NONE').toUpperCase()}</div>
+                        </div>`;
                     };
-
-                    authDiv.innerHTML += makeIcon('SPF', data.auth_results.spf?.status || 'none');
-                    authDiv.innerHTML += makeIcon('DKIM', data.auth_results.dkim?.status || 'none');
-                    authDiv.innerHTML += makeIcon('DMARC', data.auth_results.dmarc?.status || 'none');
+                    authDiv.innerHTML += makeIcon('SPF', data.auth_results.spf?.status);
+                    authDiv.innerHTML += makeIcon('DKIM', data.auth_results.dkim?.status);
+                    authDiv.innerHTML += makeIcon('DMARC', data.auth_results.dmarc?.status);
                 }
             }
 
-            // Hops Table
-            const hopsBody = document.getElementById('headerHopsTableBody');
-            if (hopsBody) {
-                hopsBody.innerHTML = '';
-                if (data.hops && data.hops.length > 0) {
-                    data.hops.forEach(hop => {
-                        hopsBody.innerHTML += `
-                            <tr style="border-bottom: 1px solid #eee;">
-                                <td style="padding: 5px;">${hop.hop}</td>
-                                <td style="padding: 5px; color: ${parseInt(hop.delay) > 10 ? 'red' : 'inherit'};">${hop.delay}</td>
-                                <td style="padding: 5px; word-break: break-all;">${hop.from}</td>
-                                <td style="padding: 5px; font-size: 0.8em;">${hop.time}</td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    hopsBody.innerHTML = '<tr><td colspan="4" style="padding: 5px; text-align: center; color: #999;">No Relay Hops Found</td></tr>';
-                }
-            }
-
-            // Raw Headers
-            const rhBody = document.getElementById('headerRawHeadersBody');
-            if (rhBody) {
-                rhBody.innerHTML = '';
-                if (data.all_headers && data.all_headers.length > 0) {
-                    data.all_headers.forEach(h => {
-                        rhBody.innerHTML += `
-                            <tr style="border-bottom: 1px solid #eee;">
-                                <td style="padding: 2px 5px; font-weight: bold; color: #444; width: 30%; vertical-align: top;">${h.name}</td>
-                                <td style="padding: 2px 5px; color: #666; word-break: break-all;">${h.value}</td>
-                            </tr>
-                        `;
-                    });
-                } else {
-                    rhBody.innerHTML = '<tr><td colspan="2" style="padding: 5px; text-align: center;">No headers available</td></tr>';
-                }
-            }
-
-            // MxToolbox Render
+            // MxToolbox
             const mx = data.mxtoolbox_analysis;
             const mxSection = document.getElementById('mxToolboxSection');
-
-            if (mx && (mx.blacklist || mx.smtp)) {
+            if (mx && Object.keys(mx).length > 0) {
                 mxSection.style.display = 'block';
                 const container = document.getElementById('mxToolboxDetailed');
-                container.innerHTML = ''; // Clear previous
-
-                const monitors = [
-                    { key: 'blacklist', label: 'Blacklist' },
-                    { key: 'smtp', label: 'SMTP' },
-                    { key: 'spf', label: 'SPF' },
-                    { key: 'dmarc', label: 'DMARC' },
-                    { key: 'dkim', label: 'DKIM' },
-                    { key: 'dns', label: 'DNS' }
-                ];
-
-                monitors.forEach(m => {
-                    const data = mx[m.key];
-                    if (!data) return;
-                    if (m.key === 'dkim' && !data.checked) return; // Skip unchecked DKIM
-
-                    // Create Section
+                container.innerHTML = '';
+                ['blacklist', 'smtp', 'spf', 'dmarc', 'dns'].forEach(key => {
+                    const monitorData = mx[key];
+                    if (!monitorData || (!monitorData.details?.length && monitorData.passed)) return;
                     const sec = document.createElement('div');
-                    sec.style.marginBottom = '15px';
-
-                    // Header
-                    const color = data.passed ? '#155724' : '#721c24';
-                    const bg = data.passed ? '#d4edda' : '#f8d7da';
-                    const icon = data.passed ? '✓' : '✗';
-
-                    let html = `
-                        <div style="background: ${bg}; color: ${color}; padding: 5px 10px; border-radius: 4px; font-weight: bold; font-size: 0.9em; margin-bottom: 5px;">
-                            ${icon} ${m.label} Check
-                        </div>
-                    `;
-
-                    // Details Table
-                    if (data.details && data.details.length > 0) {
-                        html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">`;
-                        data.details.forEach(row => {
-                            const statusColor = row.status === 'PASS' ? 'green' : (row.status === 'FAIL' ? 'red' : '#666');
-                            html += `
-                                <tr style="border-bottom: 1px solid #eee;">
-                                    <td style="padding: 4px; font-weight: bold; width: 150px;">${row.name}</td>
-                                    <td style="padding: 4px; color: ${statusColor}; font-weight: bold; width: 50px;">${row.status}</td>
-                                    <td style="padding: 4px; color: #555; word-break: break-all;">${row.info}</td>
-                                </tr>
-                            `;
+                    sec.style.marginBottom = '16px';
+                    const color = monitorData.passed ? 'var(--success)' : 'var(--danger)';
+                    let html = `<div style="background:${monitorData.passed ? '#f0fdf4' : '#fef2f2'}; padding:8px 12px; border-radius:6px; display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                            <span style="color:${color}; font-weight:bold;">${monitorData.passed ? '✓' : '✗'}</span>
+                            <span style="font-size:0.8125rem; font-weight:700; color:${color}; text-transform:uppercase;">${key.toUpperCase()}</span>
+                        </div>`;
+                    if (monitorData.details?.length) {
+                        html += `<table>`;
+                        monitorData.details.forEach(row => {
+                            html += `<tr><td style="font-weight:600; width:140px;">${row.name}</td><td style="font-weight:800; width:50px; color:${row.status === 'PASS' ? 'var(--success)' : 'var(--danger)'};">${row.status}</td><td style="color:var(--text-muted); font-size:0.8125rem;">${row.info}</td></tr>`;
                         });
                         html += `</table>`;
-                    } else {
-                        html += `<div style="font-size: 0.85em; padding: 4px; color: #666;">No details available.</div>`;
                     }
-
                     sec.innerHTML = html;
                     container.appendChild(sec);
                 });
+            } else { mxSection.style.display = 'none'; }
 
-            } else {
-                mxSection.style.display = 'none';
+            // Hops
+            const hopsB = document.getElementById('headerHopsTableBody');
+            if (hopsB) {
+                hopsB.innerHTML = '';
+                if (data.hops && data.hops.length > 0) {
+                    data.hops.forEach(hop => {
+                        const intel = data.ip_intel?.[hop.ip];
+                        let repHtml = "-";
+                        if (intel && intel.reputation?.abuse_score !== undefined) {
+                            const score = intel.reputation.abuse_score;
+                            const color = score > 50 ? 'var(--danger)' : (score > 10 ? 'var(--warning)' : 'var(--success)');
+                            repHtml = `<div style="color:${color}; font-weight:800;">${score}%</div>`;
+                            if (intel.geo?.country) repHtml += `<div style="font-size:0.625rem; color:var(--text-muted);">${intel.geo.city || ''}, ${intel.geo.country}</div>`;
+                        }
+                        hopsB.innerHTML += `<tr><td style="font-weight:600;">#${hop.hop}</td><td style="color:${parseInt(hop.delay) > 10 ? 'var(--danger)' : 'inherit'};">${hop.delay}</td><td style="word-break:break-all;"><div>${hop.from}</div><small>${hop.ip}</small></td><td>${repHtml}</td><td>${hop.time}</td></tr>`;
+                    });
+                } else { hopsB.innerHTML = '<tr><td colspan="5" style="text-align:center;">No relay evidence found</td></tr>'; }
             }
 
-            // Body Section
             document.getElementById('bodyScore').innerText = data.body_score;
             fillList('bodyReasons', data.body_reasons);
-            fillList('suspiciousDomains', data.suspicious_domains, '#c0392b');
+            fillList('suspiciousDomains', data.suspicious_domains, 'var(--danger)');
 
-            // Extracted URLs
             const urlList = document.getElementById('extractedUrls');
             urlList.innerHTML = '';
-            if (data.extracted_urls && data.extracted_urls.length > 0) {
-                data.extracted_urls.forEach(url => {
-                    const li = document.createElement('li');
-                    const encodedUrl = encodeURIComponent(url);
-                    const vtLink = `https://www.virustotal.com/gui/search/${encodedUrl}`;
-                    li.innerHTML = `<a href="${vtLink}" target="_blank" style="color: #3498db; text-decoration: none;">${url} ↗</a>`;
-                    urlList.appendChild(li);
-                });
-            } else {
-                urlList.innerHTML = '<li class="safe-li">No links extracted.</li>';
-            }
+            if (data.extracted_urls?.length) {
+                for (const url of data.extracted_urls) {
+                    const hash = await getSHA256(url);
+                    urlList.innerHTML += `<li style="margin-bottom:6px;"><a href="https://www.virustotal.com/gui/url/${hash}/summary" target="_blank" style="color:var(--primary); text-decoration:none; font-size:0.875rem;">${url} ↗</a></li>`;
+                }
+            } else { urlList.innerHTML = '<li style="color:var(--success);">No suspicious links detected.</li>'; }
 
-            // Attachments
-            // Attachments Render
+            const vtRadar = document.getElementById('vtRadarSection');
+            const vtBody = document.getElementById('vtRadarTableBody');
+            if (data.url_intel && Object.keys(data.url_intel).length > 0) {
+                vtRadar.style.display = 'block';
+                vtBody.innerHTML = '';
+                for (const [url, intel] of Object.entries(data.url_intel)) {
+                    const hitColor = (intel.hits || 0) > 5 ? '#dc2626' : ((intel.hits || 0) > 0 ? '#f59e0b' : '#16a34a');
+                    const vtLink = intel.type === 'domain' ? `https://www.virustotal.com/gui/domain/${url}/summary` : `https://www.virustotal.com/gui/url/${await getSHA256(url)}/summary`;
+                    vtBody.innerHTML += `<tr><td style="word-break:break-all; font-weight:600;"><div style="font-size:0.8125rem;">${url}</div><small>${intel.type.toUpperCase()}</small></td><td style="color:${intel.age < 365 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight:700;">${intel.age || 'Unknown'} days</td><td><span class="badge" style="background:${hitColor}; color:white;">${intel.hits || 0}</span></td><td><div><strong>Reputation:</strong> ${intel.reputation}</div><div><a href="${vtLink}" target="_blank" style="color:var(--primary);">VirusTotal ↗</a></div></td></tr>`;
+                }
+            } else { vtRadar.style.display = 'none'; }
+
             const attDiv = document.getElementById('attachmentsList');
             attDiv.innerHTML = '';
-            if (data.attachments && data.attachments.length > 0) {
+            if (data.attachments?.length) {
                 data.attachments.forEach(att => {
-                    const div = document.createElement('div');
-                    div.style.border = "1px solid #eee";
-                    div.style.padding = "8px";
-                    div.style.marginBottom = "5px";
-                    div.style.borderRadius = "4px";
-                    div.style.background = "#fff";
-
-                    // Risk Label
-                    const riskColor = att.risk === 'Clean' ? 'green' : (att.risk === 'Malicious' ? 'red' : 'orange');
-
-                    let html = `
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <strong>${att.filename}</strong>
-                                <span style="font-size: 0.8em; color: ${riskColor}; border: 1px solid ${riskColor}; padding: 0 4px; border-radius: 3px; margin-left: 5px;">${att.risk}</span>
-                            </div>
-                    `;
-
-                    // VT Stats Badge
-                    if (att.vt_stats) {
-                        const [malicious, total] = att.vt_stats.split('/').map(Number);
-                        const vtColor = malicious > 0 ? '#e74c3c' : '#2ecc71';
-                        html += `
-                            <div style="font-size: 0.8em;">
-                                <span style="background: ${vtColor}; color: white; padding: 2px 6px; border-radius: 4px;" title="VirusTotal Detection Ratio">VT: ${att.vt_stats}</span>
-                            </div>
-                        `;
-                    }
-                    html += `</div>`;
-
-                    html += `<div style="font-size: 0.8em; color: #666; margin-top: 2px; word-break: break-all;">MD5: ${att.md5}</div>`;
-
-                    // Signature Details
-                    if (att.signature) {
-                        const s = att.signature;
-                        html += `
-                            <div style="margin-top: 5px; font-size: 0.8em; background: #f8f9fa; padding: 5px; border-left: 2px solid #3498db;">
-                                <div><strong>Signed By:</strong> ${s.product} (${s.verified})</div>
-                                <div><strong>Copyright:</strong> ${s.copyright}</div>
-                                <div><strong>Original Name:</strong> ${s.original_name}</div>
-                            </div>
-                        `;
-                    }
-
-                    div.innerHTML = html;
-                    attDiv.appendChild(div);
+                    attDiv.innerHTML += `<div class="indicator-item">
+                        <div style="display:flex; justify-content:space-between;">
+                            <div><strong>${att.filename}</strong><br><small>MD5: ${att.md5}</small></div>
+                            <span class="badge" style="background:${att.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${att.risk}</span>
+                        </div>
+                    </div>`;
                 });
-            } else {
-                attDiv.innerHTML = '<span class="safe-li" style="margin-left: 20px;">No attachments.</span>';
-            }
+            } else { attDiv.innerHTML = '<div style="color:var(--text-muted); font-style:italic;">No attachments found.</div>'; }
 
-            // Sandbox Section
-            document.getElementById('sandboxScore').innerText = data.sandbox_score;
-            document.getElementById('sandboxedUrl').innerText = data.url || "None";
-            fillList('sandboxReasons', data.sandbox_reasons);
-            fillList('redirectChain', data.redirect_chain, 'black');
-
-            if (data.screenshot_path) {
-                document.getElementById('screenshot').src = "/" + data.screenshot_path + "?t=" + new Date().getTime();
-            }
-
-            // Overlay Info (Sender Domain)
-            const sender = data.sender || "";
-            let senderDomain = "-";
-            if (sender.includes("@")) {
-                senderDomain = sender.split("@")[1].replace(">", "").trim();
-            }
-            document.getElementById('overlaySender').innerText = senderDomain;
-
-            // Overlay Info (Attachments)
-            if (data.attachments && data.attachments.length > 0) {
-                const names = data.attachments.map(a => a.filename).join(", ");
-                document.getElementById('overlayAttachments').innerText = names;
-            } else {
-                document.getElementById('overlayAttachments').innerText = "None";
-            }
-
-            // Whitelist
-            if (data.whitelisted_domains && data.whitelisted_domains.length > 0) {
-                document.getElementById('whitelistHits').innerText = data.whitelisted_domains.join(", ");
-            } else {
-                document.getElementById('whitelistHits').innerText = "None";
-            }
-
-            // Block Recs
             const blockList = document.getElementById('blockActions');
             blockList.innerHTML = '';
-            data.block_recommendations.forEach(rec => {
-                const item = document.createElement('li');
-                item.style.color = "#c0392b";
-                item.style.fontWeight = "bold";
-                item.innerText = "🚫 " + rec;
-                blockList.appendChild(item);
+            if (data.block_recommendations?.length) {
+                data.block_recommendations.forEach(rec => { blockList.innerHTML += `<li style="color:var(--danger); font-size:0.875rem; font-weight:600; margin-bottom:8px;">🛡️ ${rec}</li>`; });
+            } else { blockList.innerHTML = '<li style="color:var(--text-muted); font-style:italic;">None.</li>'; }
+
+            document.getElementById('overlaySender').innerText = data.sender || 'Unknown';
+            document.getElementById('overlayAttachments').innerText = data.attachments?.length || 0;
+
+            // Clear sandbox grid for new analysis
+            document.getElementById('sandboxResultsGrid').innerHTML = '';
+        }
+
+        function renderSandboxSection(results) {
+            const grid = document.getElementById('sandboxResultsGrid');
+            const noMsg = document.getElementById('noSandboxMsg');
+            grid.innerHTML = '';
+            if (!results || results.length === 0) { noMsg.style.display = 'block'; return; }
+            noMsg.style.display = 'none';
+            results.forEach((sb, idx) => {
+                const card = document.createElement('section');
+                card.className = 'card';
+                card.id = `sandbox-card-${idx}`;
+                card.style.opacity = sb.status === 'pending' ? '0.7' : '1';
+                card.innerHTML = renderSandboxCardHtml(sb, idx);
+                grid.appendChild(card);
             });
+        }
+
+        function renderSandboxCardHtml(sb, idx) {
+            const isLoading = sb.status === 'pending';
+            const scoreColor = sb.score > 70 ? 'var(--danger)' : (sb.score > 30 ? 'var(--warning)' : 'var(--success)');
+            return `
+                <div class="section-header">
+                    <h3 style="font-size:1rem; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                        <span>🔗</span> Sandbox #${idx + 1} ${isLoading ? '<div class="loader" style="display:inline-block; width:12px; height:12px; border-width:2px; margin:0 8px;"></div>' : ''}
+                    </h3>
+                    <span class="badge" style="background:${isLoading ? '#f3f4f6' : scoreColor}; color:${isLoading ? '#374151' : 'white'};">${isLoading ? 'Analyzing...' : 'Score: ' + sb.score}</span>
+                </div>
+                <div style="margin-bottom:16px;"><code style="background:#f9fafb; padding:4px 8px; border-radius:4px; border:1px solid var(--border); word-break:break-all; font-size:0.8125rem;">${sb.url}</code></div>
+                ${isLoading ? `<div style="height:60px; display:flex; align-items:center; justify-content:center; background:#f9fafb; border-radius:8px; border:1px dashed var(--border); color:var(--text-muted); font-size:0.8125rem;">Running behavioral forensics...</div>` : `
+                    <div style="display:grid; grid-template-columns:1fr 1.5fr; gap:24px;">
+                        <div>
+                            <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Indicators</h4>
+                            <ul style="list-style:none; padding:0; margin:0; font-size:0.8125rem;">${sb.reasons.length ? sb.reasons.map(r => `<li style="margin-bottom:4px;">⚠️ ${r}</li>`).join('') : '<li style="color:var(--success);">No flags.</li>'}</ul>
+                        </div>
+                        <div style="grid-column:span 2; overflow-x:auto; white-space:nowrap; padding:12px; background:#f9fafb; border-radius:8px; border:1px solid var(--border);">
+                            <div style="display:flex; gap:12px;">${sb.screenshot_chain.length ? sb.screenshot_chain.map(shot => `<div style="flex:0 0 240px; background:white; border-radius:6px; border:1px solid var(--border); overflow:hidden;"><div style="font-size:0.6rem; color:var(--text-muted); background:#f3f4f6; padding:4px 8px; overflow:hidden;">${shot.label}</div><a href="${shot.url}" target="_blank"><img src="/${shot.path}?t=${new Date().getTime()}" style="width:100%;"></a></div>`).join('') : 'No screenshots.'}</div>
+                        </div>
+                    </div>`}
+            `;
+        }
+
+        function updateSandboxCard(idx, data) {
+            const card = document.getElementById(`sandbox-card-${idx}`);
+            if (card) { card.style.opacity = '1'; card.innerHTML = renderSandboxCardHtml(data, idx); }
+        }
+
+        function recalculateTotalVerdict() {
+            if (!currentAnalysisData) return;
+            let sbScore = 0;
+            let allSandboxDone = true;
+            currentAnalysisData.sandbox_results.forEach(sb => {
+                sbScore += sb.score;
+                if (sb.status === 'pending') allSandboxDone = false;
+            });
+
+            const totalScore = currentAnalysisData.header_score + currentAnalysisData.body_score + sbScore;
+            document.getElementById('totalScore').innerText = totalScore;
+            const vbox = document.getElementById('verdictBox');
+            let verdict = totalScore >= 71 ? "Malicious" : (totalScore >= 31 ? "Suspicious" : "Benign");
+            vbox.className = `verdict-banner ${verdict}`;
+            document.getElementById('verdictText').innerText = allSandboxDone ? verdict.toUpperCase() : `Analyzing... (${totalScore})`;
+
+            // Update API Quotas if present
+            if (currentAnalysisData.api_quotas) {
+                updateQuotaDisplay(currentAnalysisData.api_quotas);
+            }
+        }
+
+        async function downloadReport() {
+            if (!currentAnalysisData) return;
+            const btn = document.getElementById('downloadBtn');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> Generating PDF...';
+
+            try {
+                const res = await fetch('/api/report/pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentAnalysisData)
+                });
+
+                if (!res.ok) throw new Error("PDF generation failed");
+
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `DESAS_Report_${currentAnalysisData.subject.replace(/[^a-z0-9]/gi, '_').substring(0, 30)}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+            } catch (e) {
+                alert("Error downloading PDF: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
+            }
+        }
+
+        function updateQuotaDisplay(quotas) {
+            const quotaDiv = document.getElementById('apiQuotaBox');
+            if (!quotaDiv) return;
+            quotaDiv.style.display = 'block';
+
+            let html = '<h3 style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; border-top: 1px solid var(--border); padding-top: 24px;">📡 API Quotas</h3>';
+
+            if (quotas.vt_month_remaining !== undefined) {
+                html += `<div style="font-size: 0.8125rem; margin-bottom: 8px;"><strong>VT Month:</strong> ${quotas.vt_month_remaining} / ${quotas.vt_month_limit || '?'}</div>`;
+            }
+            if (quotas.vt_day_remaining !== undefined) {
+                html += `<div style="font-size: 0.8125rem; margin-bottom: 8px;"><strong>VT Day:</strong> ${quotas.vt_day_remaining}</div>`;
+            }
+            if (quotas.mx_remaining !== undefined) {
+                html += `<div style="font-size: 0.8125rem;"><strong>MxToolbox:</strong> ${quotas.mx_remaining} / ${quotas.mx_limit || '?'}</div>`;
+            }
+
+            quotaDiv.innerHTML = html;
         }
 
         async function addDomain(domain) {
             if (!confirm(`Add ${domain} to whitelist?`)) return;
             try {
-                const res = await fetch('/api/whitelist', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ domain: domain })
-                });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    alert('Domain added!');
-                    location.reload();
-                }
-            } catch (e) {
-                alert("Error adding domain");
-            }
+                const res = await fetch('/api/whitelist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: domain }) });
+                if (res.ok) { alert('Domain added!'); location.reload(); }
+            } catch (e) { alert("Error adding domain"); }
+        }
+
+        async function getSHA256(text) {
+            const msgUint8 = new TextEncoder().encode(text);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
         function fillList(id, items, color) {
             const ul = document.getElementById(id);
-            ul.innerHTML = '';
-            if (!items || items.length === 0) {
-                ul.innerHTML = '<li class="safe-li">No issues detected.</li>';
-                return;
-            }
-            items.forEach(txt => {
-                const li = document.createElement('li');
-
-                // If it's the suspicious domains list, try to extract just the domain part if possible? 
-                // Or if the item IS the domain (suspicious_domains list passed here is just strings)
-                if (id === 'suspiciousDomains') {
-                    li.innerHTML = `
-                        ${txt} 
-                        <button onclick="addDomain('${txt}')" style="margin-left:5px; font-size: 0.7em; padding: 2px 5px; cursor: pointer; border: 1px solid #ccc; background: #fff; border-radius: 3px;">⊕ Whitelist</button>
-                    `;
-                } else {
-                    li.innerText = txt;
-                }
-
-                if (color) li.style.color = color;
-                ul.appendChild(li);
-            });
+            if (!ul) return;
+            ul.innerHTML = items?.length ? items.map(txt => `<li ${color ? `style="color:${color}"` : ''}>${txt}</li>`).join('') : '<li class="safe-li">No issues detected.</li>';
         }
-    </script>
 
+        // Precise Drag & Drop Handling
+        const dropZone = document.getElementById('drop-zone');
+        const sidebarDrop = document.getElementById('sidebarDropArea');
+        const toolkitDrop = document.getElementById('toolkitDropArea');
+
+        window.addEventListener('dragenter', e => {
+            e.preventDefault();
+            if (e.dataTransfer.types.includes('Files')) {
+                dropZone.classList.add('active');
+            }
+        });
+
+        window.addEventListener('dragover', e => {
+            e.preventDefault();
+        });
+
+        window.addEventListener('dragleave', e => {
+            if (e.relatedTarget === null || e.relatedTarget === sidebarDrop || e.relatedTarget === toolkitDrop) {
+                dropZone.classList.remove('active');
+            }
+        });
+
+        window.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('active');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                // If toolkit is active, try to route to toolkit if appropriate?
+                // For now, let's check if the toolkit section is visible
+                const isToolkitVisible = document.getElementById('toolkitSection').style.display === 'grid';
+                if (isToolkitVisible) {
+                    document.getElementById('standaloneAttachmentInput').files = files;
+                    analyzeStandalone('attachment');
+                } else {
+                    document.getElementById('fileInput').files = files;
+                    handleFile();
+                }
+            }
+        });
+
+        // Specific hover states
+        [sidebarDrop, toolkitDrop].forEach(el => {
+            if (!el) return;
+            el.addEventListener('dragover', () => el.classList.add('dragover'));
+            el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+            el.addEventListener('drop', () => el.classList.remove('dragover'));
+        });
+    </script>
 </body>
 
 </html>

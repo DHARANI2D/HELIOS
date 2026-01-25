@@ -41,11 +41,34 @@ def parse_msg(file_content: bytes) -> dict:
     # Extract Attachments
     attachments = []
     for att in msg.attachments:
-        if isinstance(att, extract_msg.Attachment): # Skipping specialized types if any
+        filename = att.longFilename or att.shortFilename or "unknown"
+        
+        # Handle standard attachments
+        if isinstance(att, extract_msg.Attachment):
+            content = att.data
+            if content is None: content = b""
             attachments.append({
-                "filename": att.longFilename or att.shortFilename or "unknown",
-                "content": att.data # bytes
+                "filename": filename,
+                "content": content
             })
+        # Handle nested .msg attachments (EmbeddedMsgAttachment)
+        elif hasattr(att, 'msg'): 
+            try:
+                # In some versions, att.data is the Message object; in others, it's bytes.
+                # We want bytes for the 'content' field for recursion downstream.
+                content = att.data
+                if hasattr(content, 'exportBytes'): # It's a Message object
+                    content = content.exportBytes()
+                elif not isinstance(content, (bytes, bytearray)):
+                    # Fallback or placeholder if we can't get raw bytes easily
+                    content = b"" 
+                
+                attachments.append({
+                    "filename": filename if filename != "unknown" else "Potential Phish.msg",
+                    "content": content,
+                    "is_nested_msg": True
+                })
+            except Exception: pass
 
     # Close message
     msg.close()
@@ -54,5 +77,8 @@ def parse_msg(file_content: bytes) -> dict:
         "headers": headers_dict,
         "primary_body": primary_body,
         "attachments": attachments,
-        "raw_headers": list(raw_headers.items()) if raw_headers else [] # Convert to list of tuples
+        "raw_headers": list(raw_headers.items()) if raw_headers else [],
+        "subject": headers_dict.get("Subject", ""),
+        "from": headers_dict.get("From", ""),
+        "to": headers_dict.get("To", "")
     }
