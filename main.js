@@ -327,19 +327,41 @@ function startPython() {
     let args;
 
     if (isPackaged) {
+        // In packaged mode, backend_server is in extraResources
         const executableName = process.platform === 'win32' ? 'backend_server.exe' : 'backend_server';
         backendPath = path.join(process.resourcesPath, executableName);
         args = [];
+
+        // Verify the backend executable exists
+        const fs = require('fs');
+        if (!fs.existsSync(backendPath)) {
+            console.error(`ERROR: Backend executable not found at: ${backendPath}`);
+            console.error(`Resources path: ${process.resourcesPath}`);
+            console.error(`Listing resources directory:`);
+            try {
+                const files = fs.readdirSync(process.resourcesPath);
+                console.error(files.join('\n'));
+            } catch (err) {
+                console.error(`Failed to list directory: ${err.message}`);
+            }
+        } else {
+            console.log(`Backend executable found at: ${backendPath}`);
+        }
     } else {
+        // Development mode
         backendPath = 'uvicorn';
         args = ['app.main:app', '--host', '127.0.0.1', '--port', '8282'];
     }
 
     console.log(`Starting backend from: ${backendPath} on port 8282`);
+    console.log(`Is packaged: ${isPackaged}`);
+    console.log(`Platform: ${process.platform}`);
+    console.log(`Working directory: ${isPackaged ? process.resourcesPath : __dirname}`);
 
     pythonProcess = spawn(backendPath, args, {
         cwd: isPackaged ? process.resourcesPath : __dirname,
-        shell: !isPackaged
+        shell: !isPackaged,
+        env: { ...process.env, PYTHONUNBUFFERED: '1' }
     });
 
     pythonProcess.stdout.on('data', (data) => {
@@ -352,6 +374,12 @@ function startPython() {
 
     pythonProcess.on('error', (err) => {
         console.error('Failed to start backend process:', err);
+        console.error(`Backend path: ${backendPath}`);
+        console.error(`Args: ${JSON.stringify(args)}`);
+    });
+
+    pythonProcess.on('exit', (code, signal) => {
+        console.error(`Backend process exited with code ${code} and signal ${signal}`);
     });
 }
 
