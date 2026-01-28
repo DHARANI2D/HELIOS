@@ -14,27 +14,21 @@ async def get_ip_intel(ip: str) -> dict:
     if not ip or ip == "unknown":
         return intel
 
-    # 1. AbuseIPDB
-    if settings.abuse_key:
-        url = "https://api.abuseipdb.com/api/v2/check"
-        params = {"ipAddress": ip, "maxAgeInDays": "90"}
-        headers = {"Key": settings.abuse_key, "Accept": "application/json"}
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        details = data.get("data", {})
-                        intel["reputation"] = {
-                            "abuse_score": details.get("abuseConfidenceScore", 0),
-                            "isp": details.get("isp"),
-                            "usage_type": details.get("usageType"),
-                            "reports": details.get("totalReports", 0)
-                        }
-                        intel["abuse_score"] = details.get("abuseConfidenceScore", 0)
-        except Exception:
-            pass
+    # 1. Enhanced AbuseIPDB (v2)
+    from app.analyzer.abuseipdb import get_enhanced_ip_intel
+    try:
+        abuse_data = await get_enhanced_ip_intel(ip)
+        if abuse_data:
+            intel["reputation"] = abuse_data
+            intel["abuse_score"] = abuse_data.get("abuse_score", 0)
+            intel["country_code"] = abuse_data.get("country_code")
+            intel["country_name"] = abuse_data.get("country")
+            intel["isp"] = abuse_data.get("isp")
+            intel["domain"] = abuse_data.get("domain")
+            intel["reports"] = abuse_data.get("total_reports", 0) # Alias for frontend
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn").error(f"Error in AbuseIPDB integration: {e}")
 
     # 2. Geo-Location (Free API)
     try:

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     
     # Static Configuration (Fallbacks)
     VIRUSTOTAL_API_KEY: str = ""
-    ABUSEIPDB_API_KEY: str = ""
+    ABUSEIPDB_API_KEY: str = "c2049f09aecf31dfa290c809f63d4b2ef0f029d3161d61bfe47c9ff0d6be9ce63caa59986eabd4bc"
     URLSCAN_API_KEY: str = ""
     MXTOOLBOX_API_KEY: str = ""
     
@@ -34,8 +34,8 @@ class Settings(BaseSettings):
 
     @property
     def abuse_key(self) -> str:
-        # Static only for now as requested
-        return self.ABUSEIPDB_API_KEY
+        dyn = get_dynamic_settings()
+        return dyn.ABUSEIPDB_API_KEY or self.ABUSEIPDB_API_KEY
 
     @property
     def mx_key(self) -> str:

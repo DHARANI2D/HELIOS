@@ -1,6 +1,7 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 import logging
+import tldextract
 
 # Modular Analyzers
 from app.analyzer.eml_parser import parse_eml
@@ -9,7 +10,7 @@ from app.analyzer.headers import analyze_headers
 from app.analyzer.body import analyze_body
 from app.sandbox.browser import Sandbox
 from app.core.scoring import aggregate_verdict
-from app.core.schemas import AnalysisResult, NetworkRequest, HeaderRequest, URLRequest, DomainRequest
+from app.core.schemas import AnalysisResult, NetworkRequest, HeaderRequest, URLRequest, DomainRequest, IPRequest, ReportRequest
 
 router = APIRouter()
 sandbox = Sandbox()
@@ -150,7 +151,7 @@ async def analyze_email_api(file: UploadFile = File(...)):
     # 4. Body Analysis
     from app.core.whitelist_manager import get_whitelist
     dynamic_whitelist = get_whitelist()
-    b_score, b_reasons, urls, susp_domains, skipped_whitelist = analyze_body(parsed_data["primary_body"], whitelist=dynamic_whitelist)
+    b_score, b_reasons, urls, susp_domains, skipped_whitelist, html_intel = analyze_body(parsed_data["primary_body"], whitelist=dynamic_whitelist)
     
     # Check Domain Age for suspicious domains (BLOCK LIST)
     from app.analyzer.body import check_url_intel
@@ -207,6 +208,7 @@ async def analyze_email_api(file: UploadFile = File(...)):
     result.suspicious_domains = susp_domains
     result.whitelisted_domains = skipped_whitelist
     result.extracted_urls = urls
+    result.html_analysis = html_intel
     
     # Add suspicious domains to block recs immediately
     for d in susp_domains:
@@ -348,6 +350,25 @@ async def analyze_standalone_domain(req: DomainRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Domain analysis failed: {str(e)}")
 
+@router.post("/analyze/ip")
+async def analyze_standalone_ip(req: IPRequest):
+    from app.analyzer.reputation import get_ip_intel
+    try:
+        intel = await get_ip_intel(req.ip)
+        return intel
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"IP analysis failed: {str(e)}")
+
+@router.post("/report/ip")
+async def report_abusive_ip(req: ReportRequest):
+    from app.analyzer.abuseipdb import AbuseIPDBClient
+    client = AbuseIPDBClient()
+    try:
+        res = await client.report_ip(req.ip, req.categories, req.comment)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to report IP: {str(e)}")
+
 @router.post("/analyze/attachment")
 async def analyze_standalone_attachment(file: UploadFile = File(...)):
     from app.analyzer.attachments import analyze_attachments
@@ -429,40 +450,58 @@ async def generate_pdf_report(data: AnalysisResult):
         elements.append(Paragraph("VirusTotal Reputation Intelligence", styles['Heading3']))
         vt_data = [["Target URL / Domain", "VT Hits", "Age (Days)", "Risk"]]
         for target, intel in data.url_intel.items():
-            hits = intel.get("hits", intel.get("malicious", 0))
-            age = intel.get("age", "Unknown")
-            risk = "CRITICAL" if hits > 5 else ("WARNING" if hits > 0 else "CLEAN")
+            if not isinstance(intel, dict): continue
+            hits = intel.get("hits")
+            if hits is None: hits = intel.get("malicious", 0)
+            
+            age = intel.get("age")
+            if age is None: age = intel.get("age_days", "Unknown")
+            
+            risk = "CRITICAL" if (isinstance(hits, int) and hits > 5) else ("WARNING" if (isinstance(hits, int) and hits > 0) else "CLEAN")
             vt_data.append([Paragraph(target, styles['Normal']), str(hits), str(age), risk])
         
-        t = Table(vt_data, colWidths=[200, 80, 100, 100])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ]))
-        elements.append(t)
-        elements.append(Spacer(1, 24))
+        if len(vt_data) > 1:
+            t = Table(vt_data, colWidths=[200, 80, 100, 100])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            elements.append(t)
+            elements.append(Spacer(1, 24))
 
     # IP Reputation Section
     if data.ip_intel:
         elements.append(Paragraph("IP Infrastructure Reputation", styles['Heading3']))
         ip_data = [["IP Address", "Abuse Score", "Country", "ISP"]]
         for ip, intel in data.ip_intel.items():
-            score = intel.get("abuse_score", 0)
-            country = intel.get("country_code", "??")
-            isp = intel.get("isp", "Unknown")
-            ip_data.append([ip, f"{score}%", country, Paragraph(isp, styles['Normal'])])
+            if not isinstance(intel, dict): continue
+            # Check nested or flat structure
+            rep = intel.get("reputation", {}) if isinstance(intel.get("reputation"), dict) else {}
+            score = intel.get("abuse_score")
+            if score is None: score = rep.get("abuse_score", 0)
+            
+            country = intel.get("country_code")
+            if country is None: country = intel.get("geo", {}).get("country", "??")
+            
+            isp = intel.get("isp")
+            if isp is None: isp = rep.get("isp", "Unknown")
+            
+            # Ensure isp is never None for Paragraph
+            isp_value = str(isp) if isp is not None else "Unknown"
+            ip_data.append([ip, f"{score}%", country, Paragraph(isp_value, styles['Normal'])])
         
-        t = Table(ip_data, colWidths=[100, 80, 80, 220])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ]))
-        elements.append(t)
-        elements.append(Spacer(1, 24))
+        if len(ip_data) > 1:
+            t = Table(ip_data, colWidths=[100, 80, 80, 220])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            elements.append(t)
+            elements.append(Spacer(1, 24))
 
     # MxToolbox Section
     if data.mxtoolbox_analysis:
@@ -547,10 +586,20 @@ async def generate_pdf_report(data: AnalysisResult):
             elements.append(Spacer(1, 24))
 
     # Build and Return
-    doc.build(elements)
+    try:
+        doc.build(elements)
+    except Exception as e:
+        logger.error(f"PDF Build Error: {e}")
+        # Build a failsafe report if complex elements failed
+        elements = [Paragraph("Email Analysis Report (Recovery Mode)", title_style), Paragraph(f"An error occurred during detailed PDF generation: {str(e)}", styles['Normal'])]
+        buf = BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4)
+        doc.build(elements)
+
     buf.seek(0)
     
+    filename = f"desas_report_{hashlib.md5((data.subject or 'report').encode()).hexdigest()[:8]}.pdf"
     headers = {
-        'Content-Disposition': f'attachment; filename="desas_report_{data.subject[:20]}.pdf"'
+        'Content-Disposition': f'attachment; filename="{filename}"'
     }
     return StreamingResponse(buf, media_type="application/pdf", headers=headers)

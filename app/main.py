@@ -52,7 +52,8 @@ async def view_settings(request: Request):
         "whitelist": get_whitelist(),
         "defaults": {
             "VIRUSTOTAL_API_KEY": settings.VIRUSTOTAL_API_KEY,
-            "MXTOOLBOX_API_KEY": settings.MXTOOLBOX_API_KEY
+            "MXTOOLBOX_API_KEY": settings.MXTOOLBOX_API_KEY,
+            "ABUSEIPDB_API_KEY": settings.ABUSEIPDB_API_KEY
         }
     })
 

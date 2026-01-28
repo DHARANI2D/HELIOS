@@ -15,6 +15,14 @@ class URLRequest(BaseModel):
 class DomainRequest(BaseModel):
     domain: str
 
+class IPRequest(BaseModel):
+    ip: str
+
+class ReportRequest(BaseModel):
+    ip: str
+    categories: List[int]
+    comment: str
+
 class SandboxResult(BaseModel):
     url: str
     expanded_url: str = ""
@@ -80,6 +88,7 @@ class AnalysisResult(BaseModel):
     detected_forms: List[Dict] = []
     exfiltration_detected: Optional[Dict] = None
     js_analysis: List[Dict] = []
+    html_analysis: Dict[str, Any] = {}
     
     # Final Verdict
     total_score: int = 0

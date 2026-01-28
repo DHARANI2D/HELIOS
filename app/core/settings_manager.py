@@ -7,6 +7,7 @@ SETTINGS_FILE = "settings.json"
 class AppSettings(BaseModel):
     VIRUSTOTAL_API_KEY: str = ""
     MXTOOLBOX_API_KEY: str = ""
+    ABUSEIPDB_API_KEY: str = ""
     # Add other dynamic settings here if needed
 
 def get_persisted_settings() -> dict:

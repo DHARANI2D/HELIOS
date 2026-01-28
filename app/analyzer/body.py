@@ -4,6 +4,7 @@ import aiohttp
 from app.core.config import settings
 from datetime import datetime
 from app.analyzer.utils import decode_proofpoint_url
+from app.analyzer.html_intelligence import analyze_html_intelligence
 
 async def check_url_intel(url: str, is_domain: bool = True) -> tuple[int, str | None, int | None, dict | None]:
     """
@@ -67,11 +68,21 @@ async def check_domain_age(domain: str) -> tuple[int, str | None, int | None, di
 def analyze_body(text: str, whitelist: list[str] = None) -> tuple[int, list[str], list[str], list[str]]:
     """
     Analyzes body text/html for NLP keywords, extracts URLs, and inspects domains.
-    Returns: (score, reasons, extracted_urls, suspicious_domains, whitelisted_hits)
+    Returns: (score, reasons, extracted_urls, suspicious_domains, whitelisted_hits, html_intel)
     """
     score = 0
     reasons = []
     suspicious_domains = []
+    
+    # 0. HTML Intelligence (If content looks like HTML)
+    html_intel = {}
+    if "<html" in text.lower() or "<body" in text.lower() or "<script" in text.lower() or "<form" in text.lower():
+        html_intel = analyze_html_intelligence(text)
+        if html_intel["score"] > 0:
+            score += html_intel["score"]
+            reasons.extend(html_intel["reasons"])
+            for indicator in html_intel["js_indicators"]:
+                reasons.append(f"Security Alert (JS): {indicator}")
 
     text_lower = text.lower()
     
@@ -161,4 +172,4 @@ def analyze_body(text: str, whitelist: list[str] = None) -> tuple[int, list[str]
         else:
             final_suspicious_domains.append(d)
 
-    return score, reasons, urls, final_suspicious_domains, whitelisted_hits
+    return score, reasons, urls, final_suspicious_domains, whitelisted_hits, html_intel

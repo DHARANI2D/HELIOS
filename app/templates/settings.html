@@ -146,7 +146,6 @@
 <body>
     <nav class="navbar">
         <h1>DESAS</h1>
-        <a href="/" style="text-decoration: none; font-weight: 600; color: var(--text-muted);">Back to Analysis</a>
     </nav>
 
     <div class="container">
@@ -191,6 +190,20 @@
                     <div class="hint">Used for deep DNS diagnostics (SPF, DKIM, DMARC, Blacklists).</div>
                 </div>
 
+                <div class="form-group">
+                    <label for="abuse_key">AbuseIPDB API Key</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="abuse_key" value="{{ settings.get('ABUSEIPDB_API_KEY', '') }}"
+                            placeholder="Enter AbuseIPDB API Key">
+                        {% if settings.get('ABUSEIPDB_API_KEY') %}
+                        <button type="button" class="btn"
+                            style="width: auto; background: #fee2e2; color: #991b1b; border: 1px solid #fecaca;"
+                            onclick="revokeKey('abuse_key')">Revoke</button>
+                        {% endif %}
+                    </div>
+                    <div class="hint">Used for IP reputation and reporting malicious infrastructure.</div>
+                </div>
+
                 <button type="submit" class="btn btn-primary" id="saveBtn">Save Configuration</button>
             </form>
 
@@ -233,7 +246,8 @@
 
             const payload = {
                 VIRUSTOTAL_API_KEY: document.getElementById('vt_key').value,
-                MXTOOLBOX_API_KEY: document.getElementById('mxtoolbox_key').value
+                MXTOOLBOX_API_KEY: document.getElementById('mxtoolbox_key').value,
+                ABUSEIPDB_API_KEY: document.getElementById('abuse_key').value
             };
 
             try {
@@ -274,6 +288,7 @@
         }};
         document.getElementById('vt_key').value = defaults.VIRUSTOTAL_API_KEY || '';
         document.getElementById('mxtoolbox_key').value = defaults.MXTOOLBOX_API_KEY || '';
+        document.getElementById('abuse_key').value = defaults.ABUSEIPDB_API_KEY || '';
         alert('Default values loaded. Click Save to apply.');
         }
 

@@ -104,6 +104,58 @@
             border: 1px solid #e5e7eb;
         }
 
+        .status-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            margin: 10% auto;
+            padding: 32px;
+            border-radius: 12px;
+            max-width: 500px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 8px;
+        }
+
+        .form-group input[type="text"],
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            box-sizing: border-box;
+        }
+
         .score-val {
             font-size: 3.5rem;
             font-weight: 900;
@@ -196,23 +248,107 @@
             width: 24px;
             height: 24px;
             border: 3px solid #e5e7eb;
-            border-bottom-color: var(--primary);
+            border-top-color: var(--primary);
             border-radius: 50%;
-            display: none;
-            animation: rotation 1s linear infinite;
-            margin: 16px auto;
+            animation: spin 1s linear infinite;
         }
 
-        @keyframes rotation {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
+        @keyframes spin {
+            to {
                 transform: rotate(360deg);
             }
         }
 
+        @keyframes slideUp {
+            from {
+                transform: translateY(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+
+            to {
+                opacity: 0;
+            }
+        }
+
+        /* Progress Bar Styles */
+        .progress-container {
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .progress-bar-bg {
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+
+        .progress-text {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Source Tags */
+        .source-tag {
+            font-size: 0.65rem;
+            background: #f3f4f6;
+            color: var(--text-muted);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .source-tag::before {
+            content: "📡";
+            font-size: 0.6rem;
+        }
+
+        .category-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 700;
+            margin: 32px 0 16px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .category-label::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+
+        /* Restored Utility Classes */
         .badge {
             display: inline-block;
             padding: 2px 8px;
@@ -232,16 +368,8 @@
 
         table {
             width: 100%;
-            min-width: 600px;
             border-collapse: separate;
             border-spacing: 0;
-            table-layout: fixed;
-        }
-
-        th,
-        td {
-            word-wrap: break-word;
-            overflow-wrap: break-word;
         }
 
         th {
@@ -271,18 +399,6 @@
         .screenshot-container img {
             width: 100%;
             display: block;
-        }
-
-        .overlay-meta {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 0.75rem;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            max-width: 80%;
         }
 
         /* Toolkit Styles */
@@ -426,14 +542,25 @@
     <div class="container" id="analysisSection">
         <aside class="sidebar-sticky">
             <div class="card" style="padding: 0; overflow: hidden;">
-                <div id="verdictBox" class="verdict-banner Pending">
+                <div id="sidebarVerdictBox" class="verdict-banner Pending">
                     <div class="verdict-label">Analysis Score</div>
-                    <div id="totalScore" class="score-val">0</div>
-                    <div id="verdictText" class="verdict-label">Ready</div>
+                    <div id="sidebarTotalScore" class="score-val">0</div>
+                    <div id="sidebarVerdictText" class="verdict-label">Ready</div>
                     <div id="threatBadge" class="badge" style="margin-top: 12px; display: none;"></div>
                 </div>
 
                 <div style="padding: 24px;">
+                    <!-- Progress Bar Moved to Sidebar -->
+                    <div id="fullAnalysisProgress" class="progress-container" style="margin-bottom: 24px;">
+                        <div class="progress-bar-bg">
+                            <div id="pbFill" class="progress-bar-fill"></div>
+                        </div>
+                        <div class="progress-text">
+                            <span id="pbStatus">Ready for Analysis...</span>
+                            <span id="pbPercent">0%</span>
+                        </div>
+                    </div>
+
                     <div class="drop-area-box" id="sidebarDropArea"
                         onclick="document.getElementById('fileInput').click()">
                         <div style="font-size: 2rem; margin-bottom: 8px;">📥</div>
@@ -442,12 +569,17 @@
                     </div>
 
                     <input type="file" id="fileInput" accept=".eml,.msg" style="display: none;" onchange="handleFile()">
-                    <div id="loader" class="loader"></div>
 
                     <div style="margin-top: 32px; border-top: 1px solid var(--border); padding-top: 24px;">
                         <h3
                             style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px;">
                             Email Metadata</h3>
+                        <div style="font-size: 0.8125rem; margin-bottom: 8px;">
+                            <strong>Subject:</strong> <span id="overlaySubject">Unknown</span>
+                        </div>
+                        <div style="font-size: 0.8125rem; margin-bottom: 8px;">
+                            <strong>Timestamp:</strong> <span id="overlayTimestamp">Unknown</span>
+                        </div>
                         <div style="font-size: 0.8125rem; margin-bottom: 8px;">
                             <strong>Sender:</strong> <span id="overlaySender">Unknown</span>
                         </div>
@@ -471,92 +603,109 @@
         </aside>
 
         <main class="module-grid">
-            <!-- 1. Headers -->
-            <section class="card">
-                <div class="section-header">
-                    <h2><span>📧</span> Header Forensics</h2>
-                    <span class="badge" id="headerScoreBadge" style="background: #f3f4f6; color: #374151;">Score: <span
-                            id="headerScore">0</span></span>
-                </div>
+            <!-- Progress Bar Removed from here -->
 
-                <div id="headerAuthIcons" style="display: flex; gap: 24px; margin-bottom: 24px;">
-                    <!-- JS Icons -->
-                </div>
-
-                <ul id="headerReasons" style="margin-bottom: 24px;"></ul>
-
-                <div style="margin-top: 24px;">
-                    <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">Routing Hops</h3>
-                    <div class="table-container">
-                        <table id="hopsTable">
-                            <thead>
-                                <tr>
-                                    <th style="width: 60px;">Hop</th>
-                                    <th style="width: 80px;">Delay</th>
-                                    <th>Source / IP</th>
-                                    <th style="width: 120px;">Security Intel</th>
-                                    <th style="width: 200px;">Timestamp</th>
-                                </tr>
-                            </thead>
-                            <tbody id="headerHopsTableBody"></tbody>
-                        </table>
+            <!-- Category 1: Header Intelligence -->
+            <div class="category-label">Header Intelligence</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                <section class="card" id="headerAuthCard">
+                    <div class="section-header">
+                        <h2><span>🔐</span> Authentication</h2>
+                        <span class="source-tag">RFC Standards</span>
                     </div>
-                </div>
+                    <div id="headerAuthIcons" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                </section>
 
-                <div id="mxToolboxSection" style="margin-top: 32px; display: none;">
-                    <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 12px;">External Reputation
-                        (MxToolbox)</h3>
-                    <div id="mxToolboxDetailed" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;"></div>
-                </div>
-            </section>
-
-            <!-- 2. Content -->
-            <section class="card">
-                <div class="section-header">
-                    <h2><span>📝</span> Content & NLP</h2>
-                    <span class="badge" id="bodyScoreBadge" style="background: #f3f4f6; color: #374151;">Score: <span
-                            id="bodyScore">0</span></span>
-                </div>
-
-                <ul id="bodyReasons" style="margin-bottom: 24px;"></ul>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-                    <div>
-                        <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">Analyzed Domains
-                        </h3>
-                        <ul id="suspiciousDomains" style="list-style: none; padding: 0;"></ul>
+                <section class="card" id="ipIntelCard">
+                    <div class="section-header">
+                        <h2><span>🛡️</span> Sender Reputation</h2>
+                        <span class="source-tag">AbuseIPDB</span>
                     </div>
-                    <div>
-                        <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">Extracted URLs
-                        </h3>
-                        <ul id="extractedUrls" style="list-style: none; padding: 0;"></ul>
-                    </div>
-                </div>
+                    <div id="senderReputationBox"></div>
+                </section>
+            </div>
 
-                <div style="margin-top: 32px;">
-                    <h3 style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 8px;">File Analysis</h3>
-                    <div id="attachmentsList"></div>
-                </div>
-            </section>
-
-            <section class="card" id="vtRadarSection" style="display: none;">
+            <section class="card" style="margin-bottom: 24px;">
                 <div class="section-header">
-                    <h2><span>🚀</span> VT Reputation Radar</h2>
+                    <h2><span>🗺️</span> Delivery Hops</h2>
+                    <span class="source-tag">Hop Analysis</span>
                 </div>
                 <div class="table-container">
-                    <table>
+                    <table style="width: 100%;">
                         <thead>
                             <tr>
-                                <th>Target URL / Domain</th>
-                                <th style="width: 100px;">Age</th>
-                                <th style="width: 100px;">VT Hits</th>
-                                <th>Details</th>
+                                <th>Hop</th>
+                                <th>Delay</th>
+                                <th>Source / IP</th>
+                                <th>Security</th>
+                                <th>Time</th>
                             </tr>
                         </thead>
-                        <tbody id="vtRadarTableBody"></tbody>
+                        <tbody id="headerHopsTableBody"></tbody>
                     </table>
                 </div>
             </section>
+
+            <!-- Category 2: Infrastructure Intelligence -->
+            <div class="category-label">Infrastructure Intelligence</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
+                <section class="card" id="mxToolboxSection" style="display: none;">
+                    <div class="section-header">
+                        <h2><span>⚙️</span> Domain Health</h2>
+                        <span class="source-tag">MxToolbox</span>
+                    </div>
+                    <div id="mxResults"></div>
+                </section>
+
+                <section class="card" id="vtRadarSection" style="display: none;">
+                    <div class="section-header">
+                        <h2><span>🎯</span> VT Radar</h2>
+                        <span class="source-tag">VirusTotal</span>
+                    </div>
+                    <div id="vtDetailedIntel"></div>
+                </section>
+            </div>
+
+            <section class="card" id="suspiciousDomainsSection" style="display: none; margin-bottom: 24px;">
+                <div class="section-header">
+                    <h2><span>🚩</span> Suspicious Domains</h2>
+                    <span class="source-tag">Whois / Age</span>
+                </div>
+                <ul id="suspiciousDomainsList" style="list-style: none; padding: 0;"></ul>
+            </section>
+
+            <!-- Category 3: Content & Code Forensics -->
+            <div class="category-label">Content & Code Forensics</div>
+            <section class="card" id="htmlForensicsSection" style="display: none; margin-bottom: 24px;">
+                <div class="section-header">
+                    <h2><span>🧬</span> Static HTML/JS Forensics</h2>
+                    <span class="source-tag">DESAS DeepScan</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px;">
+                    <div>
+                        <h4
+                            style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px;">
+                            JS Indicators</h4>
+                        <div id="jsIndicatorList"></div>
+                    </div>
+                    <div>
+                        <h4
+                            style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px;">
+                            Form Analysis</h4>
+                        <div id="detectedFormsList" style="display: grid; grid-template-columns: 1fr; gap: 12px;"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card" style="margin-bottom: 24px;">
+                <div class="section-header">
+                    <h2><span>📎</span> Attachment Analysis</h2>
+                    <span class="source-tag">VirusTotal Hash</span>
+                </div>
+                <div id="attachmentsList"></div>
+            </section>
+
+            <div class="category-label">Behavioral Sandboxing</div>
 
             <!-- 3. Sandbox Container -->
             <div id="sandboxContainer">
@@ -599,6 +748,17 @@
                 and active DNS records.</p>
             <input type="text" id="standaloneDomainInput" class="standalone-input" placeholder="evil-domain.cc">
             <button class="btn btn-primary" onclick="analyzeStandalone('domain')">Check Domain</button>
+        </div>
+
+        <div class="tool-card">
+            <h3><span>🛡️</span> IP Intelligence (AbuseIPDB)</h3>
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Check reputation or report an
+                abusive IP address.</p>
+            <input type="text" id="standaloneIpInput" class="standalone-input" placeholder="1.2.3.4">
+            <div style="display: flex; gap: 8px;">
+                <button class="btn btn-primary" onclick="analyzeStandalone('ip')">Check IP</button>
+                <button class="btn btn-outline" style="margin:0;" onclick="showReportModal()">Report IP</button>
+            </div>
         </div>
 
         <div class="tool-card">
@@ -677,6 +837,12 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ domain: document.getElementById('standaloneDomainInput').value })
                     });
+                } else if (type === 'ip') {
+                    res = await fetch('/api/analyze/ip', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ip: document.getElementById('standaloneIpInput').value })
+                    });
                 } else if (type === 'attachment') {
                     const file = document.getElementById('standaloneAttachmentInput').files[0];
                     if (!file) return;
@@ -734,6 +900,39 @@
                         <strong>VT Detection:</strong> ${data.attachment.vt_stats || 'Not scanned/No hits'}
                     </div>
                 `;
+            } else if (type === 'ip') {
+                const rep = data.reputation || {};
+                const scoreColor = (rep.abuse_score || 0) >= 50 ? 'var(--danger)' : ((rep.abuse_score || 0) >= 10 ? 'var(--warning)' : 'var(--success)');
+                const ip = document.getElementById('standaloneIpInput').value;
+                content.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                        <h4 style="margin:0;">AbuseIPDB Intelligence: ${ip}</h4>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <button class="btn btn-outline" style="width: auto; margin: 0; padding: 6px 12px; font-size: 0.75rem;" 
+                                onclick="copyToClipboard('IP: ${ip}\\nAbuse Score: ${rep.abuse_score}%\\nISP: ${rep.isp}\\nCountry: ${rep.country || data.geo?.country}')">
+                                <span>📋</span> Copy Intel
+                            </button>
+                            <span class="badge" style="background: ${scoreColor}; color:white;">Abuse Score: ${rep.abuse_score || 0}%</span>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px;">
+                        <div class="indicator-item">
+                            <div style="margin-bottom:8px;"><strong>ISP:</strong> ${rep.isp || 'Unknown'}</div>
+                            <div style="margin-bottom:8px;"><strong>Usage:</strong> ${rep.usage_type || 'Unknown'}</div>
+                            <div style="margin-bottom:8px;"><strong>Country:</strong> ${rep.country || data.geo?.country || 'Unknown'}</div>
+                            <div style="margin-bottom:8px;"><strong>Reports:</strong> ${rep.total_reports || 0} total</div>
+                        </div>
+                        <div>
+                            <h5 style="margin:0 0 12px 0; font-size:0.75rem; text-transform:uppercase; color:var(--text-muted);">Recent Abuse Reports</h5>
+                            ${rep.recent_reports?.length ? rep.recent_reports.map(r => `
+                                <div style="font-size:0.75rem; padding:8px; border:1px solid var(--border); border-radius:6px; margin-bottom:8px; background:#f9fafb;">
+                                    <div style="color:var(--text-muted); font-weight:bold; margin-bottom:4px;">${new Date(r.reportedAt).toLocaleDateString()}</div>
+                                    <div style="font-style:italic;">${r.comment}</div>
+                                </div>
+                            `).join('') : '<div style="color:var(--success); font-size:0.8125rem;">No recent reports found.</div>'}
+                        </div>
+                    </div>
+                `;
             }
         }
 
@@ -769,13 +968,29 @@
             return html;
         }
 
+        function updateProgress(percent, status) {
+            const pbFill = document.getElementById('pbFill');
+            const pbStatus = document.getElementById('pbStatus');
+            const pbPercent = document.getElementById('pbPercent');
+            pbFill.style.width = percent + '%';
+            pbStatus.innerText = status;
+            pbPercent.innerText = percent + '%';
+        }
+
         async function handleFile() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             if (!file) return;
 
-            document.getElementById('loader').style.display = 'block';
-            document.getElementById('verdictText').innerText = "Analyzing...";
+            // Reset UI for new analysis
+            const pbContainer = document.getElementById('fullAnalysisProgress');
+            pbContainer.style.display = 'block';
+            updateProgress(5, "Initial parsing...");
+
+            ['sidebarVerdictText', 'mainVerdictText'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = "Analyzing...";
+            });
             document.getElementById('downloadBtn').disabled = true;
 
             const formData = new FormData();
@@ -783,17 +998,24 @@
 
             try {
                 // Phase 1: Fast Email Analysis
+                updateProgress(20, "Extracting headers & body...");
                 const response = await fetch('/api/analyze/email', { method: 'POST', body: formData });
                 const data = await response.json();
+
+                updateProgress(40, "Checking reputation & geolocation...");
                 currentAnalysisData = data;
                 await renderReport(data);
 
+                updateProgress(70, "Performing static code scan...");
+
                 // Phase 2: Async Sandbox Detonations
                 if (data.extracted_urls && data.extracted_urls.length > 0) {
+                    updateProgress(85, "Queuing behavioral detonation...");
                     const uniqueUrls = [...new Set(data.extracted_urls)].slice(0, 5);
                     currentAnalysisData.sandbox_results = uniqueUrls.map(url => ({ url: url, status: 'pending', score: 0, reasons: [], redirect_chain: [], screenshot_chain: [] }));
                     renderSandboxSection(currentAnalysisData.sandbox_results);
 
+                    let finishedCount = 0;
                     uniqueUrls.map(async (url, idx) => {
                         try {
                             const sbRes = await fetch('/api/analyze/url', {
@@ -810,153 +1032,254 @@
                             const errorResult = { url: url, status: 'error', score: 0, reasons: ['Sandbox Failed: Network error'], redirect_chain: [], screenshot_chain: [] };
                             currentAnalysisData.sandbox_results[idx] = errorResult;
                             updateSandboxCard(idx, errorResult);
+                        } finally {
+                            finishedCount++;
+                            if (finishedCount === uniqueUrls.length) {
+                                updateProgress(100, "Forensics complete.");
+                                setTimeout(() => pbContainer.style.display = 'none', 3000);
+                            }
                         }
                     });
                 } else {
                     document.getElementById('noSandboxMsg').style.display = 'block';
+                    updateProgress(100, "Forensics complete.");
+                    setTimeout(() => pbContainer.style.display = 'none', 3000);
                 }
                 document.getElementById('downloadBtn').disabled = false;
             } catch (err) {
                 alert("Error: " + err);
-            } finally {
-                document.getElementById('loader').style.display = 'none';
+                pbContainer.style.display = 'none';
             }
         }
 
         async function renderReport(data) {
             // Verdict Initial
-            const vbox = document.getElementById('verdictBox');
-            vbox.className = `verdict-banner ${data.verdict}`;
-            document.getElementById('totalScore').innerText = data.total_score;
-            document.getElementById('verdictText').innerText = data.verdict.toUpperCase();
+            ['sidebarVerdictBox', 'mainVerdictBox'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.className = `verdict-banner ${data.verdict}`;
+            });
+            ['sidebarTotalScore', 'mainTotalScore'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = data.total_score;
+            });
+            ['sidebarVerdictText', 'mainVerdictText'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = data.verdict.toUpperCase();
+            });
 
-            // Threat Badge
-            const badge = document.getElementById('threatBadge');
-            if (data.threat_type !== "Unknown") {
-                badge.innerText = `${data.threat_type} | ${data.threat_category}`;
-                badge.style.display = 'inline-block';
-                badge.style.background = data.verdict === 'Malicious' ? '#dc2626' : '#f59e0b';
-                badge.style.color = '#fff';
-            } else { badge.style.display = 'none'; }
-
-            document.getElementById('headerScore').innerText = data.header_score;
-            fillList('headerReasons', data.header_reasons);
-
-            const authDiv = document.getElementById('headerAuthIcons');
-            if (authDiv) {
-                authDiv.innerHTML = '';
-                if (data.auth_results) {
-                    const makeIcon = (label, status) => {
-                        const s = (status || '').toLowerCase();
-                        const isPass = s === 'pass';
-                        const isFail = s.includes('fail');
-                        const color = isPass ? 'var(--success)' : (isFail ? 'var(--danger)' : 'var(--text-muted)');
-                        return `<div style="text-align:center; background:#f9fafb; padding:12px; border-radius:8px; border:1px solid var(--border); min-width:80px;">
-                            <div style="font-size:1.25rem; font-weight:bold; color:${color};">${isPass ? '✓' : (isFail ? '⚠' : '?')}</div>
-                            <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-top:4px;">${label}</div>
-                            <div style="font-size:0.625rem; color:${color}; font-weight:800;">${(status || 'NONE').toUpperCase()}</div>
-                        </div>`;
-                    };
-                    authDiv.innerHTML += makeIcon('SPF', data.auth_results.spf?.status);
-                    authDiv.innerHTML += makeIcon('DKIM', data.auth_results.dkim?.status);
-                    authDiv.innerHTML += makeIcon('DMARC', data.auth_results.dmarc?.status);
+            // Threat Classification Badge
+            const threatBadge = document.getElementById('threatBadge');
+            if (threatBadge) {
+                if (data.verdict !== 'Benign' && (data.threat_type || data.threat_category)) {
+                    threatBadge.style.display = 'inline-block';
+                    threatBadge.innerText = data.threat_category !== 'None' ? data.threat_category : data.threat_type;
+                    threatBadge.style.background = data.verdict === 'Malicious' ? 'var(--danger)' : 'var(--warning)';
+                    threatBadge.style.color = 'white';
+                } else {
+                    threatBadge.style.display = 'none';
                 }
+            }
+            // Sender Reputation (AbuseIPDB)
+            try {
+                const senderRepBox = document.getElementById('senderReputationBox');
+                if (senderRepBox) {
+                    const hops = data.hops || [];
+                    const lastHop = hops[hops.length - 1];
+                    const ip = lastHop ? lastHop.ip : 'Unknown';
+                    const intel = data.ip_intel?.[ip];
+
+                    if (intel && (intel.reputation || intel.abuse_score !== undefined)) {
+                        const score = intel.abuse_score !== undefined ? intel.abuse_score : (intel.reputation.abuse_score || 0);
+                        const color = score > 50 ? 'var(--danger)' : (score > 10 ? 'var(--warning)' : 'var(--success)');
+                        senderRepBox.innerHTML = `
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                                <span style="font-size:0.875rem; font-weight:700;">${ip}</span>
+                                <span class="badge" style="background:${color}; color:white;">Score: ${score}%</span>
+                            </div>
+                            <div style="font-size:0.8125rem; color:var(--text-muted);">
+                                <strong>ISP:</strong> ${intel.isp || intel.reputation?.isp || 'N/A'}<br>
+                                <strong>Country:</strong> ${intel.geo?.country || intel.country_name || 'N/A'}<br>
+                                <strong>Reports:</strong> ${intel.reports || intel.reputation?.reports || 0} hits
+                            </div>
+                        `;
+                    } else {
+                        senderRepBox.innerHTML = '<div style="color:var(--text-muted); font-size:0.8125rem;">No reputation data available for sender IP.</div>';
+                    }
+                }
+            } catch (e) {
+                console.error("Error rendering Sender Reputation:", e);
+            }
+
+            // Auth Results
+            try {
+                const authDiv = document.getElementById('headerAuthIcons');
+                if (authDiv) {
+                    authDiv.innerHTML = '';
+                    if (data.auth_results) {
+                        const makeIcon = (label, status) => {
+                            const s = (status || '').toLowerCase();
+                            const isPass = s === 'pass';
+                            const isFail = s.includes('fail');
+                            const color = isPass ? 'var(--success)' : (isFail ? 'var(--danger)' : 'var(--text-muted)');
+                            return `<div style="text-align:center; background:#f9fafb; padding:12px; border-radius:8px; border:1px solid var(--border); min-width:80px; flex:1;">
+                                <div style="font-size:1.25rem; font-weight:bold; color:${color};">${isPass ? '✓' : (isFail ? '⚠' : '?')}</div>
+                                <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-top:4px;">${label}</div>
+                                <div style="font-size:0.625rem; color:${color}; font-weight:800;">${(status || 'NONE').toUpperCase()}</div>
+                            </div>`;
+                        };
+                        authDiv.innerHTML += makeIcon('SPF', data.auth_results.spf?.status);
+                        authDiv.innerHTML += makeIcon('DKIM', data.auth_results.dkim?.status);
+                        authDiv.innerHTML += makeIcon('DMARC', data.auth_results.dmarc?.status);
+                    }
+                }
+            } catch (e) {
+                console.error("Error rendering Auth Results:", e);
             }
 
             // MxToolbox
-            const mx = data.mxtoolbox_analysis;
-            const mxSection = document.getElementById('mxToolboxSection');
-            if (mx && Object.keys(mx).length > 0) {
-                mxSection.style.display = 'block';
-                const container = document.getElementById('mxToolboxDetailed');
-                container.innerHTML = '';
-                ['blacklist', 'smtp', 'spf', 'dmarc', 'dns'].forEach(key => {
-                    const monitorData = mx[key];
-                    if (!monitorData || (!monitorData.details?.length && monitorData.passed)) return;
-                    const sec = document.createElement('div');
-                    sec.style.marginBottom = '16px';
-                    const color = monitorData.passed ? 'var(--success)' : 'var(--danger)';
-                    let html = `<div style="background:${monitorData.passed ? '#f0fdf4' : '#fef2f2'}; padding:8px 12px; border-radius:6px; display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-                            <span style="color:${color}; font-weight:bold;">${monitorData.passed ? '✓' : '✗'}</span>
-                            <span style="font-size:0.8125rem; font-weight:700; color:${color}; text-transform:uppercase;">${key.toUpperCase()}</span>
-                        </div>`;
-                    if (monitorData.details?.length) {
-                        html += `<table>`;
-                        monitorData.details.forEach(row => {
-                            html += `<tr><td style="font-weight:600; width:140px;">${row.name}</td><td style="font-weight:800; width:50px; color:${row.status === 'PASS' ? 'var(--success)' : 'var(--danger)'};">${row.status}</td><td style="color:var(--text-muted); font-size:0.8125rem;">${row.info}</td></tr>`;
-                        });
-                        html += `</table>`;
-                    }
-                    sec.innerHTML = html;
-                    container.appendChild(sec);
-                });
-            } else { mxSection.style.display = 'none'; }
-
-            // Hops
-            const hopsB = document.getElementById('headerHopsTableBody');
-            if (hopsB) {
-                hopsB.innerHTML = '';
-                if (data.hops && data.hops.length > 0) {
-                    data.hops.forEach(hop => {
-                        const intel = data.ip_intel?.[hop.ip];
-                        let repHtml = "-";
-                        if (intel && intel.reputation?.abuse_score !== undefined) {
-                            const score = intel.reputation.abuse_score;
-                            const color = score > 50 ? 'var(--danger)' : (score > 10 ? 'var(--warning)' : 'var(--success)');
-                            repHtml = `<div style="color:${color}; font-weight:800;">${score}%</div>`;
-                            if (intel.geo?.country) repHtml += `<div style="font-size:0.625rem; color:var(--text-muted);">${intel.geo.city || ''}, ${intel.geo.country}</div>`;
-                        }
-                        hopsB.innerHTML += `<tr><td style="font-weight:600;">#${hop.hop}</td><td style="color:${parseInt(hop.delay) > 10 ? 'var(--danger)' : 'inherit'};">${hop.delay}</td><td style="word-break:break-all;"><div>${hop.from}</div><small>${hop.ip}</small></td><td>${repHtml}</td><td>${hop.time}</td></tr>`;
+            try {
+                const mx = data.mxtoolbox_analysis;
+                const mxSection = document.getElementById('mxToolboxSection');
+                if (mx && typeof mx === 'object' && Object.keys(mx).length > 0) {
+                    mxSection.style.display = 'block';
+                    const container = document.getElementById('mxResults');
+                    container.innerHTML = '';
+                    ['blacklist', 'smtp', 'spf', 'dmarc', 'dns'].forEach(key => {
+                        const monitorData = mx[key];
+                        if (!monitorData || (!monitorData.details?.length && monitorData.passed)) return;
+                        const sec = document.createElement('div');
+                        sec.style.marginBottom = '12px';
+                        const color = monitorData.passed ? 'var(--success)' : 'var(--danger)';
+                        let html = `<div style="background:${monitorData.passed ? '#f0fdf4' : '#fef2f2'}; padding:6px 10px; border-radius:6px; display:flex; align-items:center; gap:8px; font-size:0.75rem;">
+                                <span style="color:${color}; font-weight:bold;">${monitorData.passed ? '✓' : '✗'}</span>
+                                <span style="font-weight:700; color:${color}; text-transform:uppercase;">${key.toUpperCase()}</span>
+                            </div>`;
+                        sec.innerHTML = html;
+                        container.appendChild(sec);
                     });
-                } else { hopsB.innerHTML = '<tr><td colspan="5" style="text-align:center;">No relay evidence found</td></tr>'; }
+                    if (container.innerHTML === '') mxSection.style.display = 'none';
+                } else { mxSection.style.display = 'none'; }
+            } catch (e) {
+                console.error("Error rendering MxToolbox Section:", e);
             }
 
-            document.getElementById('bodyScore').innerText = data.body_score;
-            fillList('bodyReasons', data.body_reasons);
-            fillList('suspiciousDomains', data.suspicious_domains, 'var(--danger)');
-
-            const urlList = document.getElementById('extractedUrls');
-            urlList.innerHTML = '';
-            if (data.extracted_urls?.length) {
-                for (const url of data.extracted_urls) {
-                    const hash = await getSHA256(url);
-                    urlList.innerHTML += `<li style="margin-bottom:6px;"><a href="https://www.virustotal.com/gui/url/${hash}/summary" target="_blank" style="color:var(--primary); text-decoration:none; font-size:0.875rem;">${url} ↗</a></li>`;
+            // Hops
+            try {
+                const hopsB = document.getElementById('headerHopsTableBody');
+                if (hopsB) {
+                    hopsB.innerHTML = '';
+                    if (data.hops && data.hops.length > 0) {
+                        data.hops.map(hop => {
+                            const intel = data.ip_intel?.[hop.ip];
+                            let repHtml = "-";
+                            if (intel) {
+                                const score = intel.abuse_score !== undefined ? intel.abuse_score : (intel.reputation?.abuse_score || 0);
+                                if (score !== undefined) {
+                                    const color = score > 50 ? 'var(--danger)' : (score > 10 ? 'var(--warning)' : 'var(--success)');
+                                    repHtml = `<div style="color:${color}; font-weight:800;">${score}%</div>`;
+                                }
+                            }
+                            hopsB.innerHTML += `<tr><td style="font-weight:600;">#${hop.hop}</td><td style="color:${parseInt(hop.delay) > 10 ? 'var(--danger)' : 'inherit'};">${hop.delay}</td><td style="word-break:break-all;"><div>${hop.from || 'unknown'}</div><small>${hop.ip}</small></td><td>${repHtml}</td><td>${hop.time || 'N/A'}</td></tr>`;
+                        });
+                    } else { hopsB.innerHTML = '<tr><td colspan="5" style="text-align:center;">No relay evidence found</td></tr>'; }
                 }
-            } else { urlList.innerHTML = '<li style="color:var(--success);">No suspicious links detected.</li>'; }
+            } catch (e) {
+                console.error("Error rendering Delivery Hops:", e);
+            }
 
-            const vtRadar = document.getElementById('vtRadarSection');
-            const vtBody = document.getElementById('vtRadarTableBody');
-            if (data.url_intel && Object.keys(data.url_intel).length > 0) {
-                vtRadar.style.display = 'block';
-                vtBody.innerHTML = '';
-                for (const [url, intel] of Object.entries(data.url_intel)) {
-                    const hitColor = (intel.hits || 0) > 5 ? '#dc2626' : ((intel.hits || 0) > 0 ? '#f59e0b' : '#16a34a');
-                    const vtLink = intel.type === 'domain' ? `https://www.virustotal.com/gui/domain/${url}/summary` : `https://www.virustotal.com/gui/url/${await getSHA256(url)}/summary`;
-                    vtBody.innerHTML += `<tr><td style="word-break:break-all; font-weight:600;"><div style="font-size:0.8125rem;">${url}</div><small>${intel.type.toUpperCase()}</small></td><td style="color:${intel.age < 365 ? 'var(--danger)' : 'var(--text-muted)'}; font-weight:700;">${intel.age || 'Unknown'} days</td><td><span class="badge" style="background:${hitColor}; color:white;">${intel.hits || 0}</span></td><td><div><strong>Reputation:</strong> ${intel.reputation}</div><div><a href="${vtLink}" target="_blank" style="color:var(--primary);">VirusTotal ↗</a></div></td></tr>`;
-                }
-            } else { vtRadar.style.display = 'none'; }
+            // VT Detailed Radar
+            try {
+                const vtRadar = document.getElementById('vtRadarSection');
+                const vtDetail = document.getElementById('vtDetailedIntel');
+                if (data.url_intel && typeof data.url_intel === 'object' && Object.keys(data.url_intel).length > 0) {
+                    vtRadar.style.display = 'block';
+                    vtDetail.innerHTML = '';
+                    for (const [target, intel] of Object.entries(data.url_intel)) {
+                        const hits = intel.hits !== undefined ? intel.hits : (intel.malicious || 0);
+                        const hitColor = hits > 5 ? 'var(--danger)' : (hits > 0 ? 'var(--warning)' : 'var(--success)');
+                        vtDetail.innerHTML += `
+                            <div class="indicator-item" style="border-left:4px solid ${hitColor};">
+                                <div style="font-size:0.75rem; font-weight:700; word-break:break-all;">${target}</div>
+                                <div style="display:flex; justify-content:space-between; margin-top:4px;">
+                                    <span style="font-size:0.7rem; color:var(--text-muted);">${(intel.type || 'target').toUpperCase()} | ${intel.age || intel.age_days || '?'} Days</span>
+                                    <span class="badge" style="background:${hitColor}; color:white;">Detections: ${hits}</span>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else { vtRadar.style.display = 'none'; }
+            } catch (e) {
+                console.error("Error rendering VT Radar Section:", e);
+            }
 
+            // Suspicious Domains
+            const domSection = document.getElementById('suspiciousDomainsSection');
+            const domList = document.getElementById('suspiciousDomainsList');
+            if (data.suspicious_domains && data.suspicious_domains.length > 0) {
+                domSection.style.display = 'block';
+                domList.innerHTML = data.suspicious_domains.map(dom => {
+                    const age = data.domain_age_days?.[dom] || 'Unknown';
+                    const color = age === 'Unknown' || age < 30 ? 'var(--danger)' : 'var(--warning)';
+                    return `<li class="indicator-item" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <div>
+                            <div style="font-weight:700; font-size:0.875rem;">${dom}</div>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">Age: ${age} days</div>
+                        </div>
+                        <span class="badge" style="background:${color}; color:white;">RISK</span>
+                    </li>`;
+                }).join('');
+            } else { domSection.style.display = 'none'; }
+
+            // Static HTML Forensics
+            const htmlSection = document.getElementById('htmlForensicsSection');
+            const jsList = document.getElementById('jsIndicatorList');
+            const formContainer = document.getElementById('detectedFormsList');
+            if (data.html_analysis && (data.html_analysis.js_indicators?.length || data.html_analysis.forms?.length)) {
+                htmlSection.style.display = 'block';
+                jsList.innerHTML = data.html_analysis.js_indicators?.length
+                    ? data.html_analysis.js_indicators.map(i => `<div class="indicator-item" style="font-size:0.75rem; color:var(--danger); border:none; padding:4px 0; margin:0;">⚠️ ${i}</div>`).join('')
+                    : '<div style="color:var(--success); font-size:0.75rem;">No suspicious JS detected.</div>';
+
+                formContainer.innerHTML = '';
+                if (data.html_analysis.forms?.length) {
+                    data.html_analysis.forms.forEach(form => {
+                        formContainer.innerHTML += `
+                            <div class="indicator-item" style="background:#f9fafb; border:1px solid var(--border); padding:8px; margin:0;">
+                                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                                    <span class="badge" style="background:var(--primary); color:white; font-size:0.6rem;">${form.method}</span>
+                                    <span style="font-size:0.65rem; color:var(--text-muted); font-weight:bold;">Target: ${form.target_type}</span>
+                                </div>
+                                <div style="font-size:0.75rem; word-break:break-all; font-family:monospace; margin-bottom:4px;">${form.action || '[No Action]'}</div>
+                            </div>
+                        `;
+                    });
+                } else { formContainer.innerHTML = '<div style="color:var(--success); font-size:0.75rem;">No forms detected.</div>'; }
+            } else { htmlSection.style.display = 'none'; }
+
+            // Attachments
             const attDiv = document.getElementById('attachmentsList');
             attDiv.innerHTML = '';
             if (data.attachments?.length) {
                 data.attachments.forEach(att => {
-                    attDiv.innerHTML += `<div class="indicator-item">
-                        <div style="display:flex; justify-content:space-between;">
-                            <div><strong>${att.filename}</strong><br><small>MD5: ${att.md5}</small></div>
-                            <span class="badge" style="background:${att.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${att.risk}</span>
-                        </div>
+                    attDiv.innerHTML += `<div class="indicator-item" style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:0.8125rem;"><strong>${att.filename}</strong><br><small style="color:var(--text-muted); font-family:monospace;">${att.md5}</small></div>
+                        <span class="badge" style="background:${att.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${att.risk}</span>
                     </div>`;
                 });
-            } else { attDiv.innerHTML = '<div style="color:var(--text-muted); font-style:italic;">No attachments found.</div>'; }
+            } else { attDiv.innerHTML = '<div style="color:var(--text-muted); font-size:0.8125rem; font-style:italic;">No attachments found.</div>'; }
 
+
+            document.getElementById('overlaySubject').innerText = data.subject || 'N/A';
+            document.getElementById('overlayTimestamp').innerText = data.date || 'N/A';
+            document.getElementById('overlaySender').innerText = data.sender || 'Unknown';
+            document.getElementById('overlayAttachments').innerText = data.attachments?.length || 0;
+
+            // Block Recommendations
             const blockList = document.getElementById('blockActions');
             blockList.innerHTML = '';
             if (data.block_recommendations?.length) {
-                data.block_recommendations.forEach(rec => { blockList.innerHTML += `<li style="color:var(--danger); font-size:0.875rem; font-weight:600; margin-bottom:8px;">🛡️ ${rec}</li>`; });
-            } else { blockList.innerHTML = '<li style="color:var(--text-muted); font-style:italic;">None.</li>'; }
-
-            document.getElementById('overlaySender').innerText = data.sender || 'Unknown';
-            document.getElementById('overlayAttachments').innerText = data.attachments?.length || 0;
+                data.block_recommendations.forEach(rec => { blockList.innerHTML += `<li style="color:var(--danger); font-size:0.8125rem; font-weight:700; margin-bottom:6px;">🛡️ ${rec}</li>`; });
+            } else { blockList.innerHTML = '<li style="color:var(--text-muted); font-size:0.8125rem; font-style:italic;">None.</li>'; }
 
             // Clear sandbox grid for new analysis
             document.getElementById('sandboxResultsGrid').innerHTML = '';
@@ -1017,11 +1340,34 @@
             });
 
             const totalScore = currentAnalysisData.header_score + currentAnalysisData.body_score + sbScore;
-            document.getElementById('totalScore').innerText = totalScore;
-            const vbox = document.getElementById('verdictBox');
+            ['sidebarTotalScore', 'mainTotalScore'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = totalScore;
+            });
+
+            const vboxS = document.getElementById('sidebarVerdictBox');
+            const vboxM = document.getElementById('mainVerdictBox');
             let verdict = totalScore >= 71 ? "Malicious" : (totalScore >= 31 ? "Suspicious" : "Benign");
-            vbox.className = `verdict-banner ${verdict}`;
-            document.getElementById('verdictText').innerText = allSandboxDone ? verdict.toUpperCase() : `Analyzing... (${totalScore})`;
+            if (vboxS) vboxS.className = `verdict-banner ${verdict}`;
+            if (vboxM) vboxM.className = `verdict-banner ${verdict}`;
+
+            ['sidebarVerdictText', 'mainVerdictText'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = allSandboxDone ? verdict.toUpperCase() : `Analyzing... (${totalScore})`;
+            });
+
+            // Update Threat Badge (Live)
+            const threatBadge = document.getElementById('threatBadge');
+            if (threatBadge && allSandboxDone) {
+                // Approximate re-calculation or rely on final verdict
+                if (verdict !== 'Benign') {
+                    threatBadge.style.display = 'inline-block';
+                    threatBadge.style.background = verdict === 'Malicious' ? 'var(--danger)' : 'var(--warning)';
+                    // Text will be finalized when full data arrives, for now keep what we have
+                } else {
+                    threatBadge.style.display = 'none';
+                }
+            }
 
             // Update API Quotas if present
             if (currentAnalysisData.api_quotas) {
@@ -1050,7 +1396,8 @@
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = url;
-                a.download = `DESAS_Report_${currentAnalysisData.subject.replace(/[^a-z0-9]/gi, '_').substring(0, 30)}.pdf`;
+                const safeSubject = (currentAnalysisData.subject || 'DESAS_Report').replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+                a.download = `DESAS_Report_${safeSubject}.pdf`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -1060,6 +1407,22 @@
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHtml;
+            }
+        }
+
+        async function copyToClipboard(text) {
+            try {
+                await navigator.clipboard.writeText(text);
+                const toast = document.createElement('div');
+                toast.innerText = '📋 Copied to clipboard!';
+                toast.style = 'position:fixed; bottom:20px; right:20px; background:var(--success); color:white; padding:12px 24px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:10000; font-weight:bold; animation: slideUp 0.3s ease;';
+                document.body.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.animation = 'fadeOut 0.3s ease';
+                    setTimeout(() => toast.remove(), 300);
+                }, 2000);
+            } catch (err) {
+                alert('Failed to copy: ' + err);
             }
         }
 
@@ -1096,6 +1459,25 @@
             const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
             const hashArray = Array.from(new Uint8Array(hashBuffer));
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function copyFullReport() {
+            if (!currentAnalysisData) return;
+            const summary = `
+DESAS ANALYSIS REPORT
+---------------------
+Subject: ${currentAnalysisData.subject || 'N/A'}
+Sender: ${currentAnalysisData.sender || 'N/A'}
+Score: ${currentAnalysisData.total_score}
+Verdict: ${currentAnalysisData.verdict}
+Threat Type: ${currentAnalysisData.threat_type}
+
+Indicators:
+${currentAnalysisData.risk_reasons.map(r => '• ' + r).join('\n')}
+
+Generated by DESAS Forensic Workstation
+            `.trim();
+            copyToClipboard(summary);
         }
 
         function fillList(id, items, color) {
@@ -1151,6 +1533,89 @@
             el.addEventListener('dragleave', () => el.classList.remove('dragover'));
             el.addEventListener('drop', () => el.classList.remove('dragover'));
         });
+    </script>
+
+    <!-- Report IP Modal -->
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 8px;">📢 Report Abusive IP</h2>
+            <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 24px;">Contribute to community
+                security by reporting this IP to AbuseIPDB.</p>
+
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label>IP Address</label>
+                <input type="text" id="reportIpAddr" readonly style="background: #f9fafb; cursor: not-allowed;">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label>Categories</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.75rem;">
+                    <label style="font-weight: normal;"><input type="checkbox" value="18" checked
+                            style="width:auto; margin-right:4px;"> Brute-Force</label>
+                    <label style="font-weight: normal;"><input type="checkbox" value="19"
+                            style="width:auto; margin-right:4px;"> Bad Web Bot</label>
+                    <label style="font-weight: normal;"><input type="checkbox" value="21"
+                            style="width:auto; margin-right:4px;"> Data Exfiltration</label>
+                    <label style="font-weight: normal;"><input type="checkbox" value="22"
+                            style="width:auto; margin-right:4px;"> SSH Brute-Force</label>
+                    <label style="font-weight: normal;"><input type="checkbox" value="15"
+                            style="width:auto; margin-right:4px;"> Phishing</label>
+                    <label style="font-weight: normal;"><input type="checkbox" value="11"
+                            style="width:auto; margin-right:4px;"> LFI/RFI</label>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 24px;">
+                <label>Comment</label>
+                <textarea id="reportComment" class="standalone-input" rows="3"
+                    placeholder="Describe the activity (e.g., 'Phishing site targeting bank employees')"></textarea>
+            </div>
+
+            <div style="display: flex; gap: 12px;">
+                <button class="btn btn-primary" onclick="submitReport()">Submit Report</button>
+                <button class="btn btn-outline" style="margin: 0; flex: 1;" onclick="hideReportModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showReportModal() {
+            const ip = document.getElementById('standaloneIpInput').value.trim();
+            if (!ip) { alert("Please enter an IP address first"); return; }
+            document.getElementById('reportIpAddr').value = ip;
+            document.getElementById('reportModal').style.display = 'flex'; // Use flex to center
+        }
+
+        function hideReportModal() {
+            document.getElementById('reportModal').style.display = 'none';
+        }
+
+        async function submitReport() {
+            const ip = document.getElementById('reportIpAddr').value;
+            const comment = document.getElementById('reportComment').value;
+            const checkboxes = document.querySelectorAll('#reportModal input[type="checkbox"]:checked');
+            const categories = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+            if (categories.length === 0) { alert("Please select at least one category"); return; }
+            if (!comment) { alert("Please provide a comment"); return; }
+
+            try {
+                const res = await fetch('/api/report/ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip, categories, comment })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert("Report submitted successfully! Thank you for your contribution.");
+                    hideReportModal();
+                } else {
+                    alert("Error: " + (data.detail || "Submission failed"));
+                }
+            } catch (e) {
+                alert("Network error: " + e.message);
+            }
+        }
     </script>
 </body>
 
