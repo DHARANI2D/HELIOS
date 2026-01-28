@@ -605,6 +605,37 @@
         <main class="module-grid">
             <!-- Progress Bar Removed from here -->
 
+            <!-- Verdict Justification (Phase 1 Enhancement) -->
+            <section class="card" id="verdictJustificationCard"
+                style="display: none; margin-bottom: 24px; border-left: 4px solid var(--primary);">
+                <div class="section-header">
+                    <h2><span>🧠</span> Verdict Justification</h2>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span id="confidenceBadge" class="badge"
+                            style="background: var(--primary); color: white;">Confidence: --</span>
+                    </div>
+                </div>
+                <div id="verdictExplanationText"
+                    style="margin-bottom: 20px; line-height: 1.6; white-space: pre-line; font-size: 0.9375rem;"></div>
+
+                <div id="riskFactorsContainer" style="display: none;">
+                    <h3
+                        style="font-size: 0.875rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; margin-top: 24px;">
+                        Risk Factor Breakdown</h3>
+                    <div id="riskFactorsList"></div>
+                </div>
+            </section>
+
+            <!-- Score Breakdown (Phase 7 Enhancement) -->
+            <section class="card" id="scoreBreakdownCard" style="display: none; margin-bottom: 24px;">
+                <div class="section-header">
+                    <h2><span>📊</span> Score Breakdown</h2>
+                    <span id="totalScoreBadge" class="badge" style="background: var(--primary); color: white;">Total:
+                        --</span>
+                </div>
+                <div id="scoreBreakdownContent"></div>
+            </section>
+
             <!-- Category 1: Header Intelligence -->
             <div class="category-label">Header Intelligence</div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;">
@@ -1079,6 +1110,201 @@
                     threatBadge.style.display = 'none';
                 }
             }
+
+            // Verdict Justification (Phase 1 Enhancement)
+            if (data.verdict_explanation && data.verdict !== 'Pending') {
+                const justCard = document.getElementById('verdictJustificationCard');
+                const explainText = document.getElementById('verdictExplanationText');
+                const confidenceBadge = document.getElementById('confidenceBadge');
+                const riskContainer = document.getElementById('riskFactorsContainer');
+                const riskList = document.getElementById('riskFactorsList');
+
+                justCard.style.display = 'block';
+                explainText.innerHTML = data.verdict_explanation.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                confidenceBadge.innerText = `Confidence: ${data.confidence_score}%`;
+
+                // Color code confidence
+                if (data.confidence_score >= 80) {
+                    confidenceBadge.style.background = 'var(--success)';
+                } else if (data.confidence_score >= 60) {
+                    confidenceBadge.style.background = 'var(--warning)';
+                } else {
+                    confidenceBadge.style.background = 'var(--text-muted)';
+                }
+
+                // Render risk factors
+                if (data.risk_factors && data.risk_factors.length > 0) {
+                    riskContainer.style.display = 'block';
+                    riskList.innerHTML = '';
+
+                    // Group by category
+                    const grouped = {};
+                    data.risk_factors.forEach(rf => {
+                        if (!grouped[rf.category]) grouped[rf.category] = [];
+                        grouped[rf.category].push(rf);
+                    });
+
+                    // Render each category
+                    for (const [category, factors] of Object.entries(grouped)) {
+                        const categoryDiv = document.createElement('div');
+                        categoryDiv.style.marginBottom = '16px';
+
+                        const categoryTitle = document.createElement('div');
+                        categoryTitle.style.fontWeight = '700';
+                        categoryTitle.style.fontSize = '0.8125rem';
+                        categoryTitle.style.textTransform = 'capitalize';
+                        categoryTitle.style.marginBottom = '8px';
+                        categoryTitle.style.color = 'var(--text-main)';
+                        categoryTitle.innerText = category.replace('_', ' ');
+                        categoryDiv.appendChild(categoryTitle);
+
+                        factors.forEach(factor => {
+                            const factorDiv = document.createElement('div');
+                            factorDiv.style.display = 'flex';
+                            factorDiv.style.alignItems = 'flex-start';
+                            factorDiv.style.gap = '8px';
+                            factorDiv.style.marginBottom = '6px';
+                            factorDiv.style.fontSize = '0.8125rem';
+
+                            const severityBadge = document.createElement('span');
+                            severityBadge.className = 'badge';
+                            severityBadge.style.fontSize = '0.625rem';
+                            severityBadge.style.padding = '2px 6px';
+                            severityBadge.style.textTransform = 'uppercase';
+                            severityBadge.innerText = factor.severity;
+
+                            const severityColors = {
+                                'critical': 'var(--danger)',
+                                'high': 'var(--warning)',
+                                'medium': '#f59e0b',
+                                'low': 'var(--text-muted)',
+                                'info': 'var(--success)'
+                            };
+                            severityBadge.style.background = severityColors[factor.severity] || 'var(--text-muted)';
+                            severityBadge.style.color = 'white';
+
+                            const evidenceText = document.createElement('span');
+                            evidenceText.style.flex = '1';
+                            evidenceText.innerText = factor.evidence;
+
+                            factorDiv.appendChild(severityBadge);
+                            factorDiv.appendChild(evidenceText);
+                            categoryDiv.appendChild(factorDiv);
+                        });
+
+                        riskList.appendChild(categoryDiv);
+                    }
+                } else {
+                    riskContainer.style.display = 'none';
+                }
+            } else {
+                document.getElementById('verdictJustificationCard').style.display = 'none';
+            }
+
+            // Score Breakdown (Phase 7 Enhancement)
+            if (data.score_breakdown && data.score_breakdown.length > 0 && data.verdict !== 'Pending') {
+                const breakdownCard = document.getElementById('scoreBreakdownCard');
+                const breakdownContent = document.getElementById('scoreBreakdownContent');
+                const totalBadge = document.getElementById('totalScoreBadge');
+
+                breakdownCard.style.display = 'block';
+                totalBadge.innerText = `Total: ${data.total_score}`;
+
+                // Color code total score
+                if (data.total_score >= 71) {
+                    totalBadge.style.background = 'var(--danger)';
+                } else if (data.total_score >= 31) {
+                    totalBadge.style.background = 'var(--warning)';
+                } else {
+                    totalBadge.style.background = 'var(--success)';
+                }
+
+                breakdownContent.innerHTML = '';
+
+                // Group by component
+                const grouped = {};
+                data.score_breakdown.forEach(item => {
+                    if (!grouped[item.component]) grouped[item.component] = [];
+                    grouped[item.component].push(item);
+                });
+
+                // Render each component group
+                for (const [component, items] of Object.entries(grouped)) {
+                    const componentDiv = document.createElement('div');
+                    componentDiv.style.marginBottom = '20px';
+
+                    const componentTitle = document.createElement('div');
+                    componentTitle.style.fontWeight = '700';
+                    componentTitle.style.fontSize = '0.875rem';
+                    componentTitle.style.marginBottom = '12px';
+                    componentTitle.style.display = 'flex';
+                    componentTitle.style.justifyContent = 'space-between';
+                    componentTitle.style.alignItems = 'center';
+
+                    const titleText = document.createElement('span');
+                    titleText.innerText = component;
+
+                    const componentTotal = items.reduce((sum, item) => sum + item.points, 0);
+                    const totalBadge = document.createElement('span');
+                    totalBadge.className = 'badge';
+                    totalBadge.style.background = 'var(--primary)';
+                    totalBadge.style.color = 'white';
+                    totalBadge.style.fontSize = '0.75rem';
+                    totalBadge.innerText = `+${componentTotal} pts`;
+
+                    componentTitle.appendChild(titleText);
+                    componentTitle.appendChild(totalBadge);
+                    componentDiv.appendChild(componentTitle);
+
+                    items.forEach(item => {
+                        const itemDiv = document.createElement('div');
+                        itemDiv.style.marginBottom = '10px';
+
+                        const itemHeader = document.createElement('div');
+                        itemHeader.style.display = 'flex';
+                        itemHeader.style.justifyContent = 'space-between';
+                        itemHeader.style.marginBottom = '4px';
+                        itemHeader.style.fontSize = '0.8125rem';
+
+                        const reasonText = document.createElement('span');
+                        reasonText.style.flex = '1';
+                        reasonText.style.marginRight = '12px';
+                        reasonText.innerText = item.reason;
+
+                        const pointsText = document.createElement('span');
+                        pointsText.style.fontWeight = '700';
+                        pointsText.style.color = 'var(--primary)';
+                        pointsText.innerText = `+${item.points}`;
+
+                        itemHeader.appendChild(reasonText);
+                        itemHeader.appendChild(pointsText);
+                        itemDiv.appendChild(itemHeader);
+
+                        // Progress bar
+                        const progressBg = document.createElement('div');
+                        progressBg.style.width = '100%';
+                        progressBg.style.height = '6px';
+                        progressBg.style.background = 'var(--border)';
+                        progressBg.style.borderRadius = '3px';
+                        progressBg.style.overflow = 'hidden';
+
+                        const progressFill = document.createElement('div');
+                        progressFill.style.height = '100%';
+                        progressFill.style.width = `${Math.min((item.points / data.total_score) * 100, 100)}%`;
+                        progressFill.style.background = item.points >= 40 ? 'var(--danger)' : (item.points >= 20 ? 'var(--warning)' : 'var(--primary)');
+                        progressFill.style.transition = 'width 0.3s ease';
+
+                        progressBg.appendChild(progressFill);
+                        itemDiv.appendChild(progressBg);
+                        componentDiv.appendChild(itemDiv);
+                    });
+
+                    breakdownContent.appendChild(componentDiv);
+                }
+            } else {
+                document.getElementById('scoreBreakdownCard').style.display = 'none';
+            }
+
             // Sender Reputation (AbuseIPDB)
             try {
                 const senderRepBox = document.getElementById('senderReputationBox');

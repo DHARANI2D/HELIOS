@@ -98,6 +98,14 @@ class AnalysisResult(BaseModel):
     risk_reasons: List[str] = []  # Aggregate of all reasons
     block_recommendations: List[str] = []
     
+    # Verdict Explanation (Phase 1 Enhancement)
+    verdict_explanation: str = ""
+    risk_factors: List[Dict[str, Any]] = []
+    confidence_score: int = 0
+    
+    # Score Decomposition (Phase 7 Enhancement)
+    score_breakdown: List[Dict[str, Any]] = []
+    
     # Header Visualization
     hops: List[Dict] = []
     auth_results: Dict = {}

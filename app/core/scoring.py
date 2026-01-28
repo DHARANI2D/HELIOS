@@ -49,6 +49,7 @@ def aggregate_verdict(result: AnalysisResult) -> AnalysisResult:
     total_sb_score = 0
     total_sb_reasons = []
     total_sb_recs = set()
+    score_breakdown = []
 
     # Process all sandbox results
     for i, sb_result in enumerate(result.sandbox_results):
@@ -77,7 +78,54 @@ def aggregate_verdict(result: AnalysisResult) -> AnalysisResult:
     result.sandbox_score = total_sb_score
     result.sandbox_reasons = total_sb_reasons
     
-    # 2. Total Score
+    # 2. Build Score Breakdown (Phase 7 Enhancement)
+    # Header components
+    if result.header_score > 0:
+        for reason in result.header_reasons:
+            # Extract score from reason if possible, otherwise use proportional
+            score_breakdown.append({
+                "component": "Header Analysis",
+                "points": result.header_score // max(len(result.header_reasons), 1),
+                "reason": reason,
+                "category": "authentication"
+            })
+    
+    # Body components
+    if result.body_score > 0:
+        for reason in result.body_reasons:
+            score_breakdown.append({
+                "component": "Content Analysis",
+                "points": result.body_score // max(len(result.body_reasons), 1),
+                "reason": reason,
+                "category": "content"
+            })
+    
+    # Sandbox components
+    for sb_result in result.sandbox_results:
+        if sb_result.score > 0:
+            for reason in sb_result.reasons:
+                # Parse score from reason if it contains specific values
+                points = sb_result.score // max(len(sb_result.reasons), 1)
+                
+                if "CRITICAL" in reason and "Exfiltration" in reason:
+                    points = 100
+                elif "Password input" in reason:
+                    points = 40
+                elif "POST request" in reason:
+                    points = 20
+                elif "redirect chain" in reason:
+                    points = 10
+                
+                score_breakdown.append({
+                    "component": "Sandbox Behavior",
+                    "points": points,
+                    "reason": reason,
+                    "category": "behavior"
+                })
+    
+    result.score_breakdown = score_breakdown
+    
+    # 3. Total Score
     total_score = result.header_score + result.body_score + result.sandbox_score
     result.total_score = total_score
     
@@ -126,5 +174,13 @@ def aggregate_verdict(result: AnalysisResult) -> AnalysisResult:
         else:
             result.threat_type = "Suspicious Activity"
             result.threat_category = "Anomalous Behavior"
+    
+    # 6. Generate Verdict Explanation (Phase 1 Enhancement)
+    from app.analyzer.verdict_explainer import explain_verdict
+    
+    explanation_data = explain_verdict(result.dict())
+    result.verdict_explanation = explanation_data["verdict_explanation"]
+    result.risk_factors = explanation_data["risk_factors"]
+    result.confidence_score = explanation_data["confidence_score"]
 
     return result
