@@ -38,13 +38,8 @@
       "!app/static/*.pdf"
     ],
     "extraResources": [
-      {
-        "from": "dist/backend_server*",
-        "to": ".",
-        "filter": [
-          "**/*"
-        ]
-      }
+      "dist/backend_server",
+      "dist/backend_server.exe"
     ],
     "mac": {
       "category": "public.app-category.utilities",

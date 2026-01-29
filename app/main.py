@@ -4,6 +4,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.endpoints import router as api_router
+import sys
+import os
+
+# Get base path for PyInstaller compatibility
+def get_base_path():
+    """Get base path for resources, works with PyInstaller"""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable
+        return sys._MEIPASS
+    else:
+        # Running in normal Python environment
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_PATH = get_base_path()
 
 app = FastAPI(title="Dynamic Email Sandbox Analysis System (DESAS)")
 
@@ -23,10 +37,10 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Mount Static Files
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", StaticFiles(directory=os.path.join(BASE_PATH, "app", "static")), name="static")
 
 # Templates
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=os.path.join(BASE_PATH, "app", "templates"))
 
 # Include API Router
 app.include_router(api_router, prefix="/api")

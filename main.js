@@ -327,16 +327,16 @@ function startPython() {
     let args;
 
     if (isPackaged) {
-        // In packaged mode, backend_server is in extraResources
+        // In packaged mode, backend_server is in extraResources/dist
         const executableName = process.platform === 'win32' ? 'backend_server.exe' : 'backend_server';
-        backendPath = path.join(process.resourcesPath, executableName);
+        backendPath = path.join(process.resourcesPath, 'dist', executableName);
         args = [];
 
         // Verify the backend executable exists
         const fs = require('fs');
         if (!fs.existsSync(backendPath)) {
-            console.error(`ERROR: Backend executable not found at: ${backendPath}`);
-            console.error(`Resources path: ${process.resourcesPath}`);
+            const errorMsg = `ERROR: Backend executable not found at: ${backendPath}\nResources path: ${process.resourcesPath}`;
+            console.error(errorMsg);
             console.error(`Listing resources directory:`);
             try {
                 const files = fs.readdirSync(process.resourcesPath);
@@ -344,6 +344,10 @@ function startPython() {
             } catch (err) {
                 console.error(`Failed to list directory: ${err.message}`);
             }
+
+            // Show alert to user
+            const { dialog } = require('electron');
+            dialog.showErrorBox('Backend Not Found', errorMsg + '\n\nThe application cannot start without the backend server.');
         } else {
             console.log(`Backend executable found at: ${backendPath}`);
         }
@@ -356,10 +360,11 @@ function startPython() {
     console.log(`Starting backend from: ${backendPath} on port 8282`);
     console.log(`Is packaged: ${isPackaged}`);
     console.log(`Platform: ${process.platform}`);
-    console.log(`Working directory: ${isPackaged ? process.resourcesPath : __dirname}`);
 
     pythonProcess = spawn(backendPath, args, {
-        cwd: isPackaged ? process.resourcesPath : __dirname,
+        // Don't set cwd for packaged builds - PyInstaller needs to run from its own temp directory
+        // where it extracts app/static and app/templates
+        cwd: isPackaged ? undefined : __dirname,
         shell: !isPackaged,
         env: { ...process.env, PYTHONUNBUFFERED: '1' }
     });
