@@ -91,9 +91,12 @@ REM [6/7] Build Python backend
 REM ============================================================================
 echo [6/7] Building Python backend...
 
-REM Clean previous builds
+REM Clean previous builds and temporary samples
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
+if exist system_verify rmdir /s /q system_verify
+if exist advanced_samples rmdir /s /q advanced_samples
+if exist verification_samples rmdir /s /q verification_samples
 
 REM Build backend for Windows
 pyinstaller build_assets\backend.spec --clean --noconfirm

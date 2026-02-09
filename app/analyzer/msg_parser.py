@@ -41,34 +41,24 @@ def parse_msg(file_content: bytes) -> dict:
     # Extract Attachments
     attachments = []
     for att in msg.attachments:
-        filename = att.longFilename or att.shortFilename or "unknown"
+        filename = att.longFilename or att.shortFilename
+        if not filename:
+             filename = "unknown.bin"
         
-        # Handle standard attachments
-        if isinstance(att, extract_msg.Attachment):
-            content = att.data
-            if content is None: content = b""
-            attachments.append({
-                "filename": filename,
-                "content": content
-            })
-        # Handle nested .msg attachments (EmbeddedMsgAttachment)
-        elif hasattr(att, 'msg'): 
-            try:
-                # In some versions, att.data is the Message object; in others, it's bytes.
-                # We want bytes for the 'content' field for recursion downstream.
-                content = att.data
-                if hasattr(content, 'exportBytes'): # It's a Message object
-                    content = content.exportBytes()
-                elif not isinstance(content, (bytes, bytearray)):
-                    # Fallback or placeholder if we can't get raw bytes easily
-                    content = b"" 
-                
-                attachments.append({
-                    "filename": filename if filename != "unknown" else "Potential Phish.msg",
-                    "content": content,
-                    "is_nested_msg": True
-                })
-            except Exception: pass
+        # Simplified data access
+        content = att.data
+        if content is None:
+             content = b""
+
+        # Check nested
+        is_nested = filename.lower().endswith(".msg")
+
+        attachments.append({
+            "filename": filename,
+            "content": content,
+            "is_nested_msg": is_nested,
+            "content_type": getattr(att, 'mimetype', 'application/octet-stream')
+        })
 
     # Close message
     msg.close()
@@ -82,3 +72,42 @@ def parse_msg(file_content: bytes) -> dict:
         "from": headers_dict.get("From", ""),
         "to": headers_dict.get("To", "")
     }
+
+def extract_attachments_to_dir(file_path: str, output_dir: str) -> list:
+    """
+    Extracts all attachments from a MSG file to a directory.
+    Targeting user's specific logic for 100% fidelity.
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+    
+    extracted_files = []
+    
+    try:
+        msg = extract_msg.Message(file_path)
+        
+        # 1. Save standard attachments
+        for attachment in msg.attachments:
+            # logic: attachment.longestFilename or attachment.shortFilename
+            # but we let the library handle saving mostly, just ensuring the name
+            try:
+                # User used: attachment.save(customPath=output_dir)
+                # We replicate that.
+                if hasattr(attachment, 'save'):
+                    attachment.save(customPath=output_dir, extractEmbedded=True)
+                    fname = attachment.longFilename or attachment.shortFilename or "unknown"
+                    if not fname and isinstance(attachment, extract_msg.attachments.EmbeddedMsg):
+                         fname = "Embedded Msg" # Library often names it automatically on save though
+                    extracted_files.append(fname)
+            except Exception as e:
+                print(f"Failed to save specific attachment: {e}")
+
+        msg.close()
+        
+        # Re-list directory to get exact saved names (safest way to know what happened)
+        extracted_files = os.listdir(output_dir)
+        
+    except Exception as e:
+        print(f"Extraction failed: {e}")
+        
+    return extracted_files

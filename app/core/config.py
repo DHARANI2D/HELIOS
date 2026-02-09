@@ -18,13 +18,10 @@ class Settings(BaseSettings):
     
     # Whitelists
     DOMAIN_WHITELIST: list[str] = [
-        "googleapis.com", 
-        "gstatic.com", 
         "google.com", 
         "microsoft.com", 
         "office.com",
-        "live.com",
-        "azure.com"
+        "live.com"
     ]
 
     @property

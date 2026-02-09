@@ -2,17 +2,20 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.ipynb_checkpoints
 .venv/
 env/
 venv/
 ENV/
 .env
+*.spec
 
 # Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+.npm/
 
 # Electron & Builds
 build/
@@ -21,6 +24,16 @@ release/
 out/
 *.dmg
 *.exe
+*.zip
+*.tar.gz
+*.pkg
+
+# Forensic Test Samples (to prevent accidental commit of "malware" artifacts)
+advanced_samples/
+verification_samples/
+system_verify/
+*_threat.*
+*_payload.*
 
 # App Specific
 app/static/*.png
@@ -30,9 +43,12 @@ settings.json
 whitelist.json
 *.log
 .DS_Store
+Thumbs.db
 
 # IDEs
 .vscode/
 .idea/
 .gemini/
 brain/
+*.swp
+*.swo

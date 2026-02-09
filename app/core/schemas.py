@@ -37,7 +37,8 @@ class SandboxResult(BaseModel):
     score: int = 0
     reasons: List[str] = []
     status: str = "pending" # pending, complete, error
-    api_quotas: Dict[str, Any] = {}
+    whitelisted: bool = False
+    dns_details: List[str] = []
 
 class AnalysisResult(BaseModel):
     # Meta
@@ -110,4 +111,5 @@ class AnalysisResult(BaseModel):
     hops: List[Dict] = []
     auth_results: Dict = {}
     all_headers: List[Dict] = []
-    api_quotas: Dict[str, Any] = {}
+    html_analysis: Dict[str, Any] = {}
+    mxtoolbox_analysis: Dict[str, Any] = None

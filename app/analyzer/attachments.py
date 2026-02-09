@@ -1,23 +1,34 @@
 import hashlib
-import zipfile
-import olefile
-import io
-import aiohttp
-import re
-from pypdf import PdfReader
-from docx import Document
-from app.core.config import settings
-
-import hashlib
+import logging
 import zipfile
 import olefile
 import io
 import aiohttp
 import re
 import tldextract
-from pypdf import PdfReader
+from pdfminer.high_level import extract_text as pdf_extract_text
 from docx import Document
 from app.core.config import settings
+from app.analyzer.url_extractor import (
+    process_raw_urls, 
+    extract_urls_from_text, 
+    analyze_image_bytes, 
+    is_tesseract_available
+)
+from app.analyzer.forensics import (
+    structural_analysis,
+    vba_semantic_analysis,
+    obfuscation_heuristics,
+    shannon_entropy,
+    infer_mitre_techniques,
+    pdf_forensic_signals,
+    analyze_image_forensics,
+    detect_polyglots,
+    analyze_ole_streams,
+    detect_xlm_macros
+)
+
+logger = logging.getLogger("uvicorn")
 
 async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], list[dict]]:
     """
@@ -64,6 +75,39 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
         found_indicators = []
         nested_domains_intel = {}
 
+        # FORENSIC DATA COLLECTOR
+        forensic_signals = {
+            "has_macros": False,
+            "auto_exec": False,
+            "obfuscation": False,
+            "high_entropy": False,
+            "suspicious_calls": [],
+            "mitre_techniques": [],
+            "structural_anomalies": [],
+            "pdf_flags": [],
+            "image_flags": [],
+            "polyglot": False,
+            "xlm_macro": False,
+            "ole_anomaly": False,
+            "appended_data": False
+        }
+
+        # --- 1. Structural Analysis (All Files) ---
+        struct_res = structural_analysis(content, filename)
+        if struct_res["structure_score"] > 0:
+            score += struct_res["structure_score"]
+            reasons.append(f"Structural anomalies in {filename}: {', '.join(struct_res.get('unexpected_files', []))}")
+            forensic_signals["structural_anomalies"] = struct_res.get("unexpected_files", [])
+
+        # --- 2. Polyglot & Appended Payload Check ---
+        polyglot_findings = detect_polyglots(content)
+        if polyglot_findings:
+            score += 25
+            reasons.extend(polyglot_findings)
+            forensic_signals["polyglot"] = True
+            if any("Appended" in f for f in polyglot_findings):
+                forensic_signals["appended_data"] = True
+
         # --- Extension Checks ---
         for ext in risky_extensions:
             if filename.endswith(ext):
@@ -73,49 +117,105 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
                 break
         
         # --- Content & Hyperlink Extraction ---
+        raw_nested_urls = []
+        image_meta = {}
         try:
             if filename.endswith(".pdf"):
-                reader = PdfReader(io.BytesIO(content))
-                for page in reader.pages:
-                    # Text Extraction
-                    extracted_text += page.extract_text() or ""
-                    # Hyperlink/URI Extraction
-                    if "/Annots" in page:
-                        for annot in page["/Annots"]:
-                            obj = annot.get_object()
-                            if "/A" in obj and "/URI" in obj["/A"]:
-                                nested_urls.append(obj["/A"]["/URI"])
-
+                extracted_text = pdf_extract_text(io.BytesIO(content))
+                # Deep PDF Forensics
+                pdf_res = pdf_forensic_signals(extracted_text, content)
+                if pdf_res["has_js"] or pdf_res["has_launch"]:
+                    score += 30
+                    reasons.append(f"Active content detected in PDF {filename}")
+                    forensic_signals["pdf_flags"].append("Active Content (JS/Launch)")
+                if pdf_res["evasion_detected"]:
+                    score += 20
+                    reasons.append(f"PDF evasion techniques detected in {filename}")
             elif filename.endswith(".docx") or filename.endswith(".docm"):
                 doc = Document(io.BytesIO(content))
-                # Text Extraction
                 extracted_text = "\n".join([p.text for p in doc.paragraphs])
-                # Hyperlink Extraction (Rels)
-                rels = doc.part.rels
-                for rel in rels.values():
+                for rel in doc.part.rels.values():
                     if "hyperlink" in rel.reltype:
-                        nested_urls.append(rel._target)
-
+                        raw_nested_urls.append(rel._target)
+            elif filename.endswith(".xlsx") or filename.endswith(".xlsm"):
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+                    rows = []
+                    for sheet in wb.worksheets:
+                        for row in sheet.iter_rows(values_only=True):
+                            # Filter out rows that are entirely None
+                            if any(cell is not None for cell in row):
+                                row_str = " | ".join([str(cell) if cell is not None else "" for cell in row])
+                                rows.append(row_str)
+                    extracted_text = "\n".join(rows)
+                    logger.info(f"Extracted {len(rows)} rows from Excel: {filename}")
+                    
+                    # XLM Macro Check
+                    xlm_findings = detect_xlm_macros(extracted_text, content)
+                    if xlm_findings:
+                        score += 30
+                        reasons.extend(xlm_findings)
+                        forensic_signals["xlm_macro"] = True
+                except Exception as e:
+                    logger.warning(f"Excel extraction failed for {filename}: {e}")
             elif filename.endswith(".txt") or filename.endswith(".log"):
                 extracted_text = content.decode("utf-8", errors="ignore")
             
-            # --- Regex Harvesting (as fallback/additional) ---
-            if extracted_text:
-                links = re.findall(r'https?://[^\s<>"]+|www\.[^\s<>"]+', extracted_text)
-                nested_urls.extend(links)
+            # --- Image Forensic Integration (OCR + Metadata + Entropy) ---
+            image_extensions = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"]
+            if any(filename.endswith(ext) for ext in image_extensions):
+                img_urls, ocr_text = analyze_image_bytes(content)
+                nested_urls.extend(list(img_urls))
+                extracted_text = ocr_text
                 
-                # --- TOAD Heuristics ---
+                # Metadata + Entropy Check
+                img_forensics = analyze_image_forensics({}, content) # Pass empty exif initially, will rely on byte scan
+                if img_forensics["suspicious"]:
+                    score += 15
+                    reasons.append(f"Suspicious image metadata/entropy in {filename}")
+                    forensic_signals["image_flags"].extend(img_forensics["reasons"])
+                
+                try:
+                    from PIL import Image as PILImage
+                    with PILImage.open(io.BytesIO(content)) as img:
+                        image_meta = {
+                            "format": img.format,
+                            "size": f"{img.width}x{img.height}",
+                            "mode": img.mode,
+                            "ocr_active": is_tesseract_available()
+                        }
+                        # Rescan forensics with actual EXIF
+                        exif = img.getexif()
+                        if exif:
+                            img_forensics_exif = analyze_image_forensics(exif, content)
+                            if img_forensics_exif["suspicious"]:
+                                score += 15
+                                reasons.append(f"Suspicious EXIF data in {filename}")
+                                forensic_signals["image_flags"].extend(img_forensics_exif["reasons"])
+
+                except Exception as e:
+                    logger.warning(f"Metadata extraction failed for {filename}: {e}")
+
+            # --- Unified Extraction from Text ---
+            if extracted_text:
+                nested_urls.extend(extract_urls_from_text(extracted_text))
                 for pattern in INDICATORS:
                     if re.search(pattern, extracted_text, re.IGNORECASE):
-                        found_indicators.append(pattern.replace("\\", ""))
-                        
+                        # Use a readable label for the phone pattern
+                        label = "Phone/Callback Number Pattern" if "\\d" in pattern and "10," in pattern else pattern
+                        found_indicators.append(label)
                 if found_indicators:
                     score += 15
                     reasons.append(f"Suspicious phishing indicators found in '{filename}': {', '.join(found_indicators[:3])}")
                     if risk_label == "Clean": risk_label = "Suspicious Content"
 
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error analyzing attachment {filename}: {e}")
+
+        # Clean raw gathered URLs (if any from rels)
+        if raw_nested_urls:
+            nested_urls.extend(process_raw_urls(set(raw_nested_urls)))
 
         # --- Nested Domain Analytics ---
         nested_urls = list(set(nested_urls))
@@ -130,7 +230,7 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
                 continue
 
         for domain in unique_domains:
-            d_score, d_reason, d_age, d_intel = await check_domain_age(domain)
+            d_score, d_reason, d_age, d_intel, _ = await check_domain_age(domain)
             nested_domains_intel[domain] = {
                 "score": d_score,
                 "reason": d_reason,
@@ -142,30 +242,92 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
                 reasons.append(f"Nested link in '{filename}' targets high-risk domain: {domain} ({d_reason})")
                 risk_label = "Malicious (Nested Link)"
 
-        # --- Macro Detection ---
+        # --- 4. Deep Macro & Semantic Analysis (OLE/Zip) ---
         has_macros = False
+        vba_code_extracted = ""
+        
         try:
+            # OLE Formats
             if any(filename.endswith(ext) for ext in office_extensions_ole):
                 if olefile.isOleFile(io.BytesIO(content)):
                     ole = olefile.OleFileIO(io.BytesIO(content))
+                    
+                    # Advanced OLE Stream Analysis
+                    ole_res = analyze_ole_streams(content)
+                    if ole_res["ole_anomalies"]:
+                        score += 20
+                        reasons.extend(ole_res["risky_streams"])
+                        forensic_signals["ole_anomaly"] = True
+
                     if ole.exists('Macros') or ole.exists('_VBA_PROJECT_CUR') or ole.exists('VBA'):
                         has_macros = True
+                        # Try to extract VBA for semantic analysis (simplified for this context)
+                        # In a real scenario we'd use olevba properly to extract code
+                        from oletools.olevba import VBA_Parser
+                        vba_parser = VBA_Parser(filename, data=content)
+                        if vba_parser.detect_vba_macros():
+                            for (_, _, _, code) in vba_parser.extract_macros():
+                                vba_code_extracted += code + "\n"
             
+            # Office XML Formats
             if any(filename.endswith(ext) for ext in office_extensions_xml):
                 if zipfile.is_zipfile(io.BytesIO(content)):
                     with zipfile.ZipFile(io.BytesIO(content)) as z:
                         if any(p in z.namelist() for p in ['word/vbaProject.bin', 'xl/vbaProject.bin', 'ppt/vbaProject.bin']):
                             has_macros = True
+                            # Extract bin and parse if possible, or just flag
             
             if has_macros:
                 score += 30
                 risk_label = "High Risk (Macros)"
                 reasons.append(f"Macros detected in Office file: {filename}")
+                forensic_signals["has_macros"] = True
+                
                 if any(filename.endswith(ext) for ext in excel_extensions):
                     reasons.append(f"CRITICAL: Active Excel Macros found in {filename} (Potential Dropper)")
 
-        except Exception:
-            pass
+                # VSA (VBA Semantic Analysis)
+                if vba_code_extracted:
+                    vsa_res = vba_semantic_analysis(vba_code_extracted)
+                    if vsa_res["auto_exec"]:
+                        score += 25
+                        reasons.append(f"Auto-execution logic found in macro ({filename})")
+                        forensic_signals["auto_exec"] = True
+                    if vsa_res["obfuscation"]:
+                        score += 20
+                        reasons.append(f"Obfuscated macro code detected in {filename}")
+                        forensic_signals["obfuscation"] = True
+                    if vsa_res["staging_logic"]:
+                        score += 20
+                        reasons.append(f"Payload staging logic found in macro ({filename})")
+                    
+                    forensic_signals["suspicious_calls"].extend(vsa_res["suspicious_calls"])
+        
+        except Exception as e:
+            logger.warning(f"Macro analysis error: {e}")
+
+        # --- 5. Obfuscation & Entropy Checks (General) ---
+        # Calculate entropy for everything
+        e_score = shannon_entropy(content)
+        if e_score > 7.2:
+            forensic_signals["high_entropy"] = True
+            # Only flag if it's not a known compressed format or image
+            if not (filename.endswith(".zip") or filename.endswith(".png") or filename.endswith(".jpg")):
+                 score += 15
+                 reasons.append(f"High entropy content in {filename} (Possible packed payload)")
+
+        # Obfuscation on extracted text (e.g. scripts)
+        if extracted_text and any(filename.endswith(ext) for ext in [".js", ".vbs", ".ps1", ".html"]):
+             obf_score = obfuscation_heuristics(extracted_text)
+             if obf_score > 20:
+                 score += obf_score
+                 reasons.append(f"Highly obfuscated script detected: {filename}")
+                 forensic_signals["obfuscation"] = True
+
+        # --- 6. MITRE Mapping ---
+        mitre_hits = infer_mitre_techniques(forensic_signals)
+        forensic_signals["mitre_techniques"] = mitre_hits
+
         
         processed_data = {
             "filename": filename,
@@ -177,7 +339,10 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
             "extracted_urls": nested_urls,
             "nested_domains": nested_domains_intel,
             "indicators": found_indicators,
-            "has_macros": has_macros
+            "has_macros": has_macros,
+            "image_info": image_meta,
+            "extracted_text": extracted_text[:2000],
+            "forensics": forensic_signals # New SOC Data
         }
 
         # --- VirusTotal File Scan ---

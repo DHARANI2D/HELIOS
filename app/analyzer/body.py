@@ -65,7 +65,12 @@ async def check_url_intel(url: str, is_domain: bool = True) -> tuple[int, str | 
 async def check_domain_age(domain: str) -> tuple[int, str | None, int | None, dict | None, dict]:
     return await check_url_intel(domain, is_domain=True)
 
-def analyze_body(text: str, whitelist: list[str] = None) -> tuple[int, list[str], list[str], list[str]]:
+def analyze_body(text: str, whitelist: list[str] = None, session_dir: str = None) -> tuple[int, list[str], list[str], list[str]]:
+    """
+    Analyzes body text/html for NLP keywords, extracts URLs, and inspects domains.
+    Accepts optional session_dir to scan specific body-*.txt files for accurate URL extraction.
+    Returns: (score, reasons, extracted_urls, suspicious_domains, whitelisted_hits, html_intel)
+    """
     """
     Analyzes body text/html for NLP keywords, extracts URLs, and inspects domains.
     Returns: (score, reasons, extracted_urls, suspicious_domains, whitelisted_hits, html_intel)
@@ -105,42 +110,72 @@ def analyze_body(text: str, whitelist: list[str] = None) -> tuple[int, list[str]
             reasons.append(f"Financial/Lure keyword '{word}' detected")
             break
 
-    # 3. URL Extraction
-    url_pattern = re.compile(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+(?:[^\s<>"\'()]+)?')
-    urls = list(set(url_pattern.findall(text))) # Dedupe
-
+    # 3. URL Extraction (Updated to use robust user-defined logic)
+    from app.analyzer.url_extractor import extract_urls_from_text, extract_urls_recursive
+    import os
+    
+    urls = []
+    
+    # Priority: Scan ALL files in session directory if available (User Requirement)
+    if session_dir and os.path.exists(session_dir):
+        urls = extract_urls_recursive(session_dir)
+    
+    # Fallback to scanning the provided text if no files found or no session
+    if not urls:
+        urls = extract_urls_from_text(text)
+    
+    # Urls are already deduped and cleaned by the extractor
+    
     # 4. Domain Analysis
     suspicious_tlds = ["cc", "xyz", "top", "download", "review", "country", "stream"]
     high_value_keywords = ["microsoft", "google", "apple", "paypal", "secure", "login", "account"]
 
-    final_urls = set()
-    for url in urls:
-        final_urls.add(url)
+    # Redundant decoding block removed - handled by url_extractor
+    final_urls = urls 
+    
+    # Whitelist Logic - FILTER FIRST
+    effective_whitelist = whitelist if whitelist is not None else settings.DOMAIN_WHITELIST
+    whitelisted_hits = []
+    
+    # Filtered lists
+    clean_urls = []
+    suspicious_domains = []
+
+    for url in final_urls:
         try:
-            decoded_url = decode_proofpoint_url(url)
-            if decoded_url != url:
-                reasons.append(f"Proofpoint Defense URL detected and decoded: {decoded_url}")
-                final_urls.add(decoded_url)
+            ext = tldextract.extract(url)
+            domain = f"{ext.domain}.{ext.suffix}".lower()
             
-            ext = tldextract.extract(decoded_url)
-            domain = f"{ext.domain}.{ext.suffix}"
-            tld = ext.suffix
+            # Check Whitelist
+            is_whitelisted = False
+            for wd in effective_whitelist:
+                wd_lower = wd.lower().strip()
+                if domain == wd_lower or domain.endswith("." + wd_lower):
+                    is_whitelisted = True
+                    break
             
-            if tld in suspicious_tlds:
+            if is_whitelisted:
+                whitelisted_hits.append(domain)
+                continue # STRICT SKIP: Do not analyze, do not add to suspicious
+            
+            # If not whitelisted, keep for analysis
+            clean_urls.append(url)
+            
+            # TLD Check
+            if ext.suffix in suspicious_tlds:
                 score += 10
-                reasons.append(f"Suspicious TLD '.{tld}' detected in domain {domain}")
+                reasons.append(f"Suspicious TLD '.{ext.suffix}' detected in domain {domain}")
                 suspicious_domains.append(domain)
 
+            # Keyword Check
             for kw in high_value_keywords:
                 if kw in ext.domain and domain not in ["microsoft.com", "google.com", "apple.com", "paypal.com"]:
                     score += 15
                     reasons.append(f"High-value keyword '{kw}' found in suspicious domain {domain}")
                     suspicious_domains.append(domain)
+
         except Exception:
             continue
-    
-    urls = list(final_urls)
-    suspicious_domains = list(set(suspicious_domains))
     
     # 5. TOAD
     phone_pattern = re.compile(r'(?:\+?1[-. ]?)?\(?([2-9][0-8][0-9])\)?[-. ]?([2-9][0-9]{2})[-. ]?([0-9]{4})')
@@ -150,26 +185,9 @@ def analyze_body(text: str, whitelist: list[str] = None) -> tuple[int, list[str]
             score += 10
             reasons.append("Potential TOAD indicator: Phone numbers detected with support keywords")
 
-    # 6. Whitelist Filtering
-    final_suspicious_domains = []
-    whitelisted_hits = []
-    
-    # Use provided whitelist or fallback to default
-    effective_whitelist = whitelist if whitelist is not None else settings.DOMAIN_WHITELIST
-    
-    for d in suspicious_domains:
-        is_whitelisted = False
-        d_lower = d.lower()
-        for wd in effective_whitelist:
-            wd_lower = wd.lower().strip()
-            # Precise matching: exact match or subdomain match
-            if d_lower == wd_lower or d_lower.endswith("." + wd_lower):
-                is_whitelisted = True
-                break
-        
-        if is_whitelisted:
-            whitelisted_hits.append(d)
-        else:
-            final_suspicious_domains.append(d)
+    # Clean up lists
+    whitelisted_hits = list(set(whitelisted_hits))
+    suspicious_domains = list(set(suspicious_domains))
+    clean_urls = list(set(clean_urls))
 
-    return score, reasons, urls, final_suspicious_domains, whitelisted_hits, html_intel
+    return score, reasons, clean_urls, suspicious_domains, whitelisted_hits, html_intel

@@ -20,14 +20,36 @@ def calculate_sandbox_score(result_obj: SandboxResult) -> tuple[int, list[str], 
         score += 10
         reasons.append(f"Sandbox ({result_obj.url}): Long redirect chain ({len(result_obj.redirect_chain)} hops)")
     
-    # Rule 4: Data Exfiltration Check (Verified)
-    if result_obj.exfiltration_detected:
-        score += 100
-        reasons.append(f"CRITICAL ({result_obj.url}): Verified Data Exfiltration detected! Dummy credentials sent to {result_obj.exfiltration_detected['target_url']}")
-        recs.append(f"Block Data Exfil Target: {result_obj.exfiltration_detected['target_url']}")
+    # Rule 4: Data Exfiltration (3-Pillar Model)
+    if result_obj.exfiltration_detected and "pillars" in result_obj.exfiltration_detected:
+        ex_data = result_obj.exfiltration_detected
+        p1 = ex_data["pillars"]["pillar_1"]["detected"]
+        p2 = ex_data["pillars"]["pillar_2"]["detected"]
+        p3 = ex_data["pillars"]["pillar_3"]["detected"]
+
+        if p1 and p2 and p3:
+            score += 100
+            reasons.append(f"CRITICAL ({result_obj.url}): Confirmed Data Exfiltration (Sensitive data + Unauthorized target + Stealthy behavior)")
+        elif p1 and p2:
+            score += 80
+            reasons.append(f"HIGH ({result_obj.url}): Unauthorized sensitive data submission detected")
+        elif p1:
+            score += 40
+            reasons.append(f"Suspicious ({result_obj.url}): Attempted submission of sensitive credentials")
+        elif p2:
+            score += 30
+            reasons.append(f"Suspicious ({result_obj.url}): Communication with unauthorized external domain")
+        
+        if p3 and not (p1 and p2 and p3):
+            score += 20
+            reasons.append(f"Forensic Alert ({result_obj.url}): Stealthy network behavior (background beaconing/beacons)")
+            
+        if "target_url" in ex_data:
+            recs.append(f"Block Data Exfil Target: {ex_data['target_url']}")
     elif any(req.method == "POST" for req in result_obj.network_requests):
+        # Legacy/Fallback if pillar data missing but POSTs seen
         score += 20
-        reasons.append(f"Sandbox ({result_obj.url}): Generic POST requests detected (Potential Exil)")
+        reasons.append(f"Sandbox ({result_obj.url}): Generic POST requests detected (Potential Exfil)")
 
     # Rule 5: JS Behavioral Analysis
     for script in result_obj.js_analysis:

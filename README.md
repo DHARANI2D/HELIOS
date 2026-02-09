@@ -7,36 +7,8 @@
 ![Platform](https://img.shields.io/badge/Platform-Electron--Desktop-orange)
 ![Reports](https://img.shields.io/badge/Reports-Professional%20PDF-blue)
 
-**DESAS** is a specialized forensic workstation designed for SOC analysts to safely investigate and detonate suspicious emails. It provides a controlled environment to observe malicious behavior, analyze headers, extract intelligence, and generate professional forensic reports—all within a standalone desktop application.
+*
 
----
-
-## 🚀 Key Features
-
-### 📄 Professional PDF Reporting
-- **Forensic-Grade Reports**: Instantly generate comprehensive PDF reports with email screenshots, VirusTotal reputation data, MxToolbox diagnostics, and sandbox behavioral evidence
-- **Visual Evidence**: Automated capturing of email body and sandbox screenshots for legal and compliance documentation
-- **Detailed Metadata**: Complete email headers including Subject, Sender, Recipient, Date/Time, and authentication results
-
-### 🔍 Advanced Threat Intelligence
-- **VirusTotal Integration**: Real-time domain/URL reputation checks with malicious hit counts and domain age analysis
-- **MxToolbox Diagnostics**: Automated SPF, DKIM, DMARC, MX, and Blacklist verification for sender authentication
-- **IP Reputation**: Infrastructure abuse scoring and geolocation tracking
-- **API Quota Tracking**: Live visibility into VirusTotal and MxToolbox token usage directly in the sidebar
-
-### 🧪 Isolated Sandbox Detonation
-- **Headless Browser**: Secure URL detonation using Playwright with Chromium
-- **Behavioral Analysis**: Real-time DOM mutation tracking, form detection, and JavaScript execution monitoring
-- **Screenshot Evidence**: Automated visual capture of each redirect hop and final landing page
-- **Network Forensics**: Complete request logging with domain extraction and exfiltration detection
-
-### 🛠 Forensic Toolkit
-- **Domain Intelligence**: Standalone tool for rapid VirusTotal lookups with whitelist integration
-- **Attachment Scrutiny**: Dedicated analysis for suspicious files with safe extraction
-- **Header Parser**: Standalone SPF/DKIM/DMARC validation and hop visualization
-- **Whitelist Management**: Centralized domain whitelisting with dynamic override capabilities
-
----
 
 ## 🖥 Desktop Application
 

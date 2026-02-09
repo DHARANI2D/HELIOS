@@ -511,6 +511,117 @@
             background: #eff6ff;
             transform: scale(1.02);
         }
+
+        /* Toolkit Dashboard Grid - Fixed & Compact */
+        .toolkit-dashboard {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
+
+        @media (min-width: 1024px) {
+            .toolkit-dashboard {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        .toolkit-dashboard .tool-card {
+            background: white;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            position: relative;
+            background-clip: padding-box;
+        }
+
+        .toolkit-dashboard .tool-card:hover {
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .toolkit-dashboard .tool-card h3 {
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 1rem;
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .toolkit-dashboard .tool-card p {
+            margin: 0;
+            line-height: 1.5;
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        .toolkit-dashboard .standalone-input {
+            width: 100%;
+            padding: 10px;
+            font-size: 0.875rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+
+        .toolkit-dashboard textarea.standalone-input {
+            min-height: 100px;
+            resize: none;
+        }
+
+        .toolkit-dashboard .btn {
+            width: 100%;
+            padding: 10px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            height: auto;
+            cursor: pointer;
+            margin-top: auto;
+        }
+
+        /* All cards span 1 by default now for compactness */
+        .tool-card.span-2 {
+            grid-column: span 2;
+        }
+
+        @media (min-width: 1024px) {
+            .toolkit-dashboard {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .header-file-btn {
+            background: #f8fafc;
+            border: 1px solid var(--border);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            cursor: pointer;
+        }
+
+        .role-btn {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            color: var(--text-muted);
+        }
+
+        .role-btn:hover {
+            color: var(--primary);
+        }
+
+        .role-btn.active {
+            color: var(--primary) !important;
+        }
     </style>
 </head>
 
@@ -561,6 +672,50 @@
                         </div>
                     </div>
 
+                    <div style="margin-bottom: 20px;">
+                        <label
+                            style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: block;">Analysis
+                            Depth</label>
+                        <div id="analysisModeSelector"
+                            style="display: flex; background: #f1f5f9; border-radius: 8px; padding: 4px; gap: 4px;">
+                            <button class="mode-btn active" onclick="setAnalysisMode('direct', this)"
+                                style="flex:1; border:none; padding:8px; font-size:0.75rem; border-radius:6px; cursor:pointer; background:var(--card-bg); box-shadow:0 2px 4px rgba(0,0,0,0.05); font-weight:700; color:var(--primary); transition: all 0.2s;">
+                                📧 Direct
+                            </button>
+                            <button class="mode-btn" onclick="setAnalysisMode('forensic', this)"
+                                style="flex:1; border:none; padding:8px; font-size:0.75rem; border-radius:6px; cursor:pointer; background:transparent; font-weight:600; color:var(--text-muted); transition: all 0.2s;">
+                                🔍 Deep Forensic
+                            </button>
+                        </div>
+                    </div>
+
+                    <script>
+                        let activeAnalysisMode = 'direct';
+                        function setAnalysisMode(mode, btn) {
+                            activeAnalysisMode = mode;
+                            document.querySelectorAll('.mode-btn').forEach(b => {
+                                b.classList.remove('active');
+                                b.style.background = 'transparent';
+                                b.style.boxShadow = 'none';
+                                b.style.color = 'var(--text-muted)';
+                                b.style.fontWeight = '600';
+                            });
+                            btn.classList.add('active');
+                            btn.style.background = 'var(--card-bg)';
+                            btn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                            btn.style.color = 'var(--primary)';
+                            btn.style.fontWeight = '700';
+
+                            // Optional: Update drop area text based on mode
+                            const dropTxt = document.querySelector('#sidebarDropArea div:nth-child(3)');
+                            if (mode === 'forensic') {
+                                dropTxt.innerText = "Extract, Decode & Select Artifacts";
+                            } else {
+                                dropTxt.innerText = "or Drag & Drop email here";
+                            }
+                        }
+                    </script>
+
                     <div class="drop-area-box" id="sidebarDropArea"
                         onclick="document.getElementById('fileInput').click()">
                         <div style="font-size: 2rem; margin-bottom: 8px;">📥</div>
@@ -597,7 +752,6 @@
                                 recommendations yet.</li>
                         </ul>
                     </div>
-                    <div id="apiQuotaBox" style="margin-top: 32px; display: none;"></div>
                 </div>
             </div>
         </aside>
@@ -753,68 +907,91 @@
         </main>
     </div>
 
-    <!-- Forensic Toolkit Section -->
-    <div class="container toolkit-container" id="toolkitSection" style="margin-top: 32px; padding:0 32px 32px 32px;">
-        <div class="tool-card">
-            <h3><span>📧</span> Header Analyzer</h3>
-            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Paste raw email headers for
-                deep routing and auth analysis.</p>
-            <textarea id="standaloneHeaderInput" class="standalone-input" rows="8"
-                placeholder="Authentication-Results: ...&#10;Received: from ..."></textarea>
-            <button class="btn btn-primary" onclick="analyzeStandalone('header')">Analyze Headers</button>
-        </div>
+    <!-- Forensic Toolkit Section (Fixed & Streamlined) -->
+    <div id="toolkitSection" style="display: none; padding: 24px 40px;">
+        <div class="toolkit-dashboard">
+            <div class="tool-card span-2">
+                <h3><span>📧 Header Analyzer</span></h3>
+                <p>Upload file or paste raw headers.</p>
+                <div id="headerFileContainer">
+                    <div class="drop-area-box" id="headerDropArea"
+                        onclick="document.getElementById('headerFileInput').click()"
+                        style="padding: 12px; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 80px;">
+                        <div style="font-size: 1.5rem; margin-bottom: 4px;">📥</div>
+                        <div style="font-weight: 700; font-size: 0.75rem;">Drop .txt, .eml or Click</div>
+                    </div>
+                </div>
 
-        <div class="tool-card">
-            <h3><span>🔗</span> URL Sandbox</h3>
-            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Detonate a URL in our browser
-                sandbox to check for redirects and credentials.</p>
-            <input type="text" id="standaloneUrlInput" class="standalone-input"
-                placeholder="https://suspicious-link.com/login">
-            <button class="btn btn-primary" onclick="analyzeStandalone('url')">Detonate URL</button>
-        </div>
+                <div style="text-align:center; position: relative; margin: 12px 0;">
+                    <hr style="border: 0; border-top: 1px solid var(--border); margin: 0;">
+                    <span
+                        style="position: absolute; top: -10px; left: 50%; transform: translateX(-50%); background: white; padding: 0 8px; color: var(--text-muted); font-size: 0.7rem; font-weight: 700;">OR</span>
+                </div>
 
-        <div class="tool-card">
-            <h3><span>🌐</span> Domain Intelligence</h3>
-            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Check domain age, reputation,
-                and active DNS records.</p>
-            <input type="text" id="standaloneDomainInput" class="standalone-input" placeholder="evil-domain.cc">
-            <button class="btn btn-primary" onclick="analyzeStandalone('domain')">Check Domain</button>
-        </div>
+                <div id="headerTextContainer" style="display:block;">
+                    <textarea id="standaloneHeaderInput" class="standalone-input"
+                        placeholder="Paste full email headers..."
+                        style="min-height:80px; resize:vertical; display:block; font-size:0.75rem;"></textarea>
+                </div>
 
-        <div class="tool-card">
-            <h3><span>🛡️</span> IP Intelligence (AbuseIPDB)</h3>
-            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Check reputation or report an
-                abusive IP address.</p>
-            <input type="text" id="standaloneIpInput" class="standalone-input" placeholder="1.2.3.4">
-            <div style="display: flex; gap: 8px;">
-                <button class="btn btn-primary" onclick="analyzeStandalone('ip')">Check IP</button>
-                <button class="btn btn-outline" style="margin:0;" onclick="showReportModal()">Report IP</button>
-            </div>
-        </div>
-
-        <div class="tool-card">
-            <h3><span>📎</span> File Analysis</h3>
-            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;">Upload an attachment to check
-                for macros, signatures, and known malware hashes.</p>
-
-            <div class="drop-area-box" id="toolkitDropArea"
-                onclick="document.getElementById('standaloneAttachmentInput').click()">
-                <div style="font-size: 1.5rem; margin-bottom: 8px;">📎</div>
-                <div style="font-weight: 700; font-size: 0.8125rem;">Drop attachment here</div>
-                <div style="font-size: 0.7rem; opacity: 0.7;">or click to browse</div>
+                <input type="file" id="headerFileInput" style="display: none;" accept=".txt,.headers,.eml"
+                    onchange="loadHeaderFile(this.files[0])">
+                <button class="btn btn-primary" style="margin-top:12px;" onclick="analyzeStandalone('header')">Analyze
+                    Headers</button>
             </div>
 
-            <input type="file" id="standaloneAttachmentInput" style="display: none;"
-                onchange="analyzeStandalone('attachment')">
-        </div>
 
-        <div id="toolkitResults" class="card" style="grid-column: span 2; display: none; margin-top: 24px;">
-            <div class="section-header">
-                <h2>Toolkit Result</h2>
-                <button class="btn btn-outline" style="width:auto; padding: 4px 12px; margin:0;"
-                    onclick="document.getElementById('toolkitResults').style.display='none'">Clear</button>
+            <div class="tool-card">
+                <h3><span>📎 File Analysis</span></h3>
+                <p>Check macros and malware hashes.</p>
+                <div id="attachmentFileContainer">
+                    <div class="drop-area-box" id="toolkitDropArea"
+                        onclick="document.getElementById('standaloneAttachmentInput').click()"
+                        style="padding: 12px; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 80px;">
+                        <div style="font-size: 1.5rem; margin-bottom: 4px;">📎</div>
+                        <div style="font-weight: 700; font-size: 0.75rem;">Drop or Click</div>
+                    </div>
+                </div>
+
+                <input type="file" id="standaloneAttachmentInput" style="display: none;"
+                    onchange="analyzeStandalone('attachment')">
             </div>
-            <div id="toolkitResultsContent"></div>
+
+            <div class="tool-card">
+                <h3><span>🔗 URL Sandbox</span></h3>
+                <p>Detonate a URL in our browser sandbox.</p>
+                <input type="text" id="standaloneUrlInput" class="standalone-input"
+                    placeholder="https://suspicious-link.com">
+                <button class="btn btn-primary" onclick="analyzeStandalone('url')">Detonate URL</button>
+            </div>
+
+            <div class="tool-card">
+                <h3><span>🌐 Domain Intelligence</span></h3>
+                <p>Check domain age and DNS records.</p>
+                <input type="text" id="standaloneDomainInput" class="standalone-input" placeholder="evil-domain.cc">
+                <button class="btn btn-primary" onclick="analyzeStandalone('domain')">Check Domain</button>
+            </div>
+
+            <div class="tool-card">
+                <h3><span>🛡️ IP Intelligence</span></h3>
+                <p>Check reputation on AbuseIPDB.</p>
+                <input type="text" id="standaloneIpInput" class="standalone-input" placeholder="1.2.3.4">
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-primary" style="flex:1;" onclick="analyzeStandalone('ip')">Check IP</button>
+                    <button class="btn btn-outline" style="flex:1; margin:0;"
+                        onclick="showReportModal()">Report</button>
+                </div>
+            </div>
+
+            <div id="toolkitResults" class="card" style="grid-column: 1 / -1; display: none; margin-top: 20px;">
+                <div class="section-header" style="margin-bottom: 12px;">
+                    <h2 style="font-size: 1rem; margin:0;">Toolkit Result</h2>
+                    <button class="btn btn-outline"
+                        style="width:auto; padding: 2px 8px; margin:0; font-size: 0.7rem; height: 24px;"
+                        onclick="document.getElementById('toolkitResults').style.display='none'">Clear</button>
+                </div>
+                <div id="toolkitResultsContent"></div>
+            </div>
         </div>
     </div>
 
@@ -829,7 +1006,7 @@
 
         function showSection(section) {
             if (section === 'analysis') {
-                document.getElementById('analysisSection').style.display = 'flex';
+                document.getElementById('analysisSection').style.display = 'grid';
                 document.getElementById('toolkitSection').style.display = 'none';
                 document.getElementById('navAnalysis').classList.add('active');
                 document.getElementById('navToolkit').classList.remove('active');
@@ -839,6 +1016,22 @@
                 document.getElementById('navAnalysis').classList.remove('active');
                 document.getElementById('navToolkit').classList.add('active');
             }
+        }
+
+        async function loadHeaderFile(file) {
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                document.getElementById('standaloneHeaderInput').value = e.target.result;
+                // Visual feedback
+                const dropArea = document.getElementById('headerDropArea');
+                if (dropArea) {
+                    const originalHtml = dropArea.innerHTML;
+                    dropArea.innerHTML = `<div style="font-size: 1.25rem; margin-bottom: 4px;">✅</div><div style="font-weight: 700; font-size: 0.7rem; color: var(--success);">${file.name} Loaded</div>`;
+                    setTimeout(() => { dropArea.innerHTML = originalHtml; }, 3000);
+                }
+            };
+            reader.readAsText(file);
         }
 
         async function analyzeStandalone(type) {
@@ -875,7 +1068,9 @@
                         body: JSON.stringify({ ip: document.getElementById('standaloneIpInput').value })
                     });
                 } else if (type === 'attachment') {
-                    const file = document.getElementById('standaloneAttachmentInput').files[0];
+                    const fileInput = document.getElementById('standaloneAttachmentInput');
+                    let file = fileInput.files[0];
+
                     if (!file) return;
                     const formData = new FormData();
                     formData.append('file', file);
@@ -902,11 +1097,57 @@
                     <tbody>${renderHops(data.hops, data.ip_intel)}</tbody></table></div>
                 `;
             } else if (type === 'url') {
+                let exfilHtml = '';
+                if (data.exfiltration_detected) {
+                    const ex = data.exfiltration_detected;
+                    const p = ex.pillars;
+                    const verdictColor = ex.verdict === 'Confirmed' ? 'var(--danger)' : 'var(--warning)';
+
+                    exfilHtml = `
+                        <div style="margin-top:24px; padding:20px; background:#fff5f5; border:1px solid #feb2b2; border-radius:12px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                                <h5 style="margin:0; color:#c53030; font-size:0.95rem;">🚩 Data Exfiltration Analysis</h5>
+                                <span class="badge" style="background:${verdictColor}; color:white;">${ex.verdict}</span>
+                            </div>
+                            
+                            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin-bottom:16px;">
+                                <div style="text-align:center; padding:10px; background:white; border-radius:8px; border:1px solid ${p.pillar_1.detected ? '#feb2b2' : '#e2e8f0'};">
+                                    <div style="font-size:1.1rem; margin-bottom:4px;">${p.pillar_1.detected ? '🔑' : '🛡️'}</div>
+                                    <div style="font-size:0.65rem; font-weight:bold; color:var(--text-muted);">PILLAR 1</div>
+                                    <div style="font-size:0.75rem; color:${p.pillar_1.detected ? 'var(--danger)' : 'var(--success)'}; font-weight:700;">Sensitive Data</div>
+                                </div>
+                                <div style="text-align:center; padding:10px; background:white; border-radius:8px; border:1px solid ${p.pillar_2.detected ? '#feb2b2' : '#e2e8f0'};">
+                                    <div style="font-size:1.1rem; margin-bottom:4px;">${p.pillar_2.detected ? '🌐' : '✅'}</div>
+                                    <div style="font-size:0.65rem; font-weight:bold; color:var(--text-muted);">PILLAR 2</div>
+                                    <div style="font-size:0.75rem; color:${p.pillar_2.detected ? 'var(--danger)' : 'var(--success)'}; font-weight:700;">Unauthorized Target</div>
+                                </div>
+                                <div style="text-align:center; padding:10px; background:white; border-radius:8px; border:1px solid ${p.pillar_3.detected ? '#feb2b2' : '#e2e8f0'};">
+                                    <div style="font-size:1.1rem; margin-bottom:4px;">${p.pillar_3.detected ? '🕵️' : '🔔'}</div>
+                                    <div style="font-size:0.65rem; font-weight:bold; color:var(--text-muted);">PILLAR 3</div>
+                                    <div style="font-size:0.75rem; color:${p.pillar_3.detected ? 'var(--danger)' : 'var(--success)'}; font-weight:700;">Stealthy Behavior</div>
+                                </div>
+                            </div>
+
+                            <div style="font-size:0.8125rem;">
+                                <div style="margin-bottom:6px;"><strong>Verdict:</strong> ${p.pillar_1.summary}</div>
+                                <div style="margin-bottom:6px;"><strong>Origin Deviance:</strong> ${p.pillar_2.summary}</div>
+                                <div><strong>Forensic Pattern:</strong> ${p.pillar_3.summary}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
                 content.innerHTML = `
-                    <h4 style="margin:0 0 24px 0;">Sandbox Finished (Score: ${data.score})</h4>
-                    <ul style="margin-bottom: 24px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-                    <div style="font-size: 0.875rem;"><strong>Final URL:</strong> <span style="font-family: monospace;">${data.expanded_url}</span></div>
-                    <div class="screenshot-container"><img src="/${data.screenshot_path}"></div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                        <h4 style="margin:0;">Sandbox Finished</h4>
+                        <span class="badge" style="background: ${data.score > 70 ? 'var(--danger)' : (data.score > 30 ? 'var(--warning)' : 'var(--success)')}; color:white;">Score: ${data.score}</span>
+                    </div>
+                    <ul style="margin-bottom: 16px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+                    <div style="font-size: 0.8125rem; margin-bottom: 20px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;">
+                        <strong>Final URL:</strong> <span style="font-family: monospace; word-break: break-all;">${data.expanded_url}</span>
+                    </div>
+                    <div class="screenshot-container"><img src="/${data.screenshot_path}" style="border-radius:12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);"></div>
+                    ${exfilHtml}
                 `;
             } else if (type === 'domain') {
                 const isWhitelisted = data.whitelisted;
@@ -919,6 +1160,24 @@
                     ${renderDNSInfo(data.intel)}
                 `;
             } else if (type === 'attachment') {
+                let extraInfo = '';
+                if (data.attachment.image_info && Object.keys(data.attachment.image_info).length > 0) {
+                    const info = data.attachment.image_info;
+                    extraInfo = `
+                        <div style="margin-top:16px; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;">
+                            <div style="font-weight:700; font-size:0.75rem; color:var(--primary); text-transform:uppercase; margin-bottom:8px;">🖼️ Image Forensics</div>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; font-size:0.8125rem;">
+                                <div><strong>Format:</strong> ${info.format}</div>
+                                <div><strong>Dimensions:</strong> ${info.size}</div>
+                                <div><strong>Mode:</strong> ${info.mode}</div>
+                                <div style="color: ${info.ocr_active ? 'var(--success)' : 'var(--warning)'};">
+                                    <strong>OCR:</strong> ${info.ocr_active ? '✅ Active' : '⚠️ Unavailable'}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
                 content.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                         <h4 style="margin:0;">File Scan Results</h4>
@@ -926,10 +1185,21 @@
                     </div>
                     <ul style="margin-bottom: 24px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
                     <div class="indicator-item">
+                        <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:6px; font-family:monospace;">Audit Path: ${data.attachment.filename}</div>
                         <strong>Filename:</strong> ${data.attachment.filename}<br>
                         <strong>MD5:</strong> <span style="font-family: monospace;">${data.attachment.md5}</span><br>
                         <strong>VT Detection:</strong> ${data.attachment.vt_stats || 'Not scanned/No hits'}
                     </div>
+                    ${data.attachment.extracted_text ? `
+                        <div style="margin-top:16px;">
+                            <button class="btn btn-outline" style="width:auto; padding:4px 12px; font-size:0.75rem; margin:0;" 
+                                onclick="const c = this.nextElementSibling; c.style.display = c.style.display === 'none' ? 'block' : 'none'; this.innerText = c.style.display === 'none' ? '👁️ Show Parsed Content' : 'Hide Parsed Content'">
+                                👁️ Hide Parsed Content
+                            </button>
+                            <pre style="display:block; margin-top:12px; padding:12px; background:#f1f5f9; border-radius:8px; font-size:0.75rem; white-space:pre-wrap; word-break:break-all; max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; color:#475569;">${data.attachment.extracted_text}</pre>
+                        </div>
+                    ` : ''}
+                    ${extraInfo}
                 `;
             } else if (type === 'ip') {
                 const rep = data.reputation || {};
@@ -1013,73 +1283,36 @@
             const file = fileInput.files[0];
             if (!file) return;
 
-            // Reset UI for new analysis
             const pbContainer = document.getElementById('fullAnalysisProgress');
             pbContainer.style.display = 'block';
-            updateProgress(5, "Initial parsing...");
-
-            ['sidebarVerdictText', 'mainVerdictText'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.innerText = "Analyzing...";
-            });
-            document.getElementById('downloadBtn').disabled = true;
 
             const formData = new FormData();
             formData.append('file', file);
+            formData.append('analysis_mode', activeAnalysisMode);
 
-            try {
-                // Phase 1: Fast Email Analysis
-                updateProgress(20, "Extracting headers & body...");
-                const response = await fetch('/api/analyze/email', { method: 'POST', body: formData });
-                const data = await response.json();
+            // LOGIC BRANCHING BASED ON MODE
+            if (activeAnalysisMode === 'direct') {
+                updateProgress(20, "Direct parsing started...");
+                await runFinalAnalysis(formData);
+            }
+            else if (activeAnalysisMode === 'forensic') {
+                updateProgress(5, "Inspecting container artifacts...");
+                try {
+                    const inspectRes = await fetch('/api/inspect/email', { method: 'POST', body: formData });
+                    if (!inspectRes.ok) throw new Error("Inspection failed");
+                    const inspectData = await inspectRes.json();
 
-                updateProgress(40, "Checking reputation & geolocation...");
-                currentAnalysisData = data;
-                await renderReport(data);
-
-                updateProgress(70, "Performing static code scan...");
-
-                // Phase 2: Async Sandbox Detonations
-                if (data.extracted_urls && data.extracted_urls.length > 0) {
-                    updateProgress(85, "Queuing behavioral detonation...");
-                    const uniqueUrls = [...new Set(data.extracted_urls)].slice(0, 5);
-                    currentAnalysisData.sandbox_results = uniqueUrls.map(url => ({ url: url, status: 'pending', score: 0, reasons: [], redirect_chain: [], screenshot_chain: [] }));
-                    renderSandboxSection(currentAnalysisData.sandbox_results);
-
-                    let finishedCount = 0;
-                    uniqueUrls.map(async (url, idx) => {
-                        try {
-                            const sbRes = await fetch('/api/analyze/url', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ url: url })
-                            });
-                            const result = await sbRes.json();
-                            currentAnalysisData.sandbox_results[idx] = result;
-                            updateSandboxCard(idx, result);
-                            recalculateTotalVerdict();
-                        } catch (err) {
-                            console.error(`Detonation failed for ${url}:`, err);
-                            const errorResult = { url: url, status: 'error', score: 0, reasons: ['Sandbox Failed: Network error'], redirect_chain: [], screenshot_chain: [] };
-                            currentAnalysisData.sandbox_results[idx] = errorResult;
-                            updateSandboxCard(idx, errorResult);
-                        } finally {
-                            finishedCount++;
-                            if (finishedCount === uniqueUrls.length) {
-                                updateProgress(100, "Forensics complete.");
-                                setTimeout(() => pbContainer.style.display = 'none', 3000);
-                            }
-                        }
-                    });
-                } else {
-                    document.getElementById('noSandboxMsg').style.display = 'block';
-                    updateProgress(100, "Forensics complete.");
-                    setTimeout(() => pbContainer.style.display = 'none', 3000);
+                    if (inspectData.attachments && inspectData.attachments.length > 0) {
+                        pbContainer.style.display = 'none';
+                        showAttachmentModal(inspectData);
+                    } else {
+                        updateProgress(20, "No nested artifacts, analyzing directly...");
+                        await runFinalAnalysis(formData);
+                    }
+                } catch (err) {
+                    console.warn("Forensic inspection failed, falling back to direct:", err);
+                    await runFinalAnalysis(formData);
                 }
-                document.getElementById('downloadBtn').disabled = false;
-            } catch (err) {
-                alert("Error: " + err);
-                pbContainer.style.display = 'none';
             }
         }
 
@@ -1487,10 +1720,84 @@
             attDiv.innerHTML = '';
             if (data.attachments?.length) {
                 data.attachments.forEach(att => {
-                    attDiv.innerHTML += `<div class="indicator-item" style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="font-size:0.8125rem;"><strong>${att.filename}</strong><br><small style="color:var(--text-muted); font-family:monospace;">${att.md5}</small></div>
-                        <span class="badge" style="background:${att.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${att.risk}</span>
-                    </div>`;
+                    attDiv.innerHTML += `
+                        <div class="indicator-item">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div style="font-size:0.8125rem;">
+                                    <strong>${att.filename}</strong><br>
+                                    <small style="color:var(--text-muted); font-family:monospace;">${att.md5}</small>
+                                </div>
+                                <span class="badge" style="background:${att.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${att.risk}</span>
+                            </div>
+
+                            ${att.image_info ? `
+                                <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+                                    <span class="badge" style="background:var(--primary); color:white; font-size:0.65rem;">🖼️ ${att.image_info.format}</span>
+                                    <span class="badge" style="background:#f1f5f9; color:var(--text-main); font-size:0.65rem; border:1px solid var(--border);">📏 ${att.image_info.size}</span>
+                                    <span class="badge" style="background:${att.image_info.ocr_active ? '#ecfdf5' : '#fef2f2'}; color:${att.image_info.ocr_active ? '#059669' : '#b91c1c'}; font-size:0.65rem; border:1px solid ${att.image_info.ocr_active ? '#10b981' : '#ef4444'};">
+                                        ${att.image_info.ocr_active ? '✅ OCR Active' : '❌ OCR Unavailable'}
+                                    </span>
+                                </div>
+                            ` : ''}
+
+                            ${att.forensics ? `
+                                <div style="margin-top:10px; border-top:1px dashed var(--border); padding-top:8px;">
+                                    <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:6px;">
+                                        ⚡ DESAS Deep Forensics 
+                                        ${att.forensics.high_entropy ? '<span title="High Entropy (Packed?)" style="cursor:help;">🎲</span>' : ''}
+                                        ${att.forensics.obfuscation ? '<span title="Obfuscation Detected" style="cursor:help;">🎭</span>' : ''}
+                                    </div>
+
+                                    <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">
+                                        ${att.forensics.mitre_techniques && att.forensics.mitre_techniques.length ?
+                                att.forensics.mitre_techniques.map(t => `<span class="badge" style="background:#4c1d95; color:white; font-size:0.65rem;">🛡️ ${t}</span>`).join('') : ''}
+                                        
+                                        ${att.forensics.structural_anomalies && att.forensics.structural_anomalies.length ?
+                                `<span class="badge" style="background:#be123c; color:white; font-size:0.65rem;">🏗️ Malformed Structure</span>` : ''}
+                                         
+                                         ${att.forensics.pdf_flags && att.forensics.pdf_flags.length ?
+                                att.forensics.pdf_flags.map(f => `<span class="badge" style="background:#be185d; color:white; font-size:0.65rem;">📄 ${f}</span>`).join('') : ''}
+                                            
+                                         ${att.forensics.image_flags && att.forensics.image_flags.length ?
+                                att.forensics.image_flags.map(f => `<span class="badge" style="background:#0f766e; color:white; font-size:0.65rem;">🖼️ ${f}</span>`).join('') : ''}
+                                    </div>
+
+                                    ${(att.forensics.auto_exec || att.forensics.obfuscation || att.forensics.staging_logic) ? `
+                                        <div style="background:#fff7ed; border:1px solid #ffedd5; padding:6px; border-radius:4px; margin-bottom:6px;">
+                                            <div style="font-size:0.65rem; color:#c2410c; font-weight:bold; margin-bottom:4px;">BEHAVIORAL INSIGHTS</div>
+                                            <ul style="margin:0; padding-left:16px; font-size:0.7rem; color:#9a3412;">
+                                                ${att.forensics.auto_exec ? '<li>Auto-Execution Logic Identified</li>' : ''}
+                                                ${att.forensics.obfuscation ? '<li>Code Obfuscation / Evasion Techniques</li>' : ''}
+                                                ${att.forensics.staging_logic ? '<li>Payload Staging / Dropper Behavior</li>' : ''}
+                                            </ul>
+                                        </div>
+                                    ` : ''}
+
+                                    ${att.forensics.suspicious_calls && att.forensics.suspicious_calls.length ? `
+                                        <div style="font-size:0.65rem; color:var(--danger); font-family:monospace; background:#fef2f2; padding:4px; border-radius:4px;">
+                                            <strong>Suspicious Calls:</strong> ${att.forensics.suspicious_calls.join(', ')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+
+                            ${att.has_macros ? `
+                                <div style="margin-top:10px; padding:8px; background:#fef2f2; border:1px solid #ef4444; border-radius:6px; color:#b91c1c; font-size:0.75rem; font-weight:700; display:flex; align-items:center; gap:8px;">
+                                    <span>⚠️</span> CRITICAL: Embedded Macros Detected (Active Content)
+                                </div>
+                            ` : ''}
+
+                            ${att.extracted_text ? `
+                                <div style="margin-top:10px;">
+                                    <div style="font-size:0.65rem; color:var(--text-muted); margin-bottom:4px; font-family:monospace;">Audit Path: ${att.filename}</div>
+                                    <button class="btn btn-outline" style="width:auto; padding:2px 8px; font-size:0.65rem; margin:0;" 
+                                        onclick="const c = this.nextElementSibling; c.style.display = c.style.display === 'none' ? 'block' : 'none'; this.innerText = c.style.display === 'none' ? '👁️ Show Parsed Content' : 'Hide Parsed Content'">
+                                        👁️ Hide Parsed Content
+                                    </button>
+                                    <pre style="display:block; margin-top:8px; padding:10px; background:#f1f5f9; border-radius:6px; font-size:0.7rem; white-space:pre-wrap; word-break:break-all; max-height:150px; overflow-y:auto; border:1px solid #e2e8f0; color:#475569;">${att.extracted_text}</pre>
+                                </div>
+                            ` : ''}
+                        </div>`;
                 });
             } else { attDiv.innerHTML = '<div style="color:var(--text-muted); font-size:0.8125rem; font-style:italic;">No attachments found.</div>'; }
 
@@ -1541,10 +1848,28 @@
                 ${isLoading ? `<div style="height:60px; display:flex; align-items:center; justify-content:center; background:#f9fafb; border-radius:8px; border:1px dashed var(--border); color:var(--text-muted); font-size:0.8125rem;">Running behavioral forensics...</div>` : `
                     <div style="display:grid; grid-template-columns:1fr 1.5fr; gap:24px;">
                         <div>
-                            <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Indicators</h4>
+                            <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px;">Forensic Indicators</h4>
                             <ul style="list-style:none; padding:0; margin:0; font-size:0.8125rem;">${sb.reasons.length ? sb.reasons.map(r => `<li style="margin-bottom:4px;">⚠️ ${r}</li>`).join('') : '<li style="color:var(--success);">No flags.</li>'}</ul>
+                            
+                            ${sb.exfiltration_detected ? `
+                                <div style="margin-top:16px; padding:8px; background:#fff5f5; border:1px solid #feb2b2; border-radius:8px;">
+                                    <div style="font-size:0.65rem; font-weight:bold; color:#c53030; margin-bottom:6px;">DATA EXFILTRATION PILLARS</div>
+                                    <div style="display:flex; gap:12px; margin-bottom:8px;">
+                                        <div title="Sensitive Data: ${sb.exfiltration_detected.pillars.pillar_1.summary}">
+                                            <span style="font-size:1.1rem;">${sb.exfiltration_detected.pillars.pillar_1.detected ? '🔑' : '🛡️'}</span>
+                                        </div>
+                                        <div title="Unauthorized Target: ${sb.exfiltration_detected.pillars.pillar_2.summary}">
+                                            <span style="font-size:1.1rem;">${sb.exfiltration_detected.pillars.pillar_2.detected ? '🌐' : '✅'}</span>
+                                        </div>
+                                        <div title="Stealthy Behavior: ${sb.exfiltration_detected.pillars.pillar_3.summary}">
+                                            <span style="font-size:1.1rem;">${sb.exfiltration_detected.pillars.pillar_3.detected ? '🕵️' : '🔔'}</span>
+                                        </div>
+                                    </div>
+                                    <div style="font-size:0.7rem; color:#c53030; font-weight:600;">Verdict: ${sb.exfiltration_detected.verdict}</div>
+                                </div>
+                            ` : ''}
                         </div>
-                        <div style="grid-column:span 2; overflow-x:auto; white-space:nowrap; padding:12px; background:#f9fafb; border-radius:8px; border:1px solid var(--border);">
+                        <div style="grid-column:span 1; overflow-x:auto; white-space:nowrap; padding:12px; background:#f9fafb; border-radius:8px; border:1px solid var(--border);">
                             <div style="display:flex; gap:12px;">${sb.screenshot_chain.length ? sb.screenshot_chain.map(shot => `<div style="flex:0 0 240px; background:white; border-radius:6px; border:1px solid var(--border); overflow:hidden;"><div style="font-size:0.6rem; color:var(--text-muted); background:#f3f4f6; padding:4px 8px; overflow:hidden;">${shot.label}</div><a href="${shot.url}" target="_blank"><img src="/${shot.path}?t=${new Date().getTime()}" style="width:100%;"></a></div>`).join('') : 'No screenshots.'}</div>
                         </div>
                     </div>`}
@@ -1595,10 +1920,6 @@
                 }
             }
 
-            // Update API Quotas if present
-            if (currentAnalysisData.api_quotas) {
-                updateQuotaDisplay(currentAnalysisData.api_quotas);
-            }
         }
 
         async function downloadReport() {
@@ -1652,25 +1973,6 @@
             }
         }
 
-        function updateQuotaDisplay(quotas) {
-            const quotaDiv = document.getElementById('apiQuotaBox');
-            if (!quotaDiv) return;
-            quotaDiv.style.display = 'block';
-
-            let html = '<h3 style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; border-top: 1px solid var(--border); padding-top: 24px;">📡 API Quotas</h3>';
-
-            if (quotas.vt_month_remaining !== undefined) {
-                html += `<div style="font-size: 0.8125rem; margin-bottom: 8px;"><strong>VT Month:</strong> ${quotas.vt_month_remaining} / ${quotas.vt_month_limit || '?'}</div>`;
-            }
-            if (quotas.vt_day_remaining !== undefined) {
-                html += `<div style="font-size: 0.8125rem; margin-bottom: 8px;"><strong>VT Day:</strong> ${quotas.vt_day_remaining}</div>`;
-            }
-            if (quotas.mx_remaining !== undefined) {
-                html += `<div style="font-size: 0.8125rem;"><strong>MxToolbox:</strong> ${quotas.mx_remaining} / ${quotas.mx_limit || '?'}</div>`;
-            }
-
-            quotaDiv.innerHTML = html;
-        }
 
         async function addDomain(domain) {
             if (!confirm(`Add ${domain} to whitelist?`)) return;
@@ -1716,6 +2018,7 @@ Generated by DESAS Forensic Workstation
         const dropZone = document.getElementById('drop-zone');
         const sidebarDrop = document.getElementById('sidebarDropArea');
         const toolkitDrop = document.getElementById('toolkitDropArea');
+        const headerDrop = document.getElementById('headerDropArea');
 
         window.addEventListener('dragenter', e => {
             e.preventDefault();
@@ -1753,11 +2056,17 @@ Generated by DESAS Forensic Workstation
         });
 
         // Specific hover states
-        [sidebarDrop, toolkitDrop].forEach(el => {
+        [sidebarDrop, toolkitDrop, headerDrop].forEach(el => {
             if (!el) return;
             el.addEventListener('dragover', () => el.classList.add('dragover'));
             el.addEventListener('dragleave', () => el.classList.remove('dragover'));
-            el.addEventListener('drop', () => el.classList.remove('dragover'));
+            el.addEventListener('drop', (e) => {
+                el.classList.remove('dragover');
+                if (el === headerDrop) {
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) loadHeaderFile(files[0]);
+                }
+            });
         });
     </script>
 
@@ -1840,6 +2149,200 @@ Generated by DESAS Forensic Workstation
                 }
             } catch (e) {
                 alert("Network error: " + e.message);
+            }
+        }
+    </script>
+
+    <!-- Attachment Selection Modal -->
+    <div id="attachmentModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 700px;">
+            <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:24px;">
+                <div>
+                    <h2 style="margin:0;">📦 Attachment Classifier</h2>
+                    <p style="font-size: 0.8125rem; color: var(--text-muted); margin-top:4px;">Select the artifacts you
+                        wish to analyze.</p>
+                </div>
+                <div id="fileTypeBadge" class="badge"
+                    style="background:var(--primary); color:white; padding:4px 12px; font-size:0.75rem;">.MSG Container
+                </div>
+            </div>
+
+            <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Filename</th>
+                            <th style="width: 120px;">Size</th>
+                            <th style="width: 200px; text-align: center;">Role Assignment</th>
+                        </tr>
+                    </thead>
+                    <tbody id="attachmentTableBody">
+                        <!-- Dynamic Content -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div
+                style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); display: flex; gap: 12px;">
+                <button class="btn btn-primary" onclick="confirmAttachmentSelection()">
+                    <span>🚀</span> Analyze Selected
+                </button>
+                <button class="btn btn-outline" style="margin:0; flex:1;" onclick="hideAttachmentModal()">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = null;
+        let selectedTarget = null;
+        let selectedHeader = null;
+
+        function showAttachmentModal(data) {
+            currentSessionId = data.session_id;
+            const body = document.getElementById('attachmentTableBody');
+            body.innerHTML = '';
+
+            selectedTarget = null;
+            selectedHeader = null;
+
+            data.attachments.forEach((att, idx) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="font-weight:600; font-size:0.875rem;">${att.filename}</td>
+                    <td>${(att.size / 1024).toFixed(1)} KB</td>
+                    <td>
+                        <div style="display: flex; background: #f1f5f9; border-radius: 6px; padding: 2px; gap: 2px;">
+                            <button class="role-btn" onclick="setRole('${att.filename}', 'target', this)" style="flex:1; border:none; padding:4px; font-size:0.75rem; border-radius:4px; cursor:pointer; background:transparent; font-weight:600;">Target</button>
+                            <button class="role-btn" onclick="setRole('${att.filename}', 'header', this)" style="flex:1; border:none; padding:4px; font-size:0.75rem; border-radius:4px; cursor:pointer; background:transparent; font-weight:600;">Header</button>
+                            <button class="role-btn active" onclick="setRole('${att.filename}', 'none', this)" style="flex:1; border:none; padding:4px; font-size:0.75rem; border-radius:4px; cursor:pointer; background:var(--card-bg); box-shadow:0 1px 2px rgba(0,0,0,0.1); font-weight:600;">None</button>
+                        </div>
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+
+            document.getElementById('attachmentModal').style.display = 'flex';
+        }
+
+        function setRole(filename, role, btn) {
+            // Reset siblings in this row
+            const row = btn.closest('div');
+            row.querySelectorAll('.role-btn').forEach(b => {
+                b.classList.remove('active');
+                b.style.background = 'transparent';
+                b.style.boxShadow = 'none';
+            });
+
+            // Set this button active
+            btn.classList.add('active');
+            btn.style.background = 'var(--card-bg)';
+            btn.style.boxShadow = '0 1px 2px rgba(0,0,0,0.1)';
+
+            // Global Selection Logic (only one target/header allowed)
+            if (role === 'target') {
+                // Clear previous target selections in other rows
+                const allRows = document.getElementById('attachmentTableBody').querySelectorAll('tr');
+                allRows.forEach(r => {
+                    const tBtn = r.querySelector('button[onclick*="\'target\'"]');
+                    if (tBtn && tBtn !== btn && tBtn.classList.contains('active')) {
+                        // Click "None" in that row
+                        r.querySelector('button[onclick*="\'none\'"]').click();
+                    }
+                });
+                selectedTarget = filename;
+            } else if (role === 'header') {
+                // Clear previous header selections in other rows
+                const allRows = document.getElementById('attachmentTableBody').querySelectorAll('tr');
+                allRows.forEach(r => {
+                    const hBtn = r.querySelector('button[onclick*="\'header\'"]');
+                    if (hBtn && hBtn !== btn && hBtn.classList.contains('active')) {
+                        r.querySelector('button[onclick*="\'none\'"]').click();
+                    }
+                });
+                selectedHeader = filename;
+            } else {
+                if (selectedTarget === filename) selectedTarget = null;
+                if (selectedHeader === filename) selectedHeader = null;
+            }
+        }
+
+        function hideAttachmentModal() {
+            document.getElementById('attachmentModal').style.display = 'none';
+        }
+
+        async function confirmAttachmentSelection() {
+            if (!selectedTarget) {
+                alert("Please select a Target file to analyze.");
+                return;
+            }
+            hideAttachmentModal();
+
+            // Proceed to final analysis
+            const pbContainer = document.getElementById('fullAnalysisProgress');
+            pbContainer.style.display = 'block';
+            updateProgress(10, "Initializing deep forensics...");
+
+            const formData = new FormData();
+            formData.append('session_id', currentSessionId);
+            formData.append('analysis_mode', 'attachment');
+            formData.append('target_attachment', selectedTarget);
+            if (selectedHeader) formData.append('header_attachment', selectedHeader);
+
+            await runFinalAnalysis(formData);
+        }
+
+        async function runFinalAnalysis(formData) {
+            const pbContainer = document.getElementById('fullAnalysisProgress');
+            try {
+                updateProgress(30, "Analyzing headers & indicators...");
+                const response = await fetch('/api/analyze/email', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                updateProgress(50, "Scanning cross-linked reputation...");
+                currentAnalysisData = data;
+                await renderReport(data);
+
+                if (data.extracted_urls && data.extracted_urls.length > 0) {
+                    updateProgress(80, "Queuing sandbox detonations...");
+                    const uniqueUrls = [...new Set(data.extracted_urls)].slice(0, 5);
+                    currentAnalysisData.sandbox_results = uniqueUrls.map(url => ({ url: url, status: 'pending', score: 0, reasons: [], redirect_chain: [], screenshot_chain: [] }));
+                    renderSandboxSection(currentAnalysisData.sandbox_results);
+
+                    let finishedCount = 0;
+                    uniqueUrls.map(async (url, idx) => {
+                        try {
+                            const sbRes = await fetch('/api/analyze/url', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ url: url })
+                            });
+                            const result = await sbRes.json();
+                            currentAnalysisData.sandbox_results[idx] = result;
+                            updateSandboxCard(idx, result);
+                            recalculateTotalVerdict();
+                        } catch (err) {
+                            const errorResult = { url: url, status: 'error', score: 0, reasons: ['Sandbox Failed'], redirect_chain: [], screenshot_chain: [] };
+                            currentAnalysisData.sandbox_results[idx] = errorResult;
+                            updateSandboxCard(idx, errorResult);
+                        } finally {
+                            finishedCount++;
+                            if (finishedCount === uniqueUrls.length) {
+                                updateProgress(100, "Forensics complete.");
+                                setTimeout(() => pbContainer.style.display = 'none', 3000);
+                            }
+                        }
+                    });
+                } else {
+                    document.getElementById('noSandboxMsg').style.display = 'block';
+                    updateProgress(100, "Forensics complete.");
+                    setTimeout(() => pbContainer.style.display = 'none', 3000);
+                }
+                document.getElementById('downloadBtn').disabled = false;
+            } catch (err) {
+                alert("Deep analysis failed: " + err);
+                pbContainer.style.display = 'none';
             }
         }
     </script>

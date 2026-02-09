@@ -36,6 +36,7 @@ a = Analysis(
         'reportlab.pdfgen',
         'reportlab.lib',
         'reportlab.platypus',
+        'openpyxl'
     ],
     hookspath=[],
     hooksconfig={},

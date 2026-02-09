@@ -96,8 +96,8 @@ echo ""
 # ============================================================================
 echo "[6/7] Building Python backend..."
 
-# Clean previous builds
-rm -rf build dist
+# Clean previous builds and temporary samples
+rm -rf build dist release system_verify advanced_samples verification_samples
 
 # Build backend for macOS
 pyinstaller build_assets/backend.spec --clean --noconfirm
