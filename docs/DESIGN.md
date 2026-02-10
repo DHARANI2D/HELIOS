@@ -10,16 +10,19 @@ DESAS follows a layered architecture, optimized for isolation and analyst-driven
 graph TD
     A[Analyst Interface - Desktop UI] --> B[Analysis Backend - FastAPI]
     B --> C[Sandbox Execution - Playwright/Chromium]
-    B --> D[Scoring & Reporting Engine]
+    B --> D[Forensic Analysis Layer - Signatures/Heuristics]
+    B --> E[Scoring & Reporting Engine]
     C --> B
     D --> B
-    B --> E[.eml Storage/Evidence preservation]
+    E --> B
+    B --> F[.eml Storage/Evidence preservation]
 ```
 
 ### 2.1 Component Description
 - **Analyst Interface**: A local web interface (FastAPI/JS) for file upload and result visualization.
 - **Analysis Backend**: Orchestrates the analysis flow, manages the sandbox lifecycle, and stores results.
-- **Sandbox Execution Layer**: Uses Playwright with Headless Chromium to navigate URLs extracted from emails, monitoring DOM mutations and network traffic.
+- **Sandbox Execution Layer**: Uses Playwright with Headless Chromium to navigate URLs extracted from emails.
+- **Forensic Analysis Layer**: Perforams deep inspection for Polyglots, OLE anomalies, XLM macros, and appended payloads.
 - **Scoring & Reporting Engine**: A rule-based engine that maps observed behaviors to risk scores and MITRE ATT&CK techniques.
 
 ## 3. Core Processing Logic

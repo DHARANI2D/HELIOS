@@ -6,18 +6,21 @@
 ![Security](https://img.shields.io/badge/Security-Isolated--Sandbox-red)
 ![Platform](https://img.shields.io/badge/Platform-Electron--Desktop-orange)
 ![Reports](https://img.shields.io/badge/Reports-Professional%20PDF-blue)
+![Forensics](https://img.shields.io/badge/Forensics-Advanced-purple)
 
-*
+DESAS is a production-grade **Dynamic Email Sandbox Analysis System** designed for high-fidelity forensic investigation of suspicious emails and attachments. It transforms complex phishing attempts into actionable intelligence through automated sandbox detonation, deep file forensics, and multi-format content extraction.
 
+---
 
 ## 🖥 Desktop Application
 
 DESAS is built as a robust **Electron-based Desktop Application** for seamless analyst workflows:
 
-- ✅ **Integrated Backend**: Automatically spawns Python FastAPI analysis engine on startup
-- ✅ **Cross-Platform**: Optimized for Windows and macOS environments
-- ✅ **Professional Branding**: Custom shield-themed icon and premium UI design
-- ✅ **Offline Capable**: Core analysis works without internet (except external API calls)
+- ✅ **Integrated Backend**: Automatically spawns Python FastAPI analysis engine on startup.
+- ✅ **Cross-Platform**: Optimized for Windows and macOS (Apple Silicon & Intel).
+- ✅ **Advanced Forensics**: Real-time detection of polyglots, appended payloads, and XLM macros.
+- ✅ **Multi-Format Extraction**: Automatic OCR and text parsing for PDF, DOCX, and Excel.
+- ✅ **MITRE ATT&CK Integration**: Automatic mapping of threats to industry-standard techniques.
 
 ---
 
@@ -25,23 +28,25 @@ DESAS is built as a robust **Electron-based Desktop Application** for seamless a
 
 ### Main Analysis Interface
 ![Main Analysis](./screenshots/main_analysis.png)
-*Comprehensive email analysis with header forensics, content analysis, and sandbox detonation*
+*Comprehensive email analysis with header forensics, content analysis, and sandbox detonation.*
 
 ### Forensic Toolkit
 ![Forensic Toolkit](./screenshots/forensic_toolkit.png)
-*Standalone tools for rapid domain intelligence, URL sandbox, and attachment analysis*
+*Standalone tools for rapid domain intelligence, URL sandbox, and deep attachment analysis.*
 
-### Sandbox Detonation
-![Sandbox Detonation](./screenshots/sandbox_detonation.png)
-*Real-time URL detonation with screenshot evidence and behavioral indicators*
+---
 
-### Settings & Whitelist Management
-![Settings](./screenshots/settings_whitelist.png)
-*API configuration and dynamic domain whitelisting*
+## 🛡 Advanced Forensic Capabilities
 
-### Malicious Email Detection
-![Malicious Detection](./screenshots/malicious_detection.png)
-*Advanced threat detection with SPF/DKIM/DMARC validation and routing hop analysis*
+The DESAS engine identifies sophisticated evasion techniques used by modern threat actors:
+
+| Capability | Description | MITRE Mapping |
+|:---|:---|:---|
+| **Polyglot Detection** | Detects files masquerading as multiple formats (e.g., PDF starting with a PE signature). | T1027.001 |
+| **Appended Payloads** | Identifies malicious scripts or executables hidden after valid image EOF markers. | T1027.001 |
+| **OLE Stream Audit** | Deep scans OLE containers for `MBDG`, `Package`, and Equation Editor exploits. | T1204.002 |
+| **XLM Macro Hunting** | Detects Legacy Excel 4.0 macros (`EXEC`, `REGISTER`) used for stealth. | T1059 |
+| **Image Forensics** | Heuristic entropy checks and metadata analysis for steganography detection. | T1497 |
 
 ---
 
@@ -55,39 +60,24 @@ DESAS/
 │   │   ├── msg_parser.py     # Outlook .msg parser
 │   │   ├── headers.py        # SPF/DKIM/DMARC analysis
 │   │   ├── body.py           # URL extraction & VirusTotal checks
-│   │   ├── attachments.py    # File type detection & risk scoring
-│   │   ├── mxtoolbox.py      # MxToolbox API integration
-│   │   └── reputation.py     # IP intelligence (IP-API)
+│   │   ├── attachments.py    # Main attachment analysis pipeline
+│   │   ├── forensics.py      # [NEW] Advanced signature & signal detection
+│   │   ├── url_extractor.py  # OCR and deep URL scraping
+│   │   └── mxtoolbox.py      # MxToolbox API integration
 │   ├── core/                 # Configuration & Data Models
-│   │   ├── schemas.py        # Pydantic models for API responses
-│   │   ├── config.py         # Environment & API key management
-│   │   ├── whitelist_manager.py  # Dynamic whitelist operations
-│   │   └── scoring.py        # Verdict calculation logic
+│   │   ├── config.py         # Environment & API management
+│   │   └── scoring.py        # Verdict calculation logic (MITRE-aligned)
 │   ├── sandbox/              # Detonation Engine
-│   │   └── browser.py        # Playwright-based URL sandbox
+│   │   └── browser.py        # Playwright browser automation
 │   ├── api/                  # FastAPI Endpoints
-│   │   └── endpoints.py      # Analysis & reporting routes
-│   ├── templates/            # Electron UI (HTML/CSS/JS)
-│   │   ├── index.html        # Main analysis interface
-│   │   └── settings.html     # Configuration panel
-│   └── static/               # Generated Evidence (screenshots, hops)
-├── docs/                     # Documentation Suite
-│   ├── DESIGN.md             # Technical architecture
-│   ├── SUMMARY.md            # Strategic overview
-│   ├── WALKTHROUGH.md        # Demo scenario
-│   ├── ARCH_REVIEW.md        # Review preparation
-│   └── WINDOWS_BUILD_GUIDE.md # Build instructions
-├── samples/                  # Test Email Samples
-├── build_assets/             # Build Configuration
-│   ├── backend.spec          # PyInstaller spec
-│   └── run_server.py         # Standalone server launcher
-├── icon.png                  # Application Icon
+│   │   └── endpoints.py      # Analysis, reporting, and toolkit routes
+│   └── templates/            # Electron UI (HTML/CSS/JS)
+├── build_assets/             # Build Configuration & Spec Files
+├── docs/                     # Documentation Suite (Design, Guides)
+├── samples/                  # Curated Forensic Test Samples
 ├── main.js                   # Electron Main Process
-├── package.json              # Node.js Dependencies & Build Config
-├── requirements.txt          # Python Dependencies
-├── .env.example              # Environment Template
-├── .gitignore                # Git Exclusions
-└── README.md                 # This File
+├── package.json              # App configuration & dependencies
+└── requirements.txt          # Backend dependencies (openpyxl, pdfminer, etc.)
 ```
 
 ---
@@ -96,90 +86,73 @@ DESAS/
 
 | Layer | Technology | Purpose |
 |-------|------------|---------|
-| **Frontend** | Electron + Vanilla CSS/JS | High-performance desktop UI |
-| **Backend** | FastAPI (Python 3.10+) | RESTful analysis API |
-| **Detonation** | Playwright (Chromium) | Headless browser sandbox |
-| **Reporting** | ReportLab | Professional PDF generation |
-| **Intelligence** | VirusTotal API, MxToolbox API, IP-API | Threat reputation & validation |
-| **Parsing** | `extract_msg`, `email` (stdlib) | Email format support (.eml, .msg) |
-| **Packaging** | PyInstaller, Electron-Builder | Standalone executables |
+| **Frontend** | Electron + Vanilla CSS/JS | High-performance, low-dependency desktop UI |
+| **Backend** | FastAPI (Python 3.12+) | Async RESTful analysis engine |
+| **Detonation** | Playwright (Chromium) | Isolated browser sandbox for URL inspection |
+| **OCR** | Tesseract OCR | Visual text extraction from phishing screenshots |
+| **Extraction** | `openpyxl`, `python-docx`, `pdfminer.six` | Multi-format office document parsing |
+| **Intelligence** | VirusTotal, MxToolbox, IP-API | Global threat reputation & DNS validation |
+| **Forensics** | `olefile`, `hashlib`, Custom Heuristics | Deep object analysis and polyglot detection |
 
 ---
 
-## � Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
-- **Python 3.10+** with pip
-- **Node.js 18+** with npm
-- **Playwright** browsers installed
+- **Python 3.12+**
+- **Node.js 20+**
+- **Tesseract OCR**: Required for image text extraction (`brew install tesseract` on Mac).
+- **Playwright**: Installed via `playwright install chromium`.
 
 ### Installation
 
-1. **Clone the repository**
+1. **Clone and Install**
    ```bash
    git clone <repository-url>
    cd DESAS
-   ```
-
-2. **Install Python dependencies**
-   ```bash
    pip install -r requirements.txt
-   playwright install chromium
-   ```
-
-3. **Install Node.js dependencies**
-   ```bash
    npm install
    ```
 
-4. **Configure API keys**
+2. **Configure Environment**
    ```bash
    cp .env.example .env
-   # Edit .env and add your VirusTotal and MxToolbox API keys
+   # Add your API keys (VT_KEY, MX_KEY, etc.)
    ```
 
-5. **Run the application**
+3. **Run for Development**
    ```bash
    npm start
    ```
 
----
-
-## 📖 Documentation
-
-| Document | Audience | Description |
-|----------|----------|-------------|
-| [**DESIGN.md**](./docs/DESIGN.md) | Security Architects | Technical architecture, component diagrams, and isolation principles |
-| [**SUMMARY.md**](./docs/SUMMARY.md) | SOC Managers | High-level value proposition and strategic fit |
-| [**WALKTHROUGH.md**](./docs/WALKTHROUGH.md) | Analysts | Step-by-step forensic investigation demo |
-| [**WINDOWS_BUILD_GUIDE.md**](./docs/WINDOWS_BUILD_GUIDE.md) | Developers | Instructions for building Windows `.exe` installer |
-| [**ARCH_REVIEW.md**](./docs/ARCH_REVIEW.md) | Review Panels | Preparation for technical reviews and Q&A |
+4. **Build Production DMG/EXE**
+   ```bash
+   # macOS
+   ./build_macos.sh
+   
+   # Windows
+   build_windows.bat
+   ```
 
 ---
 
 ## 🛡 Security & Isolation
 
-DESAS is designed to run in a **dedicated, isolated environment**:
-
-- ✅ **No Internal Network Access**: Prevents lateral movement to corporate infrastructure
-- ✅ **Controlled Egress**: Monitored internet access for detonation and API calls only
-- ✅ **Disposable Contexts**: Every sandbox session is ephemeral to prevent cross-contamination
-- ✅ **API Key Protection**: Sensitive credentials stored in `.env` (excluded from version control)
-
----
-
-## 🎯 Use Cases
-
-1. **Phishing Investigation**: Analyze suspicious emails with automated header validation and URL detonation
-2. **Incident Response**: Generate forensic PDF reports with visual evidence for legal/compliance teams
-3. **Threat Hunting**: Bulk domain/URL reputation checks using the Forensic Toolkit
-4. **Security Awareness**: Demonstrate real-world phishing techniques in a safe environment
+DESAS follows the "Clean Room" analysis principle:
+- ✅ **Ephemeral Sandboxes**: Browser contexts are wiped after every detonation.
+- ✅ **Strict Egress Control**: Intelligence API calls are the only permitted outbound traffic.
+- ✅ **No Local DB**: Forensic data is kept in-memory or exported as PDF, reducing local footprint.
+- ✅ **Process Isolation**: The backend server runs as a separate process from the UI for stability.
 
 ---
 
-## 📝 License
+## 📖 Documentation Suite
 
-This project is proprietary software developed for SOC operations.
+- [**USER_GUIDE.md**](./docs/USER_GUIDE.md): Comprehensive analyst guide for all app features.
+- [**DESIGN.md**](./docs/DESIGN.md): Technical architecture and data flow.
+- [**SUMMARY.md**](./docs/SUMMARY.md): Strategic value for SOC managers.
+- [**WALKTHROUGH.md**](./docs/WALKTHROUGH.md): Step-by-step forensic investigation guide.
+- [**WINDOWS_BUILD_GUIDE.md**](./docs/WINDOWS_BUILD_GUIDE.md): Detailed Windows packaging instructions.
 
 ---
 

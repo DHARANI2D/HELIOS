@@ -28,7 +28,7 @@ function createMenu() {
                     click: () => {
                         if (mainWindow) {
                             mainWindow.webContents.executeJavaScript(`
-                                document.querySelector('a[href="settings.html"]')?.click();
+                                window.location.href = '/settings';
                             `);
                         }
                     }
@@ -64,7 +64,7 @@ function createMenu() {
                     click: () => {
                         if (mainWindow) {
                             mainWindow.webContents.executeJavaScript(`
-                                document.querySelector('.tab-btn[data-tab="fullAnalysis"]')?.click();
+                                document.getElementById('navAnalysis')?.click();
                             `);
                         }
                     }
@@ -75,7 +75,7 @@ function createMenu() {
                     click: () => {
                         if (mainWindow) {
                             mainWindow.webContents.executeJavaScript(`
-                                document.querySelector('.tab-btn[data-tab="forensicToolkit"]')?.click();
+                                document.getElementById('navToolkit')?.click();
                             `);
                         }
                     }

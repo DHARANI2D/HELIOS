@@ -976,11 +976,7 @@
                 <h3><span>🛡️ IP Intelligence</span></h3>
                 <p>Check reputation on AbuseIPDB.</p>
                 <input type="text" id="standaloneIpInput" class="standalone-input" placeholder="1.2.3.4">
-                <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-primary" style="flex:1;" onclick="analyzeStandalone('ip')">Check IP</button>
-                    <button class="btn btn-outline" style="flex:1; margin:0;"
-                        onclick="showReportModal()">Report</button>
-                </div>
+                <button class="btn btn-primary" onclick="analyzeStandalone('ip')">Check IP</button>
             </div>
 
             <div id="toolkitResults" class="card" style="grid-column: 1 / -1; display: none; margin-top: 20px;">
@@ -1002,7 +998,20 @@
     </div>
 
     <script>
+        // Global Error Boundary
+        window.onerror = function (message, source, lineno, colno, error) {
+            console.error('DESAS JS Error:', message, 'at', source, ':', lineno, ':', colno);
+            // If the screen is blank, we can at least show a toast if possible
+            const errDiv = document.createElement('div');
+            errDiv.style = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background: #fee2e2; color: #991b1b; padding: 12px 24px; border-radius: 8px; border: 1px solid #fecaca; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 99999; font-weight: bold;';
+            errDiv.innerText = '⚠️ Frontend Error: ' + message;
+            document.body.appendChild(errDiv);
+            return false;
+        };
+
         let currentAnalysisData = null;
+
+
 
         function showSection(section) {
             if (section === 'analysis') {
@@ -1152,7 +1161,12 @@
             } else if (type === 'domain') {
                 const isWhitelisted = data.whitelisted;
                 content.innerHTML = `
-                    <h4 style="margin:0 0 24px 0;">Domain Intelligence: ${data.domain} ${isWhitelisted ? '<span class="badge" style="background:#10b981; color:white; vertical-align:middle; margin-left:8px;">Whitelisted</span>' : ''}</h4>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                        <h4 style="margin:0;">Domain Intelligence: ${data.domain} ${isWhitelisted ? '<span class="badge" style="background:#10b981; color:white; vertical-align:middle; margin-left:8px;">Whitelisted</span>' : ''}</h4>
+                        <a href="https://www.virustotal.com/gui/domain/${data.domain}/detection" target="_blank" class="btn btn-outline" style="width:auto; margin:0; padding:4px 12px; font-size:0.75rem; text-decoration:none;">
+                            <span>🌐</span> View on VirusTotal
+                        </a>
+                    </div>
                     <div class="indicator-item" style="background: ${isWhitelisted ? '#f0fdf4' : (data.score > 0 ? '#fef2f2' : '#f0fdf4')}">
                         <strong>Score: ${data.score}</strong> - ${data.reason || 'No malicious indicators found'}
                         <div style="font-size: 0.875rem; color: var(--text-muted); margin-top: 4px;">Age: ${data.age_days || 'Unknown'} days</div>
@@ -1181,7 +1195,12 @@
                 content.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                         <h4 style="margin:0;">File Scan Results</h4>
-                        <span class="badge" style="background: ${data.attachment.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${data.attachment.risk}</span>
+                        <div style="display:flex; gap:8px;">
+                            <a href="https://www.virustotal.com/gui/file/${data.attachment.md5}/detection" target="_blank" class="btn btn-outline" style="width:auto; margin:0; padding:4px 12px; font-size:0.75rem; text-decoration:none;">
+                                <span>🛡️</span> View on VirusTotal
+                            </a>
+                            <span class="badge" style="background: ${data.attachment.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${data.attachment.risk}</span>
+                        </div>
                     </div>
                     <ul style="margin-bottom: 24px;">${data.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
                     <div class="indicator-item">
@@ -1209,11 +1228,17 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                         <h4 style="margin:0;">AbuseIPDB Intelligence: ${ip}</h4>
                         <div style="display:flex; gap:8px; align-items:center;">
+                            <a href="https://www.virustotal.com/gui/ip-address/${ip}/detection" target="_blank" class="btn btn-outline" style="width: auto; margin: 0; padding: 6px 12px; font-size: 0.75rem; text-decoration:none;">
+                                <span>🌐</span> VirusTotal
+                            </a>
+                            <a href="https://www.abuseipdb.com/check/${ip}" target="_blank" class="btn btn-outline" style="width: auto; margin: 0; padding: 6px 12px; font-size: 0.75rem; text-decoration:none;">
+                                <span>🛡️</span> AbuseIPDB
+                            </a>
                             <button class="btn btn-outline" style="width: auto; margin: 0; padding: 6px 12px; font-size: 0.75rem;" 
                                 onclick="copyToClipboard('IP: ${ip}\\nAbuse Score: ${rep.abuse_score}%\\nISP: ${rep.isp}\\nCountry: ${rep.country || data.geo?.country}')">
-                                <span>📋</span> Copy Intel
+                                <span>📋</span> Copy
                             </button>
-                            <span class="badge" style="background: ${scoreColor}; color:white;">Abuse Score: ${rep.abuse_score || 0}%</span>
+                            <span class="badge" style="background: ${scoreColor}; color:white;">${rep.abuse_score || 0}%</span>
                         </div>
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px;">
