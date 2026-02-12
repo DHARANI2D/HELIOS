@@ -1,8 +1,9 @@
 import json
 import os
 from app.core.config import settings
+from app.core.settings_manager import DATA_DIR
 
-WHITELIST_FILE = "whitelist.json"
+WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist.json")
 
 def get_whitelist() -> list[str]:
     """

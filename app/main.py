@@ -15,9 +15,12 @@ def get_base_path():
         return sys._MEIPASS
     else:
         # Running in normal Python environment
+        # Move up two levels from app/main.py to reach project root
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 BASE_PATH = get_base_path()
+print(f"DEBUG: BASE_PATH: {BASE_PATH}")
+print(f"DEBUG: sys.frozen: {getattr(sys, 'frozen', False)}")
 
 app = FastAPI(title="Dynamic Email Sandbox Analysis System (DESAS)")
 
@@ -37,10 +40,30 @@ async def log_requests(request: Request, call_next):
     return response
 
 # Mount Static Files
-app.mount("/static", StaticFiles(directory=os.path.join(BASE_PATH, "app", "static")), name="static")
+static_dir = os.path.join(BASE_PATH, "app", "static")
+if not os.path.exists(static_dir):
+    # Fallback for different build structures
+    static_dir = os.path.join(BASE_PATH, "static")
+    
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    print(f"DEBUG: Mounted static files from {static_dir}")
+else:
+    print(f"ERROR: Static directory not found: {static_dir}")
 
 # Templates
-templates = Jinja2Templates(directory=os.path.join(BASE_PATH, "app", "templates"))
+template_dir = os.path.join(BASE_PATH, "app", "templates")
+if not os.path.exists(template_dir):
+    # Fallback for different build structures
+    template_dir = os.path.join(BASE_PATH, "templates")
+
+if os.path.exists(template_dir):
+    templates = Jinja2Templates(directory=template_dir)
+    print(f"DEBUG: Loaded templates from {template_dir}")
+else:
+    # Final fallback to current directory
+    templates = Jinja2Templates(directory="templates")
+    print(f"WARNING: Template directory not found, using 'templates' fallback")
 
 # Include API Router
 app.include_router(api_router, prefix="/api")

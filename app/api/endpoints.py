@@ -30,12 +30,11 @@ async def inspect_email_attachments(file: UploadFile = File(...)):
     Used for the 'Attachment Mode' interactive selection.
     SAVES content to a temp server-side directory for fidelity.
     """
-    import uuid
-    import os
-    import shutil
+    import tempfile
     
     session_id = str(uuid.uuid4())
-    temp_dir = f"/tmp/desas_sessions/{session_id}"
+    temp_root = os.path.join(tempfile.gettempdir(), "desas_sessions")
+    temp_dir = os.path.join(temp_root, session_id)
     os.makedirs(temp_dir, exist_ok=True)
     
     try:
@@ -105,7 +104,9 @@ async def analyze_email_api(
         
         if session_id and (analysis_mode == "attachment" or analysis_mode == "proofpoint" or analysis_mode == "forensic"):
             # LOAD FROM TEMP DIR
-            temp_dir = f"/tmp/desas_sessions/{session_id}"
+            import tempfile
+            temp_root = os.path.join(tempfile.gettempdir(), "desas_sessions")
+            temp_dir = os.path.join(temp_root, session_id)
             if not os.path.exists(temp_dir):
                 raise HTTPException(status_code=400, detail="Session expired or invalid")
                 

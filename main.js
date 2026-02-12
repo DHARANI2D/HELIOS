@@ -327,30 +327,40 @@ function startPython() {
     let args;
 
     if (isPackaged) {
-        // In packaged mode, backend_server is in extraResources/dist
+        // In packaged mode, backend_server is in extraResources
         const executableName = process.platform === 'win32' ? 'backend_server.exe' : 'backend_server';
-        backendPath = path.join(process.resourcesPath, 'dist', executableName);
-        args = [];
 
-        // Verify the backend executable exists
+        // Define possible relative paths for the backend in resources
+        const possiblePaths = [
+            path.join(process.resourcesPath, executableName),
+            path.join(process.resourcesPath, 'dist', executableName),
+            path.join(process.resourcesPath, 'app', 'dist', executableName),
+            path.join(app.getAppPath(), '..', executableName), // For portable app structures
+            path.join(app.getAppPath(), '..', 'dist', executableName)
+        ];
+
         const fs = require('fs');
-        if (!fs.existsSync(backendPath)) {
-            const errorMsg = `ERROR: Backend executable not found at: ${backendPath}\nResources path: ${process.resourcesPath}`;
-            console.error(errorMsg);
-            console.error(`Listing resources directory:`);
-            try {
-                const files = fs.readdirSync(process.resourcesPath);
-                console.error(files.join('\n'));
-            } catch (err) {
-                console.error(`Failed to list directory: ${err.message}`);
+        backendPath = null;
+
+        console.log(`Checking possible backend locations:`);
+        for (const p of possiblePaths) {
+            console.log(` - Checking ${p}`);
+            if (fs.existsSync(p)) {
+                backendPath = p;
+                console.log(`Found backend at: ${p}`);
+                break;
             }
+        }
+
+        if (!backendPath) {
+            const errorMsg = `ERROR: Backend executable not found.\nSearched paths:\n${possiblePaths.join('\n')}\n\nResources path: ${process.resourcesPath}\nApp path: ${app.getAppPath()}`;
+            console.error(errorMsg);
 
             // Show alert to user
             const { dialog } = require('electron');
             dialog.showErrorBox('Backend Not Found', errorMsg + '\n\nThe application cannot start without the backend server.');
-        } else {
-            console.log(`Backend executable found at: ${backendPath}`);
         }
+        args = [];
     } else {
         // Development mode
         backendPath = 'uvicorn';

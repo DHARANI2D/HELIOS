@@ -2,7 +2,21 @@ import json
 import os
 from pydantic import BaseModel
 
-SETTINGS_FILE = "settings.json"
+def get_data_dir():
+    """Returns a platform-specific directory for application data."""
+    if os.name == 'nt': # Windows
+        base_dir = os.environ.get('APPDATA')
+    else: # macOS / Linux
+        base_dir = os.path.expanduser('~/Library/Application Support')
+        if not os.path.exists(base_dir):
+            base_dir = os.path.expanduser('~/.local/share')
+            
+    data_dir = os.path.join(base_dir, "DESAS")
+    os.makedirs(data_dir, exist_ok=True)
+    return data_dir
+
+DATA_DIR = get_data_dir()
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 class AppSettings(BaseModel):
     VIRUSTOTAL_API_KEY: str = ""
