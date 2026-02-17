@@ -66,3 +66,49 @@ def remove_from_whitelist(domain: str) -> list[str]:
             print(f"Error saving whitelist: {e}")
             
     return current
+
+def export_whitelist_to_excel(file_path: str):
+    """Exports the current whitelist to an Excel file."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Whitelist"
+    ws.append(["Domain"])
+    
+    current = get_whitelist()
+    for domain in current:
+        ws.append([domain])
+    
+    wb.save(file_path)
+    return True
+
+def import_whitelist_from_excel(file_path: str) -> list[str]:
+    """Imports domains from an Excel file into the whitelist. Skips duplicates."""
+    import openpyxl
+    if not os.path.exists(file_path):
+        return get_whitelist()
+        
+    wb = openpyxl.load_workbook(file_path)
+    ws = wb.active
+    
+    new_domains = []
+    # Assume first column has domains, skip header if it says 'Domain'
+    first_row = True
+    for row in ws.iter_rows(values_only=True):
+        if first_row and row[0] and str(row[0]).lower() == "domain":
+            first_row = False
+            continue
+        if row[0]:
+            new_domains.append(str(row[0]).lower().strip())
+    
+    current = set(get_whitelist())
+    current.update(new_domains)
+    
+    updated_list = sorted(list(current))
+    try:
+        with open(WHITELIST_FILE, 'w') as f:
+            json.dump(updated_list, f, indent=2)
+    except Exception as e:
+        print(f"Error saving imported whitelist: {e}")
+        
+    return updated_list

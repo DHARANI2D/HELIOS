@@ -6,13 +6,13 @@ from datetime import datetime
 from app.analyzer.utils import decode_proofpoint_url
 from app.analyzer.html_intelligence import analyze_html_intelligence
 
-async def check_url_intel(url: str, is_domain: bool = True) -> tuple[int, str | None, int | None, dict | None]:
+async def check_url_intel(url: str, is_domain: bool = True) -> tuple[int, str | None, int | None, dict | None, dict]:
     """
     Checks URL or Domain intelligence via VirusTotal.
-    Returns: (score_penalty, warning_message, age_days, intel_dict)
+    Returns: (score_penalty, warning_message, age_days, intel_dict, headers)
     """
     if not settings.vt_key:
-        return 0, None, None, None
+        return 0, None, None, None, {}
     
     import urllib.parse
     if is_domain:
@@ -40,7 +40,10 @@ async def check_url_intel(url: str, is_domain: bool = True) -> tuple[int, str | 
                         "reputation": attrs.get("reputation", 0),
                         "hits": malicious_hits,
                         "stats": stats,
-                        "type": "domain" if is_domain else "url"
+                        "type": "domain" if is_domain else "url",
+                        "categories": list(attrs.get("categories", {}).values()),
+                        "tags": attrs.get("tags", []),
+                        "last_analysis": attrs.get("last_analysis_date")
                     }
 
                     age_days = None

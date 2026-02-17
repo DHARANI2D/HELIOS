@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - DESAS</title>
+    <link rel="icon" href="/icon.png" type="image/png">
+    <script type="text/javascript" src="/eel.js"></script>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --success: #10b981;
+            --danger: #dc2626;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--primary);
+            letter-spacing: -0.02em;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 24px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 24px;
+            font-size: 1.5rem;
+        }
+
+        .navbar h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 900;
+            color: var(--primary);
+            letter-spacing: -0.02em;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .navbar-logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 8px;
+            color: var(--text-main);
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.875rem;
+            box-sizing: border-box;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-main);
+            text-decoration: none;
+            display: inline-block;
+            margin-bottom: 24px;
+            font-size: 0.875rem;
+        }
+
+        .hint {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        #status {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 8px;
+            display: none;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .status-success {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .status-error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .whitelist-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+
+        .whitelist-table th {
+            text-align: left;
+            padding: 12px;
+            background: #f1f5f9;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            border-bottom: 2px solid var(--border);
+        }
+
+        .whitelist-table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .whitelist-item-row:hover {
+            background: #f8fafc;
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 24px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #f9fafb;
+        }
+
+        .drop-zone:hover,
+        .drop-zone.dragover {
+            border-color: var(--primary);
+            background: #eff6ff;
+            color: var(--primary);
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="navbar">
+        <h1>
+            <img src="/icon.png" alt="" class="navbar-logo">
+            DESAS
+        </h1>
+    </nav>
+
+    <div class="container">
+        <a href="index.html" class="btn btn-outline">← Back</a>
+
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <h2>⚙️ API Configuration</h2>
+                <button type="button" class="btn" onclick="useDefaults()"
+                    style="width: auto; padding: 8px 16px; font-size: 0.75rem; border: 1px solid var(--border);">🔄
+                    Reset to Empty</button>
+            </div>
+
+            <div class="drop-zone" id="apiDropZone">
+                <div style="font-size: 2rem; margin-bottom: 8px;">📄</div>
+                <div style="font-weight: 700;">Drag & Drop API Text File</div>
+                <div style="font-size: 0.75rem; opacity: 0.7;">Format: KEY=VALUE (txt)</div>
+            </div>
+            <input type="file" id="apiFileInput" accept=".txt" style="display: none;">
+
+            <form id="settingsForm">
+                <div class="form-group">
+                    <label for="vt_key">VirusTotal API Key</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="vt_key" placeholder="Enter VirusTotal API Key">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="mxtoolbox_key">MxToolbox API Key</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="mxtoolbox_key" placeholder="Enter MxToolbox API Key">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="abuse_key">AbuseIPDB API Key</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="password" id="abuse_key" placeholder="Enter AbuseIPDB API Key">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="saveBtn">Save Configuration</button>
+            </form>
+
+            <div id="status"></div>
+        </div>
+
+        <div class="card" style="margin-top: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h2 style="margin:0;">🛡️ Domain Whitelist</h2>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn"
+                        style="width: auto; padding: 6px 12px; font-size: 0.75rem; border: 1px solid #e2e8f0;"
+                        onclick="exportWhitelist()">📥 Export</button>
+                    <button class="btn"
+                        style="width: auto; padding: 6px 12px; font-size: 0.75rem; border: 1px solid #e2e8f0;"
+                        onclick="document.getElementById('xlImportInput').click()">📤 Import</button>
+                    <input type="file" id="xlImportInput" accept=".xlsx,.txt" style="display: none;"
+                        onchange="importWhitelist(this)">
+                </div>
+            </div>
+
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 16px;">Whitelisted domains are
+                skipped during scanning and marked as safe in reports.</p>
+
+            <div class="drop-zone" id="whitelistDropZone">
+                <div style="font-size: 1.5rem; margin-bottom: 4px;">🎯</div>
+                <div style="font-weight: 700; font-size: 0.9rem;">Drop Domain List Here</div>
+                <div style="font-size: 0.7rem; opacity: 0.7;">Supports .txt (one per line) or .xlsx</div>
+            </div>
+
+            <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                <input type="text" id="newWhitelistDomain" placeholder="Enter domain (e.g. microsoft.com)"
+                    style="flex: 1;">
+                <button class="btn btn-primary" style="width: auto; padding: 0 24px;" onclick="addDomain()">Add</button>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <input type="text" id="whitelistSearch" placeholder="🔍 Filter whitelisted domains..."
+                    oninput="filterWhitelist(this.value)" style="padding: 8px 12px; font-size: 0.8rem;">
+            </div>
+
+            <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px;">
+                <table class="whitelist-table">
+                    <thead>
+                        <tr>
+                            <th>Domain</th>
+                            <th style="text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="whitelistTableBody">
+                        <!-- Items injected by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <script>
+        async function loadSettings() {
+            try {
+                const settings = await eel.get_app_settings()();
+                if (settings) {
+                    document.getElementById('vt_key').value = settings.VIRUSTOTAL_API_KEY || '';
+                    document.getElementById('mxtoolbox_key').value = settings.MXTOOLBOX_API_KEY || '';
+                    document.getElementById('abuse_key').value = settings.ABUSEIPDB_API_KEY || '';
+                }
+            } catch (e) {
+                console.error("Failed to load settings:", e);
+            }
+        }
+
+        async function loadWhitelist() {
+            try {
+                const list = await eel.get_domain_whitelist()();
+                window.currentWhitelist = list || [];
+                renderWhitelist(window.currentWhitelist);
+            } catch (e) {
+                console.error("Failed to load whitelist:", e);
+            }
+        }
+
+        function renderWhitelist(list) {
+            const container = document.getElementById('whitelistTableBody');
+            if (container) {
+                if (list.length === 0) {
+                    container.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:24px; color:var(--text-muted);">No whitelisted domains found.</td></tr>';
+                    return;
+                }
+                container.innerHTML = list.map(item => `
+                    <tr class="whitelist-item-row">
+                        <td style="font-weight: 600;">${item}</td>
+                        <td style="text-align: right;">
+                            <button class="btn" style="width: auto; padding: 4px 10px; font-size: 0.7rem; color: var(--danger); border: 1px solid #fecaca; background: #fee2e2; border-radius: 4px;"
+                                onclick="removeDomain('${item}')">Remove</button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        function filterWhitelist(query) {
+            const filtered = window.currentWhitelist.filter(d => d.toLowerCase().includes(query.toLowerCase()));
+            renderWhitelist(filtered);
+        }
+
+        document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const saveBtn = document.getElementById('saveBtn');
+            const status = document.getElementById('status');
+            saveBtn.disabled = true;
+            saveBtn.innerText = 'Saving...';
+
+            const payload = {
+                VIRUSTOTAL_API_KEY: document.getElementById('vt_key').value,
+                MXTOOLBOX_API_KEY: document.getElementById('mxtoolbox_key').value,
+                ABUSEIPDB_API_KEY: document.getElementById('abuse_key').value
+            };
+
+            const res = await eel.update_app_settings(payload)();
+            if (res.status === 'success') {
+                status.innerText = '✅ Settings saved successfully!';
+                status.className = 'status-success';
+                status.style.display = 'block';
+            } else {
+                status.innerText = '❌ Error saving settings';
+                status.className = 'status-error';
+                status.style.display = 'block';
+            }
+            saveBtn.disabled = false;
+            saveBtn.innerText = 'Save Configuration';
+        });
+
+        async function addDomain() {
+            const domain = document.getElementById('newWhitelistDomain').value;
+            if (domain) {
+                await eel.add_domain_to_whitelist(domain)();
+                document.getElementById('newWhitelistDomain').value = '';
+                loadWhitelist();
+            }
+        }
+
+        async function removeDomain(domain) {
+            await eel.remove_domain_from_whitelist(domain)();
+            loadWhitelist();
+        }
+
+        async function exportWhitelist() {
+            try {
+                const res = await eel.export_whitelist_xl()();
+                if (res.status === 'success') {
+                    downloadBase64File(res.content, res.filename || 'whitelist.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    alert('✅ Whitelist exported successfully!');
+                } else {
+                    alert('❌ Export failed: ' + res.message);
+                }
+            } catch (e) { alert('Error: ' + e); }
+        }
+
+        async function importWhitelist(input) {
+            const file = input.files[0];
+            if (!file) return;
+            handleWhitelistFile(file);
+            input.value = ''; // Reset
+        }
+
+        function handleWhitelistFile(file) {
+            const reader = new FileReader();
+            const lowName = file.name.toLowerCase();
+
+            if (lowName.endsWith('.xlsx')) {
+                reader.onload = async (e) => {
+                    const content = e.target.result.split(',')[1];
+                    try {
+                        const res = await eel.import_whitelist_xl(content)();
+                        if (res.status === 'success') {
+                            loadWhitelist();
+                            alert('✅ Whitelist imported and merged successfully!');
+                        } else {
+                            alert('❌ Import failed: ' + res.message);
+                        }
+                    } catch (err) { alert('Error: ' + err); }
+                };
+                reader.readAsDataURL(file);
+            } else {
+                // Assume text file
+                reader.onload = async (e) => {
+                    const text = e.target.result;
+                    const domains = text.split('\n').map(d => d.trim()).filter(d => d && !d.startsWith('#'));
+                    let count = 0;
+                    for (const d of domains) {
+                        await eel.add_domain_to_whitelist(d)();
+                        count++;
+                    }
+                    loadWhitelist();
+                    alert(`✅ Imported ${count} domains from text file.`);
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function downloadBase64File(base64Content, fileName, mimeType) {
+            const linkSource = `data:${mimeType};base64,${base64Content}`;
+            const downloadLink = document.createElement("a");
+            downloadLink.href = linkSource;
+            downloadLink.download = fileName;
+            downloadLink.click();
+        }
+
+        function useDefaults() {
+            // Simplified for Eel migration, can be pulled from backend if needed
+            document.getElementById('vt_key').value = '';
+            document.getElementById('mxtoolbox_key').value = '';
+            document.getElementById('abuse_key').value = '';
+            alert('Default values cleared. Click Save to apply.');
+        }
+
+        // API File Import Logic
+        const dropZone = document.getElementById('apiDropZone');
+        const fileInput = document.getElementById('apiFileInput');
+
+        dropZone.onclick = () => fileInput.click();
+
+        dropZone.ondragover = (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'var(--primary)';
+        };
+
+        dropZone.ondragleave = () => {
+            dropZone.style.borderColor = 'var(--border)';
+        };
+
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleApiFile(file);
+        };
+
+        // Whitelist Drop Zone
+        const wlDropZone = document.getElementById('whitelistDropZone');
+        wlDropZone.onclick = () => document.getElementById('xlImportInput').click();
+
+        wlDropZone.ondragover = (e) => {
+            e.preventDefault();
+            wlDropZone.classList.add('dragover');
+        };
+
+        wlDropZone.ondragleave = () => {
+            wlDropZone.classList.remove('dragover');
+        };
+
+        wlDropZone.ondrop = (e) => {
+            e.preventDefault();
+            wlDropZone.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleWhitelistFile(file);
+        };
+
+        fileInput.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) handleApiFile(file);
+        };
+
+        function handleApiFile(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target.result;
+                const lines = text.split('\n');
+                let found = 0;
+                lines.forEach(line => {
+                    if (!line.includes('=')) return;
+                    const parts = line.split('=');
+                    const rawKey = parts[0] ? parts[0].trim() : '';
+                    const val = parts[1] ? parts[1].trim() : '';
+
+                    if (rawKey && val) {
+                        const key = rawKey.toUpperCase();
+                        let targetId = '';
+
+                        if (key.includes('VIRUSTOTAL') || key.includes('VT_KEY')) targetId = 'vt_key';
+                        else if (key.includes('MXTOOLBOX') || key.includes('MX_KEY')) targetId = 'mxtoolbox_key';
+                        else if (key.includes('ABUSE') || key.includes('ABUSEIPDB')) targetId = 'abuse_key';
+
+                        console.log(`Importing: ${key} -> ${targetId}`);
+                        const input = document.getElementById(targetId);
+                        if (input) {
+                            input.value = val;
+                            found++;
+                        } else {
+                            console.warn(`No input for targetId: ${targetId}`);
+                        }
+                    }
+                });
+                if (found > 0) {
+                    alert(`✅ Successfully imported ${found} keys from file!`);
+                } else {
+                    alert('❌ No valid keys found. Use format: VIRUSTOTAL_API_KEY=xxx');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        window.onload = () => {
+            loadSettings();
+            loadWhitelist();
+            console.log('Settings page initialized 🚀');
+        };
+    </script>
+</body>
+
+</html>

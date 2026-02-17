@@ -1,17 +1,27 @@
-fastapi
-uvicorn
-playwright
-jinja2
-python-multipart
-pydantic
-beautifulsoup4
-aiofiles
+# DESAS Clean Workstation Requirements
+# Web/Desktop GUI
+eel==0.18.2
+gevent-websocket==0.10.1
+
+# Analysis Engine
 tldextract
-lxml
-dnspython
-aiohttp
 pydantic-settings
-olefile
-pypdf
+aiohttp
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+
+# Forensic Libraries
+pdfminer.six
 python-docx
+olefile
+oletools
+Pillow
 openpyxl
+python-magic
+
+# Utilities
+python-dotenv
+requests
+bcrypt
+dnspython

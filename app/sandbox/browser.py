@@ -2,6 +2,7 @@ import asyncio
 from playwright.async_api import async_playwright
 import tldextract
 from app.core.schemas import SandboxResult, NetworkRequest
+from app.sandbox.exfiltration import ExfiltrationEngine
 
 class Sandbox:
     async def analyze_url(self, url: str) -> SandboxResult:
@@ -28,15 +29,15 @@ class Sandbox:
             import uuid
             
             run_id = f"{int(time.time())}_{uuid.uuid4().hex[:6]}"
-            screenshot_rel_path = f"static/sandbox_{url_hash}_{run_id}_final.png"
+            screenshot_rel_path = f"sandbox_{url_hash}_{run_id}_final.png"
             final_url = url
 
             async def capture_screenshot(u, label=""):
                 try:
                     idx = len(screenshot_chain)
                     # Unique filename for every hop
-                    path = f"static/hop_{url_hash}_{run_id}_{idx}.png"
-                    await page.screenshot(path=f"app/{path}", full_page=False)
+                    path = f"hop_{url_hash}_{run_id}_{idx}.png"
+                    await page.screenshot(path=f"app/static/{path}")
                     screenshot_chain.append({"url": u, "path": path, "label": label or f"Hop {idx}"})
                 except Exception: pass
 
@@ -51,11 +52,16 @@ class Sandbox:
             DUMMY_EMAIL = "forensic-test@example.com"
             DUMMY_PASSWORD = "Password123!"
 
-            # --- Network Listener (3-Pillar Exfiltration Detection) ---
+            # --- Network Listener (SOC-Grade Exfiltration Detection) ---
+            exfil_engine = ExfiltrationEngine()
             exfiltration_report = {
                 "pillar_1": {"detected": False, "summary": "No sensitive data found in payloads", "details": []},
                 "pillar_2": {"detected": False, "summary": "All requests sent to authorized destinations", "details": []},
-                "pillar_3": {"detected": False, "summary": "No stealthy/automated exfiltration patterns detected", "details": []}
+                "pillar_3": {"detected": False, "summary": "No stealthy/automated exfiltration patterns detected", "details": []},
+                "pii_detected": [],
+                "dns_tunneling": False,
+                "entropy": 0.0,
+                "obfuscation_layers": 0
             }
 
             def on_request(request):
@@ -82,35 +88,41 @@ class Sandbox:
                     if is_suspicious_method or is_background_req:
                         post_data = unquote(request.post_data or "")
                         
-                        # --- Pillar 1: Sensitive Data ---
-                        found_sensitive = []
-                        if DUMMY_EMAIL in post_data: found_sensitive.append("Dummy Email")
-                        if DUMMY_PASSWORD in post_data: found_sensitive.append("Dummy Password")
+                        # --- Deep Forensic Inspection via ExfiltrationEngine ---
+                        exfil_res = exfil_engine.process_payload(post_data, ext.subdomain, domain)
                         
-                        if any(k in post_data.lower() for k in ["session", "cookie", "token", "jwt", "auth"]):
-                            found_sensitive.append("Session/Auth Token Indicators")
-                            
-                        if found_sensitive:
+                        # Update Report Metadata
+                        if exfil_res["pii_detected"]:
+                            exfiltration_report["pii_detected"].extend(exfil_res["pii_detected"])
                             exfiltration_report["pillar_1"]["detected"] = True
-                            exfiltration_report["pillar_1"]["summary"] = f"Sensitive data found: {', '.join(found_sensitive)}"
-                            exfiltration_report["pillar_1"]["details"].append(f"Found {found_sensitive} in {request.method} to {domain}")
+                            exfiltration_report["pillar_1"]["summary"] = f"Sensitive data detected: {', '.join(set(exfil_res['pii_detected']))}"
+                            exfiltration_report["pillar_1"]["details"].append(f"Found {exfil_res['pii_detected']} in {request.method} to {domain}")
 
-                        # --- Pillar 2: Unauthorized Destination ---
+                        if exfil_res["dns_tunneling"]:
+                            exfiltration_report["dns_tunneling"] = True
+                            exfiltration_report["pillar_2"]["detected"] = True
+                            exfiltration_report["pillar_2"]["summary"] = "High-confidence DNS Tunneling detected"
+                            exfiltration_report["pillar_2"]["details"].extend(exfil_res["dns_reasons"])
+
+                        exfiltration_report["entropy"] = max(exfiltration_report["entropy"], exfil_res["entropy"])
+                        exfiltration_report["obfuscation_layers"] = max(exfiltration_report["obfuscation_layers"], exfil_res["obfuscation_layers"])
+
+                        # Pillar 2: Unauthorized Destination (Standard check)
                         origin_ext = tldextract.extract(url)
                         origin_domain = f"{origin_ext.domain}.{origin_ext.suffix}"
-                        
                         if domain != origin_domain and domain not in ["google.com", "gstatic.com", "googleapis.com", "microsoft.com", "bing.com"]:
                             exfiltration_report["pillar_2"]["detected"] = True
-                            exfiltration_report["pillar_2"]["summary"] = f"Data sent to external/unauthorized domain: {domain}"
+                            if not exfiltration_report["dns_tunneling"]:
+                                exfiltration_report["pillar_2"]["summary"] = f"Data sent to external/unauthorized domain: {domain}"
                             exfiltration_report["pillar_2"]["details"].append(f"Request to {domain} deviates from landing origin {origin_domain}")
 
-                        # --- Pillar 3: Stealthy Behavior ---
+                        # Pillar 3: Stealth Behavior (Standard check + Engine signals)
                         stealth_indicators = []
                         if is_background_req: stealth_indicators.append("Background Beacon (XHR/Fetch)")
-                        
-                        # Check for Base64 or highly encoded patterns
-                        if len(post_data) > 50 and any(c in post_data for c in ["=", "+", "/"]) and not " " in post_data:
-                            stealth_indicators.append("Likely Obfuscated/Encoded Payload")
+                        if exfil_res["obfuscation_layers"] > 1:
+                            stealth_indicators.append(f"Nested Obfuscation ({exfil_res['obfuscation_layers']} layers: {', '.join(exfil_res['obfuscation_signals'])})")
+                        if exfil_res["entropy"] > 4.5:
+                            stealth_indicators.append(f"High-Entropy Payload ({exfil_res['entropy']:.2f})")
                         
                         if stealth_indicators:
                             exfiltration_report["pillar_3"]["detected"] = True
@@ -206,22 +218,22 @@ class Sandbox:
                         await capture_screenshot(page.url, label="Post-Submit")
 
                 # Final Screenshot
-                await page.screenshot(path=f"app/{screenshot_rel_path}")
+                await page.screenshot(path=f"app/static/{screenshot_rel_path}")
 
             except Exception as e:
                 dom_mutations.append(f"error_during_execution: {str(e)}")
                 # Attempt to capture state even on error
                 try:
-                    await page.screenshot(path=f"app/{screenshot_rel_path}")
+                    await page.screenshot(path=f"app/static/{screenshot_rel_path}")
                     screenshot_chain.append({"url": page.url, "path": screenshot_rel_path, "label": "Error State"})
                 except Exception:
                     pass
             
             # Ensure final screenshot exists if not created yet
             import os
-            if not os.path.exists(f"app/{screenshot_rel_path}"):
+            if not os.path.exists(f"app/static/{screenshot_rel_path}"):
                  try:
-                    await page.screenshot(path=f"app/{screenshot_rel_path}")
+                    await page.screenshot(path=f"app/static/{screenshot_rel_path}")
                  except: pass
 
             await browser.close()

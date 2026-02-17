@@ -27,6 +27,7 @@ from app.analyzer.forensics import (
     analyze_ole_streams,
     detect_xlm_macros
 )
+from app.analyzer.body import check_url_intel
 
 logger = logging.getLogger("uvicorn")
 
@@ -143,13 +144,18 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
                     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
                     rows = []
                     for sheet in wb.worksheets:
-                        for row in sheet.iter_rows(values_only=True):
-                            # Filter out rows that are entirely None
-                            if any(cell is not None for cell in row):
-                                row_str = " | ".join([str(cell) if cell is not None else "" for cell in row])
-                                rows.append(row_str)
+                        for row in sheet.iter_rows():
+                            row_vals = []
+                            for cell in row:
+                                val = str(cell.value) if cell.value is not None else ""
+                                row_vals.append(val)
+                                if cell.hyperlink and cell.hyperlink.target:
+                                    raw_nested_urls.append(cell.hyperlink.target)
+                            
+                            if any(v.strip() for v in row_vals):
+                                rows.append(" | ".join(row_vals))
                     extracted_text = "\n".join(rows)
-                    logger.info(f"Extracted {len(rows)} rows from Excel: {filename}")
+                    logger.info(f"Extracted {len(rows)} rows and links from Excel: {filename}")
                     
                     # XLM Macro Check
                     xlm_findings = detect_xlm_macros(extracted_text, content)
@@ -217,32 +223,35 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
         if raw_nested_urls:
             nested_urls.extend(process_raw_urls(set(raw_nested_urls)))
 
-        # --- Nested Domain Analytics ---
+        # --- Nested Artifact Intelligence (VT) ---
         nested_urls = list(set(nested_urls))
-        unique_domains = set()
+        nested_intel = {}
+        
         for url in nested_urls:
+            # Check full URL intel
+            u_score, u_reason, u_age, u_intel, _ = await check_url_intel(url, is_domain=False)
+            
+            # Also extract domain for contextual age check if URL was clean
+            domain = ""
             try:
                 ext = tldextract.extract(url)
                 if ext.domain and ext.suffix:
                     domain = f"{ext.domain}.{ext.suffix}"
-                    unique_domains.add(domain)
-            except Exception:
-                continue
-
-        for domain in unique_domains:
-            d_score, d_reason, d_age, d_intel, _ = await check_domain_age(domain)
-            nested_domains_intel[domain] = {
-                "score": d_score,
-                "reason": d_reason,
-                "age": d_age,
-                "intel": d_intel
+            except: pass
+            
+            nested_intel[url] = {
+                "score": u_score,
+                "reason": u_reason,
+                "age": u_age,
+                "intel": u_intel,
+                "domain": domain
             }
-            if d_score > 0:
-                score += 10
-                reasons.append(f"Nested link in '{filename}' targets high-risk domain: {domain} ({d_reason})")
+            
+            if u_score > 0:
+                score += 15
+                reasons.append(f"Nested URL in '{filename}' is malicious: {url}")
                 risk_label = "Malicious (Nested Link)"
 
-        # --- 4. Deep Macro & Semantic Analysis (OLE/Zip) ---
         has_macros = False
         vba_code_extracted = ""
         
@@ -337,12 +346,12 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
             "vt_stats": None,
             "signature": None,
             "extracted_urls": nested_urls,
-            "nested_domains": nested_domains_intel,
+            "nested_intel": nested_intel, # Automated link intel
             "indicators": found_indicators,
             "has_macros": has_macros,
             "image_info": image_meta,
             "extracted_text": extracted_text[:2000],
-            "forensics": forensic_signals # New SOC Data
+            "forensics": forensic_signals # Deep forensic signals
         }
 
         # --- VirusTotal File Scan ---

@@ -16,13 +16,10 @@ class Settings(BaseSettings):
     URLSCAN_API_KEY: str = ""
     MXTOOLBOX_API_KEY: str = ""
     
-    # Whitelists
-    DOMAIN_WHITELIST: list[str] = [
-        "google.com", 
-        "microsoft.com", 
-        "office.com",
-        "live.com"
-    ]
+    @property
+    def DOMAIN_WHITELIST(self) -> list[str]:
+        dyn = get_dynamic_settings()
+        return dyn.DOMAIN_WHITELIST or ["google.com", "microsoft.com", "office.com", "live.com"]
 
     @property
     def vt_key(self) -> str:

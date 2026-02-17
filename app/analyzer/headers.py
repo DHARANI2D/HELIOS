@@ -1,179 +1,135 @@
 import re
 import email.utils
+import email.parser
 from datetime import datetime
 
-def parse_hops(headers: dict) -> list[dict]:
+def parse_headers_from_text(text: str) -> tuple[dict, list]:
     """
-    Parses 'Received' headers to trace the email path and calculate delays.
+    Parses raw header text into a dict and a list of tuples.
     """
-    hops = []
-    # In a dictionary of headers from parsing, 'Received' might be a list or a single string
-    # Our msg_parser / eml_parser needs to ensure lists are handled. 
-    # Current parsers might flatten headers. 
-    # For this implementation, we assume headers['Received'] is accessible.
-    
-    # Note: Traditional python email parser handles multiple headers by presenting them as a list if asked,
-    # but clean dict logic often overwrites. 
-    # We will need to assume the caller passes the raw headers dict where keys map to lists if duplicates exist,
-    # OR we access the raw_headers list if available.
-    # For now, let's implement the logic assuming we can iterate over a list of Received headers.
-    
-    # Since our current parsers (eml/msg) might return a simple dict, we might need to adjust them to pass
-    # a list of all headers or a MultiDict.
-    # We will come back to this. For now, we implement the parsing logic.
-    
-    return hops
+    msg = email.parser.Parser().parsestr(text)
+    headers_dict = dict(msg.items())
+    headers_list = list(msg.items())
+    return headers_dict, headers_list
 
 def parse_auth_results(headers: dict) -> dict:
     """
-    Extracts SPF, DKIM, DMARC status from Authentication-Results headers.
+    Extracts detailed SPF, DKIM, DMARC status and policies from Authentication-Results.
     """
     results = {
         "spf": {"status": "none", "details": "-"},
         "dkim": {"status": "none", "details": "-"},
-        "dmarc": {"status": "none", "details": "-"}
+        "dmarc": {"status": "none", "details": "-"},
+        "tls": {"version": "Unknown", "cipher": "Unknown"}
     }
     
-    # Combine multiple Auth-Res headers
+    # Combined Auth-Results
     auth_header = headers.get("Authentication-Results", "")
-    if isinstance(auth_header, list):
-        auth_header = " ".join(auth_header)
-        
-    if not auth_header:
-        return results
-        
-    lower_header = auth_header.lower()
+    if isinstance(auth_header, list): auth_header = " ".join(auth_header)
     
-    # Helper regex
-    def extract_status(mech):
-        match = re.search(f"{mech}=([a-z]+)", lower_header)
-        return match.group(1) if match else "none"
+    if auth_header:
+        auth_lower = auth_header.lower()
+        # Extract statuses
+        spf_match = re.search(r'spf=([a-z]+)', auth_lower)
+        dkim_match = re.search(r'dkim=([a-z]+)', auth_lower)
+        dmarc_match = re.search(r'dmarc=([a-z]+)', auth_lower)
         
-    results["spf"]["status"] = extract_status("spf")
-    results["dkim"]["status"] = extract_status("dkim")
-    results["dmarc"]["status"] = extract_status("dmarc")
-    
-    # Basic detail extraction (grabbing the whole substring for context)
-    # This is a simplification; a full parser would tokenize.
-    results["spf"]["details"] = auth_header # Context
-    
+        results["spf"]["status"] = spf_match.group(1) if spf_match else "none"
+        results["dkim"]["status"] = dkim_match.group(1) if dkim_match else "none"
+        results["dmarc"]["status"] = dmarc_match.group(1) if dmarc_match else "none"
+        
+        # Policy & Alignment
+        if "p=" in auth_lower:
+            policy_match = re.search(r'\(p=([a-z]+)\)', auth_lower)
+            if policy_match: results["dmarc"]["details"] = f"Policy: {policy_match.group(1)}"
+            
     return results
 
-def parse_headers_from_text(text: str) -> tuple[dict, list]:
-    """
-    Parses raw header text block into a dictionary and list of tuples.
-    """
-    from email.parser import Parser
-    msg = Parser().parsestr(text)
-    return dict(msg.items()), list(msg.items())
+def extract_tls_info(received_headers: list) -> dict:
+    """Extracts TLS version and cipher from Received headers."""
+    for r in received_headers:
+        tls = re.search(r'version=(TLS[\d\.]+)', r, re.I)
+        cipher = re.search(r'cipher=([A-Z0-9_\-]+)', r, re.I)
+        if tls:
+            return {
+                "version": tls.group(1),
+                "cipher": cipher.group(1) if cipher else "Unknown"
+            }
+    return {"version": "Unknown", "cipher": "Unknown"}
 
 def analyze_headers(headers: dict, raw_headers_list: list = None) -> tuple[int, list[str], str | None, list[dict], dict]:
     """
-    Analyzes email headers.
+    Professional Header Analysis.
     Returns: (score, reasons, dkim_selector, hops, auth_results)
     """
     score = 0
     reasons = []
-
-    # 1. Auth Results
-    auth_results = parse_auth_results(headers)
     
+    raw_list = raw_headers_list or []
+    received = [v for k, v in raw_list if k.lower() == "received"]
+    if not received and "Received" in headers:
+        val = headers["Received"]
+        received = val if isinstance(val, list) else [val]
+    
+    # 1. Auth Results & TLS
+    auth_results = parse_auth_results(headers)
+    tls_info = extract_tls_info(received)
+    auth_results["tls"] = tls_info
+
     if auth_results["spf"]["status"] in ["fail", "softfail"]:
-        score += 20
-        reasons.append("SPF Validation Failed")
+        score += 25
+        reasons.append(f"SPF Validation Failed ({auth_results['spf']['status']})")
     
     if auth_results["dkim"]["status"] == "fail":
-        score += 20
-        reasons.append("DKIM Validation Failed")
+        score += 25
+        reasons.append("DKIM Validation Failed - Message integrity compromised")
         
     if auth_results["dmarc"]["status"] == "fail":
-        score += 30
-        reasons.append("DMARC Validation Failed")
+        score += 40
+        reasons.append("DMARC Validation Failed - Domain Spoofing likely")
 
-    # Extract DKIM Selector
+    # 2. DKIM Signature Deep Scan
     dkim_selector = None
-    dkim_header = headers.get("DKIM-Signature", "")
-    if isinstance(dkim_header, list): dkim_header = dkim_header[0] # Take first
-    
-    if dkim_header:
-        match = re.search(r's=([^;]+)', dkim_header)
-        if match:
-            dkim_selector = match.group(1).strip()
+    dkim_sig = headers.get("DKIM-Signature", "")
+    if isinstance(dkim_sig, list): dkim_sig = dkim_sig[0]
+    if dkim_sig:
+        d_match = re.search(r'd=([^;]+)', dkim_sig)
+        s_match = re.search(r's=([^;]+)', dkim_sig)
+        if s_match: dkim_selector = s_match.group(1).strip()
+        auth_results["dkim"]["details"] = f"Domain: {d_match.group(1) if d_match else 'Unknown'}, Selector: {dkim_selector}"
 
-    # 2. Urgency
-    subject = headers.get("Subject", "")
-    if isinstance(subject, list): subject = subject[0]
-    subject = subject.lower() if subject else ""
-    
+    # 3. Urgency & Suspicious Patterns
+    subject = str(headers.get("Subject", "")).lower()
     urgency_keywords = ["urgent", "immediate", "action required", "suspended", "verify", "expiry", "expire"]
     for word in urgency_keywords:
         if word in subject:
-            score += 10
-            reasons.append(f"Urgency keyword '{word}' detected in subject")
+            score += 15
+            reasons.append(f"High Urgency Subject: '{word}' detected")
             break
 
-    # 3. MX Validation (Simulated)
-    sender = headers.get("From", "")
-    if isinstance(sender, list): sender = sender[0]
-    
-    if sender:
-        import dns.resolver
-        try:
-            start = sender.find("@")
-            end = sender.find(">")
-            if end == -1: end = len(sender)
-            domain = sender[start+1:end].strip()
-            
-            try:
-                dns.resolver.resolve(domain, 'MX')
-            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
-                score += 25
-                reasons.append(f"MX lookup failed for '{domain}'")
-        except Exception:
-            pass
-            
-    # 4. Hop Parsing
-    # We need the list of Received headers. 
-    # If raw_headers_list is provided, use it. Otherwise try headers.get("Received")
+    # 4. Hop/IP Path Trace
     hops = []
-    received = []
-    if raw_headers_list:
-        received = [v for k, v in raw_headers_list if k.lower() == "received"]
-    elif "Received" in headers:
-        val = headers["Received"]
-        received = val if isinstance(val, list) else [val]
-        
-    # Reverse order (Earliest to Latest usually bottom up in file, but email.parser order depends)
-    # Typically headers[0] is the top-most (latest). We want Hop 1 to be the bottom-most.
-    # So we reverse the list.
-    received.reverse()
+    received_working = list(received)
+    received_working.reverse() # Bottom-up Trace
     
     last_time = None
-    for i, r in enumerate(received):
-        # Parse timestamp (last part usually)
-        # "from ... by ... ; timestamp"
+    for i, r in enumerate(received_working):
         parts = r.rsplit(';', 1)
         timestamp_str = parts[-1].strip() if len(parts) > 1 else ""
         
         delay = 0
         current_time = None
-        
         try:
-            # Parse Date
             if timestamp_str:
                 current_time = email.utils.parsedate_to_datetime(timestamp_str)
-                if last_time:
+                if last_time and current_time:
                     delta = current_time - last_time
                     delay = max(0, int(delta.total_seconds()))
                 last_time = current_time
-        except Exception:
-            pass # Date parse fail
+        except: pass
             
-        # Regex for IPv4
         ip_match = re.search(r'\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]', r)
-        if not ip_match:
-            ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', r)
-        
+        if not ip_match: ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', r)
         hop_ip = ip_match.group(1) if ip_match else "unknown"
 
         hops.append({
@@ -183,5 +139,19 @@ def analyze_headers(headers: dict, raw_headers_list: list = None) -> tuple[int, 
             "time": timestamp_str,
             "delay": f"{delay}s" if i > 0 else "*"
         })
+
+    # 5. DMARC DNS Check (if domain found)
+    sender = str(headers.get("From", ""))
+    if "@" in sender:
+        try:
+            domain = sender.split("@")[-1].split(">")[0].strip()
+            import dns.resolver
+            try:
+                txt_records = dns.resolver.resolve(f"_dmarc.{domain}", "TXT")
+                for rdata in txt_records:
+                    if "v=DMARC1" in str(rdata):
+                        auth_results["dmarc"]["details"] += f" | DNS: {str(rdata)[:50]}..."
+            except: pass
+        except: pass
 
     return score, reasons, dkim_selector, hops, auth_results

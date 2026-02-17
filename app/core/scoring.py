@@ -40,6 +40,15 @@ def calculate_sandbox_score(result_obj: SandboxResult) -> tuple[int, list[str], 
             score += 30
             reasons.append(f"Suspicious ({result_obj.url}): Communication with unauthorized external domain")
         
+        # New: Advanced Exfiltration Indicators
+        if ex_data.get("pii_detected"):
+            score += 30
+            reasons.append(f"PII Leak ({result_obj.url}): Detected sensitive information ({', '.join(set(ex_data['pii_detected']))}) in network traffic")
+            
+        if ex_data.get("dns_tunneling"):
+            score += 50
+            reasons.append(f"DNS Tunneling ({result_obj.url}): Stealthy data exfiltration via complex DNS patterns detected")
+
         if p3 and not (p1 and p2 and p3):
             score += 20
             reasons.append(f"Forensic Alert ({result_obj.url}): Stealthy network behavior (background beaconing/beacons)")

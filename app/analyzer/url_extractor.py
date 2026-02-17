@@ -1,5 +1,6 @@
 import re
 import urllib.parse
+import html
 import os
 import logging
 import io
@@ -103,7 +104,9 @@ def extract_urls_from_text(text: str) -> list[str]:
     Extracts URLs from a string using the specified regex.
     """
     if not text: return []
-    raw_urls = set(re.findall(URL_REGEX, text))
+    # Unescape HTML entities before matching to clean up &amp; etc.
+    decoded_text = html.unescape(text)
+    raw_urls = set(re.findall(URL_REGEX, decoded_text))
     return process_raw_urls(raw_urls)
 
 def extract_urls_from_files(files: list[str]) -> list[str]:
@@ -118,7 +121,8 @@ def extract_urls_from_files(files: list[str]) -> list[str]:
             low = file.lower()
             if low.endswith(TEXT_EXTENSIONS):
                 with open(file, "r", errors="ignore") as f:
-                    raw_urls.update(re.findall(URL_REGEX, f.read()))
+                    content = html.unescape(f.read())
+                    raw_urls.update(re.findall(URL_REGEX, content))
             elif low.endswith((".xls", ".xlsx", ".xlsm")):
                 raw_urls.update(analyze_excel(file))
             elif low.endswith(".pdf"):
@@ -218,6 +222,7 @@ def analyze_image(path: str) -> set:
     if not os.path.exists(path): return set()
     try:
         with open(path, "rb") as f:
-            return analyze_image_bytes(f.read())
+            urls, _ = analyze_image_bytes(f.read())
+            return urls
     except Exception:
         return set()

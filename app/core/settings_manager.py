@@ -22,7 +22,7 @@ class AppSettings(BaseModel):
     VIRUSTOTAL_API_KEY: str = ""
     MXTOOLBOX_API_KEY: str = ""
     ABUSEIPDB_API_KEY: str = ""
-    # Add other dynamic settings here if needed
+    DOMAIN_WHITELIST: list[str] = ["google.com", "microsoft.com", "office.com", "live.com"]
 
 def get_persisted_settings() -> dict:
     """Loads settings from settings.json if it exists."""
