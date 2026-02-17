@@ -1,0 +1,42 @@
+name: Build DESAS Windows EXE
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        architecture: 'x64'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller eel
+
+    - name: Build with PyInstaller (via Eel)
+      # We rely on 'python -m eel' to handle static assets and spec generation.
+      # We explicitly point to app/static/icon.png.
+      run: |
+        python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean
+
+    - name: Upload Windows Exe
+      uses: actions/upload-artifact@v4
+      with:
+        name: desas-windows-exe
+        path: dist/desas.exe
