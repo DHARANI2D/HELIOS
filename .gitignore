@@ -38,6 +38,7 @@ system_verify/
 
 # App Specific
 app/static/*.png
+!app/static/icon.png
 app/static/*.jpg
 app/static/*.pdf
 settings.json
