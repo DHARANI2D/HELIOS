@@ -11,14 +11,16 @@ python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
 
+
 # Forensic Libraries
+extract-msg
 pdfminer.six
 python-docx
 olefile
 oletools
 Pillow
 openpyxl
-python-magic
+openpyxl
 
 # Utilities
 python-dotenv
