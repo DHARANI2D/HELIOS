@@ -1,6 +1,13 @@
 import eel
 import os
 import sys
+import io
+
+# GUI Patch: Redirect stdout/stderr to dummy streams if None (Windows --noconsole fix)
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = io.StringIO()
 import uuid
 import tempfile
 import base64
