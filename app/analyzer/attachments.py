@@ -270,13 +270,23 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
 
                     if ole.exists('Macros') or ole.exists('_VBA_PROJECT_CUR') or ole.exists('VBA'):
                         has_macros = True
-                        # Try to extract VBA for semantic analysis (simplified for this context)
-                        # In a real scenario we'd use olevba properly to extract code
                         from oletools.olevba import VBA_Parser
                         vba_parser = VBA_Parser(filename, data=content)
                         if vba_parser.detect_vba_macros():
-                            for (_, _, _, code) in vba_parser.extract_macros():
-                                vba_code_extracted += code + "\n"
+                            forensic_signals["ole_macros"] = []
+                            for (subfilename, stream_path, vba_filename, code) in vba_parser.extract_macros():
+                                code_sanitized = code.replace('\r', '')
+                                vba_code_extracted += code_sanitized + "\n"
+                                forensic_signals["ole_macros"].append({
+                                    "stream": stream_path,
+                                    "filename": vba_filename,
+                                    "size": len(code)
+                                })
+                                # Extract links from macro code
+                                macro_urls = extract_urls_from_text(code)
+                                nested_urls.extend(macro_urls)
+                                if macro_urls:
+                                    forensic_signals["suspicious_calls"].append(f"URLs found in macro: {', '.join(macro_urls[:3])}")
             
             # Office XML Formats
             if any(filename.endswith(ext) for ext in office_extensions_xml):

@@ -498,15 +498,41 @@ async def _analyze_standalone_logic(type, input_data):
 
 # --- Startup Logic ---
 
+@eel.expose
+def check_playwright_status():
+    """Checks if Playwright browsers are installed. Returns boolean."""
+    marker_path = os.path.join(tempfile.gettempdir(), "desas_playwright_installed.marker")
+    return os.path.exists(marker_path)
+
+@eel.expose
+def install_playwright_browsers():
+    """Installs Playwright browsers via subprocess."""
+    try:
+        import subprocess
+        logger.info("Installing Playwright Chromium...")
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = 0x08000000 # CREATE_NO_WINDOW
+            
+        subprocess.check_call(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            creationflags=creationflags
+        )
+        
+        marker_path = os.path.join(tempfile.gettempdir(), "desas_playwright_installed.marker")
+        with open(marker_path, "w") as f:
+            f.write("installed")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Playwright install failed: {e}")
+        return {"status": "error", "message": str(e)}
+
 def start_app():
     if getattr(sys, 'frozen', False):
         web_folder = os.path.join(sys._MEIPASS, 'app', 'static')
-        # If static is not at that relative path, adjust.
-        # Often it's just 'static' or 'web' in the bundle root.
         if not os.path.exists(web_folder):
              web_folder = os.path.join(sys._MEIPASS, 'static')
     else:
-        # In dev, we use the current folder's app/static
         web_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
 
     logger.info(f"Starting Eel with web folder: {web_folder}")

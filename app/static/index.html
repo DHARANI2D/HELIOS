@@ -74,7 +74,9 @@
             gap: 24px;
             box-sizing: border-box;
             overflow: hidden;
-            /* Container doesn't scroll, children do */
+            /* Ensure container doesn't scroll itself, but allows children to */
+            height: calc(100vh - 80px);
+            /* Adjust for navbar */
             margin-top: 24px;
         }
 
@@ -1187,11 +1189,71 @@
         </div>
     </div>
 
+    <!-- PLAYWRIGHT INSTALL MODAL -->
+    <div id="playwrightModal" class="modal" style="z-index: 2100;">
+        <div class="modal-content" style="max-width: 500px; text-align: center;">
+            <div style="font-size: 4rem; margin-bottom: 16px;">🧩</div>
+            <h2 style="font-size: 1.5rem; margin-bottom: 12px; letter-spacing: -0.01em;">Forensic Engine Setup</h2>
+            <p style="color: var(--text-muted); font-size: 1rem; margin-bottom: 24px; line-height: 1.5;">
+                To enable advanced sandbox detonation, the forensic browser engine (Chromium) must be installed.
+            </p>
+            <div id="pwInstallStatus" style="margin-bottom:24px; font-weight:700; color:var(--primary); display:none;">
+                <div class="loader" style="margin:0 auto 12px auto;"></div>
+                Installing... This may take a few minutes.
+            </div>
+            <button id="pwInstallBtn" class="btn btn-primary" onclick="installPlaywright()"
+                style="width: 100%; padding: 16px; font-size: 1.1rem; border-radius: 12px;">Install Component</button>
+        </div>
+    </div>
+
     <script>
         let currentAnalysisMode = 'direct';
         let currentSessionId = null;
         let selectedTargetAtt = null;
         let selectedHeaderAtt = null;
+
+        async function installPlaywright() {
+            const btn = document.getElementById('pwInstallBtn');
+            const status = document.getElementById('pwInstallStatus');
+            btn.style.display = 'none';
+            status.style.display = 'block';
+
+            try {
+                const res = await eel.install_playwright_browsers()();
+                if (res.status === 'success') {
+                    document.getElementById('playwrightModal').style.display = 'none';
+                    showToast("✅ Forensic Engine installed successfully");
+                } else {
+                    status.innerHTML = `<span style="color:var(--danger)">Error: ${res.message}</span>`;
+                    btn.innerText = "Retry Install";
+                    btn.style.display = 'block';
+                }
+            } catch (e) {
+                status.innerHTML = `<span style="color:var(--danger)">Error: ${e}</span>`;
+                btn.style.display = 'block';
+            }
+        }
+
+        window.onload = async () => {
+            console.log('DESAS initialized 🚀');
+            try {
+                // Check Playwright
+                const pwInstalled = await eel.check_playwright_status()();
+                if (!pwInstalled) {
+                    document.getElementById('playwrightModal').style.display = 'flex';
+                }
+
+                const settings = await eel.get_app_settings()();
+                if (!settings || (!settings.VIRUSTOTAL_API_KEY && !settings.ABUSEIPDB_API_KEY)) {
+                    // Only show API check if PW check is passed or closed, to avoid stacking
+                    if (pwInstalled) document.getElementById('apiCheckModal').style.display = 'flex';
+                }
+                // Pre-load global whitelist for real-time marking
+                await loadWhitelistInModal();
+            } catch (e) {
+                console.error("Failed to check startup requirements:", e);
+            }
+        };
 
         function showSection(section) {
             document.getElementById('analysisSection').style.display = section === 'analysis' ? 'grid' : 'none';
@@ -1642,13 +1704,41 @@
                     const formsList = document.getElementById('detectedFormsList');
                     if (formsList) formsList.innerHTML = (data.html_analysis?.forms || []).map(f => `<div style="font-size:0.75rem; margin-top:4px;">📝 <strong>${f.method} form</strong> to <span style="color:var(--primary);">${f.action}</span></div>`).join('') || "No forms detected.";
 
+                    // Enhanced File Analysis (Excel Macros / PDF IOCs)
                     const attList = document.getElementById('attachmentsList');
-                    if (attList) attList.innerHTML = (data.attachments || []).map(a => `
-                    <div class="indicator-item" style="display:flex; justify-content:space-between;">
-                        <div><strong>${a.filename}</strong><br><small>${a.md5}</small></div>
-                        <span class="badge" style="background:${a.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white;">${a.risk}</span>
-                    </div>
-                `).join('') || "No attachments.";
+                    if (attList) {
+                        attList.innerHTML = (data.attachments || []).map(a => {
+                            const forensics = a.forensics || {};
+                            let detailsHtml = '';
+
+                            // Excel/Office Details
+                            if (forensics.has_macros) detailsHtml += `<div style="color:var(--danger); font-size:0.7rem;">⚠️ Macros Detected</div>`;
+                            if (forensics.ole_macros && forensics.ole_macros.length > 0) {
+                                detailsHtml += `<div style="font-size:0.65rem; color:var(--text-muted); margin-left:8px;">${forensics.ole_macros.length} macro streams found</div>`;
+                            }
+
+                            // PDF/Link Details
+                            if (a.nested_intel && Object.keys(a.nested_intel).length > 0) {
+                                const count = Object.keys(a.nested_intel).length;
+                                const malCount = Object.values(a.nested_intel).filter(i => i.score > 0).length;
+                                detailsHtml += `<div style="font-size:0.7rem; margin-top:4px;">🔗 ${count} Links extracted (${malCount} <span style="color:${malCount > 0 ? 'var(--danger)' : 'var(--success)'}">suspicious</span>)</div>`;
+                            }
+
+                            // General flags
+                            if (forensics.high_entropy) detailsHtml += `<div style="color:var(--warning); font-size:0.7rem;">⚠️ High Entropy (Packed?)</div>`;
+                            if (forensics.polyglot) detailsHtml += `<div style="color:var(--danger); font-size:0.7rem;">⚠️ Polyglot File Detected</div>`;
+
+                            return `
+                        <div class="indicator-item" style="display:flex; flex-direction:column; gap:4px;">
+                            <div style="display:flex; justify-content:space-between;">
+                                <div><strong>${a.filename}</strong><br><small>${a.md5}</small></div>
+                                <span class="badge" style="background:${a.risk === 'Clean' ? 'var(--success)' : 'var(--danger)'}; color:white; height:fit-content;">${a.risk}</span>
+                            </div>
+                            ${detailsHtml ? `<div style="background:white; padding:8px; border-radius:6px; margin-top:4px; border:1px solid var(--border);">${detailsHtml}</div>` : ''}
+                        </div>
+                    `;
+                        }).join('') || "No attachments.";
+                    }
                 }
 
                 // Sandbox
@@ -2007,11 +2097,20 @@
         function updateProgress(percent, status, stepId = null) {
             const pb = document.getElementById('fullAnalysisProgress');
             const cancelBtn = document.getElementById('cancelAnalysisBtn');
+            const pbFill = document.getElementById('pbFill');
+            const pbPercent = document.getElementById('pbPercent');
+
             pb.style.display = 'block';
             if (cancelBtn) cancelBtn.style.display = (percent > 0 && percent < 100) ? 'block' : 'none';
-            document.getElementById('pbFill').style.width = percent + '%';
+
+            // Smoothly animate width
+            // requestAnimationFrame to ensure UI updates
+            requestAnimationFrame(() => {
+                pbFill.style.width = percent + '%';
+            });
+
             document.getElementById('pbStatus').innerText = status;
-            document.getElementById('pbPercent').innerText = percent + '%';
+            pbPercent.innerText = percent + '%';
 
             if (stepId) {
                 const steps = document.querySelectorAll('.step-item');
@@ -2019,14 +2118,20 @@
                 steps.forEach(s => {
                     if (s.id === stepId) {
                         s.className = 'step-item active';
+                        // Add a pulsing effect or similar if desired via CSS
                         foundActive = true;
                     } else {
-                        if (!foundActive) s.className = 'step-item done';
-                        else s.className = 'step-item';
+                        if (!foundActive) {
+                            s.className = 'step-item done';
+                        } else {
+                            s.className = 'step-item';
+                        }
                     }
                 });
-                if (percent === 100) {
-                    document.getElementById(stepId).className = 'step-item done';
+
+                // If complete, mark all as done
+                if (percent >= 100) {
+                    steps.forEach(s => s.className = 'step-item done');
                 }
             }
         }
