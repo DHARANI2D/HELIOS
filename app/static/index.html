@@ -73,10 +73,9 @@
             grid-template-columns: 320px 1fr;
             gap: 24px;
             box-sizing: border-box;
-            overflow: hidden;
-            /* Ensure container doesn't scroll itself, but allows children to */
+            /* Reverting overflow to allow natural scrolling if needed */
+            overflow-y: auto;
             height: calc(100vh - 80px);
-            /* Adjust for navbar */
             margin-top: 24px;
         }
 
