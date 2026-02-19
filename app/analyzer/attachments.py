@@ -31,17 +31,45 @@ from app.analyzer.body import check_url_intel
 
 logger = logging.getLogger("uvicorn")
 
-async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], list[dict]]:
+async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], list[dict], list[str]]:
     """
     Analyzes attachments for suspicious types, hashes, macros, and nested link intelligence.
-    Returns: (score, reasons, processed_attachments)
+    Returns: (score, reasons, processed_attachments, collected_domains)
     """
     from app.analyzer.body import check_domain_age # Lazy import to avoid circular dep
+    from app.analyzer.archives import ArchiveAnalyzer
 
     score = 0
     reasons = []
     processed_attachments = []
     
+    archive_analyzer = ArchiveAnalyzer()
+
+    # Pre-process: Expand archives
+    all_attachments = list(attachments)
+    i = 0
+    # Use while loop to safely append to list during iteration
+    while i < len(all_attachments):
+        att = all_attachments[i]
+        fname = att.get("filename", "").lower()
+        content = att.get("content", b"")
+        
+        # Check for archive types
+        if fname.endswith((".zip", ".7z")) and not att.get("_scanned_archive"):
+            try:
+                extracted = archive_analyzer.analyze_archive(file_content=content, filename=fname)
+                for e in extracted:
+                    # Mark as already scanned so we don't re-extract inner archives
+                    e["_scanned_archive"] = True
+                    # Tag as extracted for UI/Reporting if needed
+                    e["filename"] = f"[Extracted] {e['filename']}"
+                    all_attachments.append(e)
+            except Exception as e:
+                logger.warning(f"Archive expansion failed for {fname}: {e}")
+        i += 1
+
+    extracted_domains = set()
+
     risky_extensions = [".exe", ".scr", ".vbs", ".js", ".bat", ".cmd", ".ps1", ".jar"]
     office_extensions_ole = [".doc", ".xls", ".ppt"]
     office_extensions_xml = [".docx", ".docm", ".xlsx", ".xlsm", ".pptx", ".pptm"]
@@ -54,7 +82,7 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
         r"\+?[\d\s\-\.\(\)]{10,}" # Generic phone number pattern
     ]
 
-    for att in attachments:
+    for att in all_attachments:
         filename = att.get("filename", "").lower()
         content = att.get("content", b"")
         if content is None: content = b""
@@ -132,6 +160,9 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
                 if pdf_res["evasion_detected"]:
                     score += 20
                     reasons.append(f"PDF evasion techniques detected in {filename}")
+                # Extract URLs from PDF text
+                nested_urls.extend(extract_urls_from_text(extracted_text))
+
             elif filename.endswith(".docx") or filename.endswith(".docm"):
                 doc = Document(io.BytesIO(content))
                 extracted_text = "\n".join([p.text for p in doc.paragraphs])
@@ -228,6 +259,14 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
         nested_intel = {}
         
         for url in nested_urls:
+            # Domain Extraction for Inventory
+            try:
+                ext = tldextract.extract(url)
+                if ext.domain and ext.suffix:
+                    dom = f"{ext.domain}.{ext.suffix}".lower()
+                    extracted_domains.add(dom)
+            except: pass
+
             # Check full URL intel
             u_score, u_reason, u_age, u_intel, _ = await check_url_intel(url, is_domain=False)
             
@@ -395,4 +434,4 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
 
         processed_attachments.append(processed_data)
         
-    return score, reasons, processed_attachments
+    return score, reasons, processed_attachments, list(extracted_domains)

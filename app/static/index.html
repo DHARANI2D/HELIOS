@@ -30,10 +30,10 @@
             margin: 0;
             padding: 0;
             line-height: 1.5;
-            height: 100vh;
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            overflow-y: auto;
         }
 
         .navbar {
@@ -45,6 +45,8 @@
             justify-content: space-between;
             align-items: center;
             z-index: 100;
+            position: sticky;
+            top: 0;
         }
 
         .navbar h1 {
@@ -73,10 +75,9 @@
             grid-template-columns: 320px 1fr;
             gap: 24px;
             box-sizing: border-box;
-            /* Reverting overflow to allow natural scrolling if needed */
-            overflow-y: auto;
-            height: calc(100vh - 80px);
+            height: auto;
             margin-top: 24px;
+            margin-bottom: 40px;
         }
 
         .card {
@@ -88,7 +89,10 @@
         }
 
         .sidebar-sticky {
-            height: calc(100vh - 120px);
+            position: sticky;
+            top: 100px;
+            height: auto;
+            max-height: calc(100vh - 120px);
             overflow-y: auto;
             padding-right: 8px;
         }

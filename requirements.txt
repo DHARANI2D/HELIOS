@@ -28,3 +28,4 @@ python-dotenv
 requests
 bcrypt
 dnspython
+py7zr

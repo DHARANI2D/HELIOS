@@ -434,10 +434,24 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
                                if not (att.get("filename", "").lower() in ["headers.txt", "body.txt", "body.html"])]
         if filtered_attachments:
             logger.info(f"Session {session_id}: Starting analysis of {len(filtered_attachments)} attachments")
-            a_score, a_reasons, processed_attachments = await analyze_attachments(filtered_attachments)
+            a_score, a_reasons, processed_attachments, att_domains = await analyze_attachments(filtered_attachments)
             result.body_score += a_score
             result.body_reasons.extend(a_reasons)
             result.attachments = processed_attachments
+            if att_domains:
+                # Add unique domains to suspicious_domains list
+                current_domains = set(result.suspicious_domains)
+                current_domains.update(att_domains)
+                result.suspicious_domains = list(current_domains)
+                
+                # Check intel for these new domains so they appear in the report
+                for domain in att_domains:
+                    if domain not in result.url_intel:
+                         d_score, d_reason, d_age, d_intel, _ = await check_url_intel(domain, is_domain=True)
+                         if d_intel:
+                             result.url_intel[domain] = d_intel
+                         if d_age is not None:
+                             result.domain_age_days[domain] = d_age
             logger.info(f"Session {session_id}: Attachment analysis complete")
 
         # 7. IP Intel
@@ -490,8 +504,13 @@ async def _analyze_standalone_logic(type, input_data):
             return await get_ip_intel(input_data)
         elif type == 'attachment':
             content = base64.b64decode(input_data['content'])
-            a_score, a_reasons, processed = await analyze_attachments([{"filename": input_data['filename'], "content": content}])
-            return {"score": a_score, "reasons": a_reasons, "attachment": processed[0] if processed else {}}
+            a_score, a_reasons, processed, att_domains = await analyze_attachments([{"filename": input_data['filename'], "content": content}])
+            return {
+                "score": a_score, 
+                "reasons": a_reasons, 
+                "attachment": processed[0] if processed else {},
+                "extracted_domains": att_domains
+            }
     except Exception as e:
         logger.error(f"Standalone tool error: {e}")
         return {"error": str(e)}
