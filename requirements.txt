@@ -2,7 +2,8 @@
 # Web/Desktop GUI
 eel==0.18.2
 gevent-websocket==0.10.1
-playwright
+selenium
+webdriver-manager
 
 # Analysis Engine
 tldextract
