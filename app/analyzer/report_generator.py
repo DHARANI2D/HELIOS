@@ -253,4 +253,3 @@ def generate_html_report(data: dict) -> str:
     </html>
     """
     return html
-    return html
