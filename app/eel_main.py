@@ -3,10 +3,13 @@ import os
 import sys
 import io
 
-# Ensure project root is in sys.path for modular imports
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Ensure project and app roots are in sys.path for modular imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 # GUI Patch: Redirect stdout/stderr to dummy streams if None (Windows --noconsole fix)
 if sys.stdout is None:
@@ -24,6 +27,11 @@ import zipfile
 import io
 from pydantic import BaseModel
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("eel-backend")
+logger.info(f"Python Search Path: {sys.path}")
+
 # Modular Analyzers
 from app.analyzer.eml_parser import parse_eml
 from app.analyzer.msg_parser import parse_msg
@@ -32,7 +40,17 @@ from app.analyzer.body import analyze_body, check_url_intel
 from app.analyzer.attachments import analyze_attachments
 from app.analyzer.reputation import get_ip_intel
 from app.analyzer.mxtoolbox import query_mxtoolbox_with_headers
-from app.analyzer.report_generator import generate_html_report
+
+# Robust import for report_generator
+try:
+    from app.analyzer.report_generator import generate_html_report
+except ImportError as e:
+    logger.warning(f"Failed to import app.analyzer.report_generator: {e}. Trying fallback...")
+    try:
+        from analyzer.report_generator import generate_html_report
+    except ImportError:
+        logger.error("Critial: Could not find report_generator in any path.")
+        raise
 from app.sandbox.browser import Sandbox
 from app.core.scoring import aggregate_verdict, calculate_sandbox_score
 from app.core.schemas import AnalysisResult, SandboxResult

@@ -9,8 +9,8 @@ project_root = os.path.dirname(spec_root)
 block_cipher = None
 
 a = Analysis(
-    [os.path.join(spec_root, 'run_server.py')],
-    pathex=[project_root],
+    [os.path.join(project_root, 'app', 'eel_main.py')],
+    pathex=[project_root, os.path.join(project_root, 'app')],
     binaries=[],
     datas=[
         (os.path.join(project_root, 'app', 'templates'), 'app/templates'),
