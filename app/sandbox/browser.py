@@ -76,6 +76,10 @@ class Sandbox:
             }
             exfiltrated = None
 
+            # Ensure URL has protocol
+            if not url.startswith(("http://", "https://")):
+                url = "https://" + url
+
             # Navigate
             driver.get(url)
             time.sleep(2) # Wait for initial load

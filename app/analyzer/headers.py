@@ -100,12 +100,36 @@ def analyze_headers(headers: dict, raw_headers_list: list = None) -> tuple[int, 
 
     # 3. Urgency & Suspicious Patterns
     subject = str(headers.get("Subject", "")).lower()
-    urgency_keywords = ["urgent", "immediate", "action required", "suspended", "verify", "expiry", "expire"]
+    urgency_keywords = ["urgent", "immediate", "action required", "suspended", "verify", "expiry", "expire", "attention", "security alert"]
     for word in urgency_keywords:
         if word in subject:
             score += 15
             reasons.append(f"High Urgency Subject: '{word}' detected")
             break
+
+    # 4. Header Mismatches (Typosquatting / Spoofing)
+    from_header = headers.get("From", "")
+    reply_to = headers.get("Reply-To", "")
+    return_path = headers.get("Return-Path", "")
+
+    from_email = email.utils.parseaddr(from_header)[1].lower()
+    reply_email = email.utils.parseaddr(reply_to)[1].lower()
+    return_email = email.utils.parseaddr(return_path)[1].lower()
+
+    if reply_email and from_email and reply_email != from_email:
+        score += 20
+        reasons.append(f"Reply-To Mismatch: {reply_email} (From: {from_email})")
+    
+    if return_email and from_email:
+        # Simple domain extract
+        from_domain = from_email.split('@')[-1]
+        return_domain = return_email.split('@')[-1]
+        if from_domain != return_domain and "bounce" not in return_domain and "return" not in return_domain:
+             # Look for minor differences (typosquatting) using Levenshtein or just simple string checks
+             # For now, flag if completely different TLD/SLD
+             if not return_domain.endswith(from_domain) and not from_domain.endswith(return_domain):
+                 score += 15
+                 reasons.append(f"Return-Path Domain Mismatch: {return_domain} vs {from_domain}")
 
     # 4. Hop/IP Path Trace
     hops = []

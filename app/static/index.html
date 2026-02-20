@@ -1731,6 +1731,20 @@
                             if (forensics.high_entropy) detailsHtml += `<div style="color:var(--warning); font-size:0.7rem;">⚠️ High Entropy (Packed?)</div>`;
                             if (forensics.polyglot) detailsHtml += `<div style="color:var(--danger); font-size:0.7rem;">⚠️ Polyglot File Detected</div>`;
 
+                            // API Extraction (Phase 18+)
+                            if (forensics.pe_metadata && forensics.pe_metadata.all_imports) {
+                                const impData = forensics.pe_metadata.all_imports;
+                                const dlls = Object.keys(impData);
+                                if (dlls.length > 0) {
+                                    detailsHtml += `<div style="margin-top:8px;">
+                                        <div style="font-size:0.65rem; font-weight:700; color:var(--primary); text-transform:uppercase; margin-bottom:4px;">📦 API Extraction (${dlls.length} DLLs)</div>
+                                        <div style="max-height:100px; overflow-y:auto; background:#f8fafc; padding:8px; border:1px solid #e2e8f0; border-radius:6px; font-family:monospace; font-size:0.65rem;">
+                                            ${dlls.map(dll => `<div><strong>${dll}:</strong> ${impData[dll].length} calls</div>`).join('')}
+                                        </div>
+                                    </div>`;
+                                }
+                            }
+
                             return `
                         <div class="indicator-item" style="display:flex; flex-direction:column; gap:4px;">
                             <div style="display:flex; justify-content:space-between;">
@@ -2058,6 +2072,24 @@
                             </div>
                         </div>
 
+                        ${forensics.pe_metadata && forensics.pe_metadata.all_imports ? `
+                        <div style="margin-top:20px;">
+                            <h3 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:4px;">📦 API Extraction (PE Imports)</h3>
+                            <div style="background:#f8fafc; padding:16px; border-radius:12px; border:1px solid var(--border); max-height:400px; overflow-y:auto;">
+                                ${Object.keys(forensics.pe_metadata.all_imports).map(dll => `
+                                    <div style="margin-bottom:12px;">
+                                        <div style="font-size:0.75rem; font-weight:800; color:var(--primary); margin-bottom:4px;">${dll}</div>
+                                        <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                                            ${forensics.pe_metadata.all_imports[dll].map(imp => `
+                                                <span class="badge" style="background:${(forensics.pe_metadata.suspicious_imports || []).includes(imp) ? 'var(--danger)' : 'white'}; color:${(forensics.pe_metadata.suspicious_imports || []).includes(imp) ? 'white' : 'var(--text-muted)'}; border:1px solid var(--border); font-size:0.65rem; text-transform:none;">${imp}</span>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+
                         ${att.extracted_text ? `
                             <div style="margin-top:20px;">
                                 <h3 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px;">Extracted Content Preview</h3>
@@ -2079,6 +2111,162 @@
                             <strong>Age:</strong> ${data.age_days !== null ? data.age_days + ' days' : 'Unknown'}<br>
                             <strong>Registrar:</strong> ${data.intel?.registrar || 'Unknown'}
                         </div>
+                    </div>
+                `;
+            } else if (type === 'url') {
+                const sb = data;
+                const scoreColor = sb.score > 70 ? 'var(--danger)' : (sb.score > 30 ? 'var(--warning)' : 'var(--success)');
+
+                let chainHtml = '';
+                if (sb.screenshot_chain && sb.screenshot_chain.length > 0) {
+                    chainHtml = `
+                        <div style="margin-top:20px;">
+                            <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px;">Redirect & Interaction Chain</h4>
+                            <div style="display:flex; gap:12px; overflow-x:auto; padding-bottom:8px;">
+                                ${sb.screenshot_chain.map(s => `
+                                    <div style="min-width:200px;">
+                                        <img src="/${s.path}" style="width:100%; border-radius:6px; border:1px solid var(--border); aspect-ratio:16/9; object-fit:cover;">
+                                        <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px;">${s.label}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                     `;
+                }
+
+                let networkHtml = '';
+                if (sb.network_requests && sb.network_requests.length > 0) {
+                    networkHtml = `
+                        <div style="margin-top:20px;">
+                            <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px;">Network Activity (${sb.network_requests.length})</h4>
+                            <div style="max-height:200px; overflow-y:auto; background:#f8fafc; border-radius:8px; padding:12px; border:1px solid var(--border);">
+                                ${sb.network_requests.map(n => `
+                                    <div style="font-size:0.7rem; margin-bottom:4px; font-family:monospace; display:flex; gap:8px;">
+                                        <span style="color:var(--primary); font-weight:700;">${n.method}</span>
+                                        <span style="word-break:break-all;">${n.url}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                let domHtml = '';
+                if (sb.dom_mutations && sb.dom_mutations.length > 0) {
+                    domHtml = `
+                        <div style="margin-top:20px;">
+                             <h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px;">DOM & Exfiltration Signals</h4>
+                             <ul style="font-size:0.75rem; margin:0; padding-left:16px;">
+                                 ${sb.dom_mutations.map(m => `<li style="margin-bottom:4px;">${m}</li>`).join('')}
+                             </ul>
+                        </div>
+                     `;
+                }
+
+                el.innerHTML = `
+                    <div style="padding:16px; background:white; border-radius:12px;">
+                        <div class="section-header">
+                            <h2 style="font-size:1.1rem;">🔬 Sandbox Forensic Report</h2>
+                            <span class="badge" style="background:${scoreColor}; color:white;">Score: ${sb.score}/100</span>
+                        </div>
+                        
+                        <div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:24px;">
+                            <div>
+                                <div style="margin-bottom:16px;">
+                                    <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Target URL</div>
+                                    <div style="font-family:monospace; font-size:0.85rem; word-break:break-all; background:#f1f5f9; padding:8px; border-radius:6px; margin-top:4px;">${sb.url}</div>
+                                </div>
+                                ${sb.expanded_url !== sb.url ? `
+                                <div style="margin-bottom:16px;">
+                                    <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Final URL</div>
+                                    <div style="font-family:monospace; font-size:0.85rem; word-break:break-all; background:#f1f5f9; padding:8px; border-radius:6px; margin-top:4px;">${sb.expanded_url}</div>
+                                </div>` : ''}
+
+                                <div style="margin-bottom:16px;">
+                                    <h4 style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Verdict Reasons</h4>
+                                    ${sb.reasons && sb.reasons.length > 0 ?
+                        sb.reasons.map(r => `<div style="font-size:0.8rem; color:#b91c1c; margin-bottom:4px;">⚠️ ${r}</div>`).join('') :
+                        '<div style="font-size:0.8rem; color:var(--success);">✅ No suspicious indicators found.</div>'}
+                                </div>
+                            </div>
+
+                            <div>
+                                <div style="font-size:0.75rem; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px;">Live Screenshot</div>
+                                ${sb.screenshot_path ?
+                        `<a href="/${sb.screenshot_path}" target="_blank"><img src="/${sb.screenshot_path}" style="width:100%; border-radius:8px; border:1px solid var(--border); box-shadow:0 4px 6px rgba(0,0,0,0.05); cursor:zoom-in;"></a>` :
+                        `<div style="width:100%; aspect-ratio:16/9; background:#f1f5f9; display:flex; align-items:center; justify-content:center; border-radius:8px; color:var(--text-muted);">No Screenshot</div>`
+                    }
+                            </div>
+                        </div>
+
+                        ${chainHtml}
+                        
+                        ${/* EXFILTRATION SECTION */ ''}
+                        ${(() => {
+                        if (!sb.exfiltration_detected) return '';
+                        const pillars = sb.exfiltration_detected.pillars;
+                        let exfilHtml = '<div style="margin-top:20px; border-top:1px dashed var(--border); padding-top:16px;">';
+                        exfilHtml += `<h4 style="font-size:0.8rem; text-transform:uppercase; color:var(--danger); margin-bottom:12px; font-weight:800;">🚨 Exfiltration & Traffic Analysis</h4>`;
+
+                        // Pillar 1: Data Leaks
+                        if (pillars.pillar_1?.detected) {
+                            exfilHtml += `<div style="margin-bottom:12px; background:#fef2f2; padding:12px; border-radius:8px; border-left:4px solid var(--danger);">
+                                    <strong style="color:#991b1b; font-size:0.8rem;">Pillar 1: Data Leakage</strong>
+                                    <div style="font-size:0.75rem; margin-top:4px;">${pillars.pillar_1.summary}</div>
+                                    <ul style="margin:4px 0 0 16px; font-size:0.7rem; color:#7f1d1d;">${pillars.pillar_1.details.map(d => `<li>${d}</li>`).join('')}</ul>
+                                </div>`;
+                        }
+
+                        // Pillar 2: Unauthorized Destinations
+                        if (pillars.pillar_2?.detected) {
+                            exfilHtml += `<div style="margin-bottom:12px; background:#fff7ed; padding:12px; border-radius:8px; border-left:4px solid var(--warning);">
+                                    <strong style="color:#9a3412; font-size:0.8rem;">Pillar 2: Unauthorized Communication</strong>
+                                    <div style="font-size:0.75rem; margin-top:4px;">${pillars.pillar_2.summary}</div>
+                                    <ul style="margin:4px 0 0 16px; font-size:0.7rem; color:#7c2d12;">${pillars.pillar_2.details.map(d => `<li>${d}</li>`).join('')}</ul>
+                                </div>`;
+                        }
+
+                        // Pillar 3: Stealth
+                        if (pillars.pillar_3?.detected) {
+                            exfilHtml += `<div style="margin-bottom:12px; background:#f0fdf4; padding:12px; border-radius:8px; border-left:4px solid var(--success); border:1px solid #bbf7d0;"> 
+                                    <strong style="color:#166534; font-size:0.8rem;">Pillar 3: Stealth Mechanisms</strong>
+                                    <div style="font-size:0.75rem; margin-top:4px;">${pillars.pillar_3.summary}</div>
+                                    <ul style="margin:4px 0 0 16px; font-size:0.7rem; color:#14532d;">${pillars.pillar_3.details.map(d => `<li>${d}</li>`).join('')}</ul>
+                                </div>`;
+                        }
+                        exfilHtml += '</div>';
+                        return exfilHtml;
+                    })()}
+
+                        ${/* FORMS & CREDENTIALS SECTION */ ''}
+                        ${(() => {
+                        if (!sb.detected_forms || sb.detected_forms.length === 0) return '';
+                        let formHtml = '<div style="margin-top:20px;">';
+                        formHtml += `<h4 style="font-size:0.75rem; text-transform:uppercase; color:var(--text-muted); margin-bottom:12px;">Interactive Forms (${sb.detected_forms.length})</h4>`;
+
+                        formHtml += sb.detected_forms.map(f => {
+                            const hasPassword = f.fields.some(field => field.type === 'password');
+                            const alertStyle = hasPassword ? 'border:1px solid var(--danger); background:#fef2f2;' : 'border:1px solid var(--border); background:#f8fafc;';
+                            const icon = hasPassword ? '🔑 CREDENTIAL HARVESTING' : '📝 Input Form';
+
+                            return `
+                                <div style="${alertStyle} padding:12px; border-radius:8px; margin-bottom:8px;">
+                                    <div style="font-size:0.75rem; font-weight:700; color:${hasPassword ? 'var(--danger)' : 'var(--text-main)'}; margin-bottom:4px;">
+                                        ${icon}
+                                    </div>
+                                    <div style="font-size:0.7rem; font-family:monospace; margin-bottom:4px;">Action: ${f.action}</div>
+                                    <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                                        ${f.fields.map(field => `<span style="background:white; border:1px solid var(--border); padding:2px 6px; border-radius:4px; font-size:0.65rem;">${field.name} (${field.type})</span>`).join('')}
+                                    </div>
+                                </div>`;
+                        }).join('');
+
+                        formHtml += '</div>';
+                        return formHtml;
+                    })()}
+
+                        ${domHtml}
+                        ${networkHtml}
                     </div>
                 `;
             } else {

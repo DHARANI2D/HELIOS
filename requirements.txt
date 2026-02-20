@@ -23,6 +23,7 @@ oletools
 Pillow
 openpyxl
 openpyxl
+pefile
 
 # Utilities
 python-dotenv

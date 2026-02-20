@@ -189,6 +189,41 @@ def generate_html_report(data: dict) -> str:
                 </tbody>
             </table>
 
+            <h2>File Forensic Analysis</h2>
+            <div style="display:grid; grid-template-columns: 1fr; gap:20px;">
+                { "".join([f"""
+                <div style="padding:20px; border:1px solid #e2e8f0; border-radius:12px; background:white;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <h3 style="margin:0; font-size:16px; color:#1e293b;">📄 {a['filename']}</h3>
+                        <span style="font-size:12px; font-weight:bold; color:#64748b;">{a['type']} | {a['size']}</span>
+                    </div>
+                    
+                    { (lambda f: f'''
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px;">
+                        <div>
+                            <h4 style="font-size:11px; text-transform:uppercase; color:#64748b; border-bottom:1px solid #eee; padding-bottom:4px; margin-bottom:12px;">Structural Metadata</h4>
+                            <div style="font-size:13px;">
+                                <div><b>Entropy:</b> {float(f.get('entropy', 0)):.2f}</div>
+                                <div><b>Obfuscation:</b> {f.get('obfuscation', 'None')}</div>
+                                {f'<div><b>Compile Time:</b> {f["pe_metadata"]["compile_time"]}</div>' if f.get('pe_metadata', {}).get('compile_time') else ''}
+                                {f'<div><b>Imphash:</b> <small>{f["pe_metadata"]["imphash"]}</small></div>' if f.get('pe_metadata', {}).get('imphash') else ''}
+                            </div>
+                        </div>
+                        
+                        { (lambda pm: f'''
+                        <div>
+                            <h4 style="font-size:11px; text-transform:uppercase; color:#64748b; border-bottom:1px solid #eee; padding-bottom:4px; margin-bottom:12px;">API Extraction (PE Imports)</h4>
+                            <div style="max-height:150px; overflow-y:auto; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0; font-family:monospace; font-size:11px;">
+                                {"".join([f'<div><b style="color:#2563eb;">{dll}:</b> {", ".join(pm["all_imports"][dll][:10])}{"..." if len(pm["all_imports"][dll]) > 10 else ""}</div>' for dll in pm.get("all_imports", {})]) or "No imports extracted."}
+                            </div>
+                        </div>
+                        ''' if pm.get("all_imports") else "")(f.get('pe_metadata', {})) }
+                    </div>
+                    ''' if f else '<p style="font-size:12px; color:#64748b;">No forensic triggers identified.</p>')(a.get('forensics')) }
+                </div>
+                """ for a in data.get("attachments", []) if a.get("forensics")]) or '<p style="text-align:center; padding:32px; color:#64748b; background:#f1f5f9; border-radius:12px;">No attachments submitted for advanced forensics.</p>' }
+            </div>
+
             <h2>Sandbox Detonation Results</h2>
             {sandbox_findings or '<p style="text-align:center; padding:32px; color:#64748b; background:#f1f5f9; border-radius:12px;">No URLs selected for sandbox detonation.</p>'}
 

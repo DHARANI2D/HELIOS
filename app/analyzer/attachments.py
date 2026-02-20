@@ -31,19 +31,21 @@ from app.analyzer.body import check_url_intel
 
 logger = logging.getLogger("uvicorn")
 
-async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], list[dict], list[str]]:
+async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], list[dict], list[str], list[str]]:
     """
     Analyzes attachments for suspicious types, hashes, macros, and nested link intelligence.
     Returns: (score, reasons, processed_attachments, collected_domains)
     """
     from app.analyzer.body import check_domain_age # Lazy import to avoid circular dep
     from app.analyzer.archives import ArchiveAnalyzer
+    from app.analyzer.pe_analyzer import PEAnalyzer
 
     score = 0
     reasons = []
     processed_attachments = []
     
     archive_analyzer = ArchiveAnalyzer()
+    pe_analyzer = PEAnalyzer()
 
     # Pre-process: Expand archives
     all_attachments = list(attachments)
@@ -69,6 +71,7 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
         i += 1
 
     extracted_domains = set()
+    all_extracted_urls = []
 
     risky_extensions = [".exe", ".scr", ".vbs", ".js", ".bat", ".cmd", ".ps1", ".jar"]
     office_extensions_ole = [".doc", ".xls", ".ppt"]
@@ -143,6 +146,30 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
                 score += 20
                 risk_label = "High Risk"
                 reasons.append(f"Executable attachment detected: {filename}")
+                
+                # PE Analysis
+                if ext in [".exe", ".scr", ".dll", ".sys"]:
+                    pe_res = pe_analyzer.analyze_pe(content, filename)
+                    if pe_res["is_pe"]:
+                         if pe_res["score"] > 0:
+                             score += pe_res["score"]
+                             reasons.extend(pe_res["reasons"])
+                         
+                         if pe_res["is_packed"]:
+                             forensic_signals["high_entropy"] = True
+                             forensic_signals["obfuscation"] = True
+                         
+                         if pe_res["suspicious_imports"]:
+                             forensic_signals["suspicious_calls"].extend(pe_res["suspicious_imports"])
+
+                         # Store PE data in forensic signals for later
+                         forensic_signals["pe_metadata"] = {
+                             "compile_time": pe_res["compile_time"],
+                             "imphash": pe_res["imphash"],
+                             "sections": pe_res["sections"],
+                             "suspicious_imports": pe_res["suspicious_imports"],
+                             "all_imports": pe_res.get("all_imports", {})
+                         }
                 break
         
         # --- Content & Hyperlink Extraction ---
@@ -434,4 +461,7 @@ async def analyze_attachments(attachments: list[dict]) -> tuple[int, list[str], 
 
         processed_attachments.append(processed_data)
         
-    return score, reasons, processed_attachments, list(extracted_domains)
+        # Collect all URLs for sandbox analysis
+        all_extracted_urls.extend(nested_urls)
+
+    return score, reasons, processed_attachments, list(extracted_domains), list(set(all_extracted_urls))

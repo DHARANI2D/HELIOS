@@ -434,10 +434,30 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
                                if not (att.get("filename", "").lower() in ["headers.txt", "body.txt", "body.html"])]
         if filtered_attachments:
             logger.info(f"Session {session_id}: Starting analysis of {len(filtered_attachments)} attachments")
-            a_score, a_reasons, processed_attachments, att_domains = await analyze_attachments(filtered_attachments)
+            a_score, a_reasons, processed_attachments, att_domains, att_urls = await analyze_attachments(filtered_attachments)
             result.body_score += a_score
             result.body_reasons.extend(a_reasons)
             result.attachments = processed_attachments
+
+            if att_urls:
+                result.extracted_urls.extend(att_urls)
+                # Deduplicate and Sandbox
+                for url in set(att_urls):
+                     try:
+                         logger.info(f"Session {session_id}: Sandboxing attachment URL {url}")
+                         sb_result = await sandbox.analyze_url(url)
+                         sb_score, sb_reasons, _ = calculate_sandbox_score(sb_result)
+                         sb_result.score = sb_score
+                         sb_result.reasons = sb_reasons
+                         sb_result.status = "complete"
+                         result.sandbox_results.append(sb_result)
+                         
+                         if sb_score > 0:
+                            result.sandbox_score += sb_score
+                            result.sandbox_reasons.extend(sb_reasons)
+                     except Exception as e:
+                         logger.error(f"Sandbox failed for {url}: {e}")
+
             if att_domains:
                 # Add unique domains to suspicious_domains list
                 current_domains = set(result.suspicious_domains)
@@ -504,12 +524,13 @@ async def _analyze_standalone_logic(type, input_data):
             return await get_ip_intel(input_data)
         elif type == 'attachment':
             content = base64.b64decode(input_data['content'])
-            a_score, a_reasons, processed, att_domains = await analyze_attachments([{"filename": input_data['filename'], "content": content}])
+            a_score, a_reasons, processed, att_domains, att_urls = await analyze_attachments([{"filename": input_data['filename'], "content": content}])
             return {
                 "score": a_score, 
                 "reasons": a_reasons, 
                 "attachment": processed[0] if processed else {},
-                "extracted_domains": att_domains
+                "extracted_domains": att_domains,
+                "extracted_urls": att_urls
             }
     except Exception as e:
         logger.error(f"Standalone tool error: {e}")
