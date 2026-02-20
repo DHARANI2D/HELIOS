@@ -10,7 +10,7 @@ block_cipher = None
 
 a = Analysis(
     [os.path.join(project_root, 'app', 'eel_main.py')],
-    pathex=[project_root, os.path.join(project_root, 'app')],
+    pathex=[project_root],
     binaries=[],
     datas=[
         (os.path.join(project_root, 'app', 'templates'), 'app/templates'),

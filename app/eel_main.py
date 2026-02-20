@@ -3,13 +3,16 @@ import os
 import sys
 import io
 
-# Ensure project and app roots are in sys.path for modular imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
+# Robust path resolution for both source and frozen (PyInstaller) environments
+if getattr(sys, 'frozen', False):
+    # In frozen mode, sys._MEIPASS is the root where 'app/' resides
+    project_root = sys._MEIPASS
+else:
+    # In source mode, eel_main.py is in 'app/', so project_root is the parent
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
 
 # GUI Patch: Redirect stdout/stderr to dummy streams if None (Windows --noconsole fix)
 if sys.stdout is None:
@@ -40,17 +43,7 @@ from app.analyzer.body import analyze_body, check_url_intel
 from app.analyzer.attachments import analyze_attachments
 from app.analyzer.reputation import get_ip_intel
 from app.analyzer.mxtoolbox import query_mxtoolbox_with_headers
-
-# Robust import for report_generator
-try:
-    from app.analyzer.report_generator import generate_html_report
-except ImportError as e:
-    logger.warning(f"Failed to import app.analyzer.report_generator: {e}. Trying fallback...")
-    try:
-        from analyzer.report_generator import generate_html_report
-    except ImportError:
-        logger.error("Critial: Could not find report_generator in any path.")
-        raise
+from app.analyzer.report_generator import generate_html_report
 from app.sandbox.browser import Sandbox
 from app.core.scoring import aggregate_verdict, calculate_sandbox_score
 from app.core.schemas import AnalysisResult, SandboxResult
