@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 
 from ...core.database import get_db
-from ...core.models import Investigation, NormalizedEvent, InvestigationStatusEnum, SeverityEnum
+from ...core.models import Investigation, NormalizedEvent, InvestigationStatusEnum, SeverityEnum, MITREMapping, TimelineEntry
 from ...core.config import settings
 from ...intake.gateway import IntakeGateway, PasswordRequiredError, InvalidPasswordError
 from ...intake.normalizer import LogNormalizer
@@ -243,6 +243,21 @@ async def get_investigation(investigation_id: str, db: AsyncSession = Depends(ge
     )
     samples = sample_res.scalars().all()
 
+    # Get MITRE mappings
+    mitre_res = await db.execute(
+        select(MITREMapping)
+        .where(MITREMapping.investigation_id == investigation_id)
+    )
+    mitre_mappings = mitre_res.scalars().all()
+
+    # Get timeline entries
+    timeline_res = await db.execute(
+        select(TimelineEntry)
+        .where(TimelineEntry.investigation_id == investigation_id)
+        .order_by(TimelineEntry.timestamp.asc())
+    )
+    timeline_entries = timeline_res.scalars().all()
+
     return {
         "id": inv.id,
         "title": inv.title,
@@ -267,6 +282,28 @@ async def get_investigation(investigation_id: str, db: AsyncSession = Depends(ge
                 "file_hash_sha256": ev.file_hash_sha256
             }
             for ev in samples
+        ],
+        "mitre_mappings": [
+            {
+                "id": m.id,
+                "technique_id": m.technique_id,
+                "technique_name": m.technique_name,
+                "tactic": m.tactic,
+                "evidence": m.evidence,
+                "confidence": m.confidence
+            }
+            for m in mitre_mappings
+        ],
+        "timeline_entries": [
+            {
+                "id": t.id,
+                "timestamp": t.timestamp.isoformat() if t.timestamp else None,
+                "event_description": t.event_description,
+                "event_type": t.event_type,
+                "severity": t.severity,
+                "evidence_source": t.evidence_source
+            }
+            for t in timeline_entries
         ]
     }
 

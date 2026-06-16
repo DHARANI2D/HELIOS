@@ -153,17 +153,41 @@ export default function App() {
     };
     
     try {
-      const res = await fetch(`${API_BASE}/settings`, {
+      // 1. Save demo settings keys
+      const resSettings = await fetch(`${API_BASE}/settings`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(demoPayload)
       });
-      if (res.ok) {
-        alert("Demo Mode Activated! Mock keys and model configurations loaded successfully.");
-        fetchSettings();
+      
+      if (!resSettings.ok) {
+        alert("Failed to load demo configurations.");
+        return;
+      }
+      
+      await fetchSettings();
+      
+      // 2. Trigger demo investigation creation
+      const resDemo = await fetch(`${API_BASE}/settings/demo`, {
+        method: "POST"
+      });
+      
+      if (resDemo.ok) {
+        const demoData = await resDemo.json();
+        const demoId = demoData.investigation_id;
+        
+        // 3. Refresh list and select demo
+        await fetchInvestigations();
+        setSelectedId(demoId);
+        setActiveTab("rca");
+        
+        alert("Demo Mode Activated! Mock keys loaded and complete forensic investigation populated successfully.");
+      } else {
+        alert("Failed to instantiate demo investigation.");
       }
     } catch (err) {
       console.error("Failed to load demo settings", err);
+      alert("Error occurred while activating Demo Mode.");
     }
   };
 
@@ -1154,20 +1178,85 @@ export default function App() {
                       <p style={{ fontSize: '14px', lineHeight: '1.6', color: '#f1f5f9' }}>{selectedDetails.root_cause}</p>
                     </div>
 
-                    {selectedDetails.completed_at && (
+                    {/* Reconstructed Timeline: Dynamic or Fallback */}
+                    {selectedDetails.timeline_entries && selectedDetails.timeline_entries.length > 0 ? (
                       <div>
                         <h4 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--color-text-muted)', marginBottom: '10px', fontWeight: '700' }}>Reconstructed Forensic Timeline</h4>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
-                          {/* Use mock timeline if logs are mapped */}
-                          <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.05)', borderLeft: '3px solid var(--status-failed)', borderRadius: '4px' }}>
-                            <span style={{ color: 'var(--color-text-muted)' }}>08:01:23 UTC</span> | winword.exe opened phishing doc invoice.docx [Event ID 11]
+                          {selectedDetails.timeline_entries.map((entry, idx) => {
+                            const timeStr = entry.timestamp 
+                              ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' UTC' 
+                              : '00:00:00 UTC';
+                            const isCritical = entry.severity === 'critical' || entry.severity === 'high';
+                            return (
+                              <div key={idx} style={{ 
+                                padding: '8px 12px', 
+                                background: isCritical ? 'rgba(239, 68, 68, 0.05)' : 'rgba(245, 158, 11, 0.05)', 
+                                borderLeft: `3px solid ${isCritical ? 'var(--status-failed)' : '#f59e0b'}`, 
+                                borderRadius: '4px',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}>
+                                <div>
+                                  <span style={{ color: 'var(--color-text-muted)', marginRight: '8px' }}>{timeStr}</span> 
+                                  <span style={{ color: '#fff' }}>| {entry.event_description}</span>
+                                </div>
+                                <span style={{ fontSize: '10px', opacity: 0.6, background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+                                  {entry.evidence_source}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      selectedDetails.completed_at && (
+                        <div>
+                          <h4 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--color-text-muted)', marginBottom: '10px', fontWeight: '700' }}>Reconstructed Forensic Timeline</h4>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontFamily: 'monospace', fontSize: '12px' }}>
+                            <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.05)', borderLeft: '3px solid var(--status-failed)', borderRadius: '4px' }}>
+                              <span style={{ color: 'var(--color-text-muted)' }}>08:01:23 UTC</span> | winword.exe opened phishing doc invoice.docx [Event ID 11]
+                            </div>
+                            <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.08)', borderLeft: '3px solid var(--status-failed)', borderRadius: '4px' }}>
+                              <span style={{ color: 'var(--color-text-muted)' }}>08:01:31 UTC</span> | Spawned powershell.exe -enc IEX (New-Object Net.WebClient)... [Event ID 1]
+                            </div>
+                            <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', borderLeft: '3px solid var(--status-failed)', borderRadius: '4px' }}>
+                              <span style={{ color: 'var(--color-text-muted)' }}>08:01:34 UTC</span> | Outbound socket connection established to C2 node 185.220.101.5:4444 [Event ID 3]
+                            </div>
                           </div>
-                          <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.08)', borderLeft: '3px solid var(--status-failed)', borderRadius: '4px' }}>
-                            <span style={{ color: 'var(--color-text-muted)' }}>08:01:31 UTC</span> | Spawned powershell.exe -enc IEX (New-Object Net.WebClient)... [Event ID 1]
-                          </div>
-                          <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', borderLeft: '3px solid var(--status-failed)', borderRadius: '4px' }}>
-                            <span style={{ color: 'var(--color-text-muted)' }}>08:01:34 UTC</span> | Outbound socket connection established to C2 node 185.220.101.5:4444 [Event ID 3]
-                          </div>
+                        </div>
+                      )
+                    )}
+
+                    {/* Mapped MITRE ATT&CK Techniques */}
+                    {selectedDetails.mitre_mappings && selectedDetails.mitre_mappings.length > 0 && (
+                      <div style={{ marginTop: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
+                        <h4 style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--color-text-muted)', marginBottom: '12px', fontWeight: '700' }}>Mapped MITRE ATT&CK Techniques</h4>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
+                          {selectedDetails.mitre_mappings.map((mapping, idx) => (
+                            <div key={idx} style={{ 
+                              background: 'rgba(255, 255, 255, 0.02)', 
+                              border: '1px solid var(--border-color)', 
+                              borderRadius: '6px', 
+                              padding: '12px' 
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--color-primary)', fontFamily: 'monospace' }}>
+                                  {mapping.technique_id}
+                                </span>
+                                <span style={{ fontSize: '10px', color: 'var(--color-text-muted)', textTransform: 'uppercase', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+                                  {mapping.tactic}
+                                </span>
+                              </div>
+                              <h5 style={{ fontSize: '13px', fontWeight: '700', color: '#fff', marginBottom: '4px' }}>
+                                {mapping.technique_name}
+                              </h5>
+                              <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', margin: 0 }}>
+                                {mapping.evidence}
+                              </p>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     )}

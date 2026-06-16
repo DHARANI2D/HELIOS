@@ -4,12 +4,27 @@ from .config import settings
 from .models import Base
 import os
 
+import socket
+from urllib.parse import urlparse
+
 # Connect database engine
 # Support sqlite fallback out-of-the-box for ease of setup
 db_url = settings.DATABASE_URL
-if db_url.startswith("sqlite"):
-    # Ensure SQLite path is created if using a relative file path
-    pass
+
+# Robust automatic fallback to local SQLite if PostgreSQL is unreachable
+if "postgresql" in db_url:
+    try:
+        # Extract hostname and port
+        parsed = urlparse(db_url.replace("+asyncpg", ""))
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 5432
+        
+        # Test connection with a small timeout
+        with socket.create_connection((host, port), timeout=1.0):
+            pass
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        # Fallback to local SQLite using aiosqlite driver
+        db_url = "sqlite+aiosqlite:///./asip.db"
 
 engine = create_async_engine(
     db_url,
