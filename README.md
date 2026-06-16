@@ -1,264 +1,262 @@
 # 🛡️ Autonomous Security Investigation Platform (ASIP)
 
-ASIP is an enterprise-grade, **evidence-first**, **graph-native** security investigation swarming engine. Instead of acting as a simple Q&A chatbot, ASIP thinks like a senior SOC Lead and Incident Responder: it receives telemetry archives, correlates process execution paths, queries internal playbooks, validates findings via adversarial QA check-loops, and formats automated containment reports.
+### AI-Powered Autonomous Security Operations & Investigation Platform
+*Transform alerts into evidence-backed investigations using Multi-Agent AI Swarms, GraphRAG, Threat Intelligence, Investigation Memory, and Autonomous Reasoning.*
+
+<div align="center">
+
+![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green?style=for-the-badge&logo=fastapi)
+![LangGraph](https://img.shields.io/badge/LangGraph-Agent%20Orchestration-purple?style=for-the-badge&logo=chainlink)
+![Neo4j](https://img.shields.io/badge/Neo4j-GraphRAG-blue?style=for-the-badge&logo=neo4j)
+![Qdrant](https://img.shields.io/badge/Qdrant-Vector%20Database-orange?style=for-the-badge)
+![OpenSearch](https://img.shields.io/badge/OpenSearch-Search-red?style=for-the-badge&logo=opensearch)
+![MITRE](https://img.shields.io/badge/MITRE-ATT%26CK-darkgreen?style=for-the-badge)
+![Docker](https://img.shields.io/badge/Docker-Ready-blue?style=for-the-badge&logo=docker)
+
+</div>
+
+---
+
+## 🚀 Vision
+
+**ASIP is not a chatbot.**
+
+ASIP is an autonomous investigation operating system designed to think and operate like a senior SOC analyst, threat hunter, incident responder, malware analyst, and detection engineer simultaneously.
+
+Instead of simply summarizing alerts, ASIP:
+*   Collects evidence and parses telemetry deterministically
+*   Correlates logs across endpoints, firewalls, and mailboxes
+*   Extracts and decodes obfuscated indicators of compromise (IOCs)
+*   Maps raw events to MITRE ATT&CK techniques
+*   Reconstructs forensic timelines chronologically
+*   Determines root cause vectors through Chain-of-Thought (CoT) reasoning
+*   Validates findings through an Adversarial QA agent
+*   Generates actionable, prioritized containment recommendations
+*   Recalls past cases via semantic investigation memory
+
+---
+
+## 🎯 Why ASIP Exists
+
+Modern Security Operations Centers (SOC) face crippling operational overhead:
+
+| Challenge | Impact | ASIP Solution |
+| :--- | :--- | :--- |
+| **Alert Fatigue** | Analysts overwhelmed by thousands of daily alerts. | **Autonomous Triage**: Instant analysis of incoming webhooks. |
+| **Tool Fragmentation** | Data spread across SIEM, EDR, Cloud, Email, and Identity. | **Universal Event Schema (UES)**: Consolidates diverse telemetry. |
+| **Manual Investigations** | Hours spent manually querying process paths. | **Graph Correlation**: Automated parent-child process mapping. |
+| **Knowledge Silos** | Historical investigation reports are rarely reused. | **Incident Memory**: Auto-indexes reports for future recall. |
+
+---
+
+## ⚡ Core Capabilities & Integrations
+
+### Ingestion Matrix
+*   **SIEM**: Splunk, Google SecOps, Microsoft Sentinel, Elastic Security
+*   **EDR/XDR**: CrowdStrike Falcon, Microsoft Defender, SentinelOne, Wazuh
+*   **Cloud Platforms**: AWS CloudTrail, Azure Monitor, GCP Cloud Logging
+*   **Identity & Collaboration**: Active Directory, Okta, Microsoft 365, Google Workspace
+
+### Supported File Formats
+*   ✅ **Structured Data**: CSV, XLSX, JSON, XML
+*   ✅ **System Logs**: raw `.log`, `.txt` Syslog
+*   ✅ **Forensics**: Windows Event Binary (`.evtx`), Packet Capture (`.pcap`)
+*   ✅ **Archives**: `.zip`, `.7z`, `.tar` (including recursively nested & password-encrypted zip files)
+
+---
+
+## 🤖 AI Swarm Architecture
+
+ASIP organizes the investigation workflow into four consolidated cognitive nodes within a LangGraph state machine, preventing context drift:
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                                 ASIP                                   │
-│            Autonomous Swarm Security Investigation Platform            │
-└────────────────────────────────────────────────────────────────────────┘
-          │                                           │
-          ▼ Ingest logs (ZIP/7z/EVTX/CSV)             ▼ Alert Webhooks (Splunk/EDR)
-┌───────────────────────────────────┐       ┌────────────────────────────────────┐
-│      Recursive Extraction         │       │     Webhook normalization route    │
-│  (Interactive Decryption Prompt)  │       │   (CrowdStrike, Wazuh, SecOps)     │
-└─────────────────┬─────────────────┘       └─────────────────┬──────────────────┘
-                  │                                           │
-                  └─────────────────────┬─────────────────────┘
-                                        │ Universal Event Schema (UES)
-                                        ▼
-                            ┌───────────────────────┐
-                            │ SQLite/Postgres DB    │
-                            └───────────┬───────────┘
-                                        │
-                 ┌──────────────────────┴──────────────────────┐
-                 ▼                                             ▼
-┌───────────────────────────────────┐       ┌────────────────────────────────────┐
-│  Entity Process Correlation Graph │       │   Semantic Vector Database (RAG)   │
-│  - SPAWNED parent-child trees     │       │   - Corporate IR Playbooks         │
-│  - CONNECTED_TO network links     │       │   - Curated MITRE ATT&CK Corpus    │
-│  - CREATED file system trace      │       │   - Historical Incidents Memory    │
-└────────────────┬──────────────────┘       └─────────────────┬──────────────────┘
-                 │                                            │
-                 └──────────────────────┬─────────────────────┘
-                                        │ Context mapping inject
-                                        ▼
-                            ┌───────────────────────┐
-                            │ LangGraph Agent Swarm │
-                            │                       │
-                            │ 1. Threat Triage      │
-                            │ 2. Correlation & RCA  │
-                            │ 3. Adversarial QA     │ ◄── [Fails: Loops back to RCA]
-                            │ 4. Executive Report   │
-                            └───────────┬───────────┘
-                                        │
-                                        ▼
-                            ┌───────────────────────┐
-                            │ Actionable Playbook & │
-                            │  Incident Briefing    │
-                            └───────────────────────┘
+                  ┌─────────────────────────────────────────┐
+                  │          Ingestion & Normalizer         │
+                  └────────────────────┬────────────────────┘
+                                       │
+                                       ▼
+                  ┌─────────────────────────────────────────┐
+                  │          1. Triage & Extraction         │
+                  │          - Contextualizes Alert         │
+                  │          - Extracts raw IOC details     │
+                  └────────────────────┬────────────────────┘
+                                       │
+                                       ▼
+                  ┌─────────────────────────────────────────┐
+                  │       2. Correlation & RCA Agent        │
+                  │       - Rebuilds Process Trees          │
+                  │       - Queries Playbook & Incident RAG │
+                  └────────────────────┬────────────────────┘
+                                       │
+                                       ▼
+             ┌─────────────────────────────────────────┐
+             │         3. Adversarial QA Agent         │
+             │         - Verifies database citations   │
+             └────────────────────┬────────────────────┘
+                                  │
+                  ┌───────────────┴───────────────┐
+                  │ Does it pass validation?      │
+                  └──────┬─────────────────┬──────┘
+                         │ No              │ Yes
+                         ▼                 ▼
+             ┌───────────────────────┐ ┌─────────────────────────┐
+             │ Loop back to RCA node │ │ 4. Reporting Agent      │
+             │ to correct analysis   │ │ - Compiles Markdown     │
+             └───────────────────────┘ │   Summary & Playbook    │
+                                       └─────────────────────────┘
 ```
 
 ---
 
-## 🚀 Key Features
+## 🕸️ GraphRAG & Inmemory Memory Layer
 
-*   **Recursive Decryption Gateway**: Automatically extracts zip, 7z, and tar archives recursively. If an archive is password-protected, the pipeline pauses, updates state to `awaiting_password`, and triggers an interactive frontend decryption prompt.
-*   **Multi-Platform Log Normalizer**: Programmatically parses Splunk CSV exports, Wazuh alerts, Windows Event binary EVTX files, Sysmon telemetry, Google SecOps UDM formats, and CrowdStrike process tables into the unified **Universal Event Schema (UES)**.
-*   **Swarm Agent Orchestration (LangGraph)**: Orchestrates four focused agent nodes inside an iterative state machine:
-    1.  **Triage Agent**: Contextualizes alerts and maps threat indicators.
-    2.  **RCA Agent**: Reconstructs execution flow using the correlation graph.
-    3.  **Adversarial QA Agent**: Challenges findings, ensuring every claim is backed by a verified database log citation.
-    4.  **Reporting Agent**: Generates containment strategies (Immediate, Short, Long-term) and incident reports.
-*   **Knowledge Base & Incident Memory RAG**: Queries a semantic vector store (Qdrant with memory fallback) to surface standard playbooks, MITRE ATT&CK mappings, and historical incidents matching the alert context.
-*   **Enterprise Webhook Intake**: Exposes real-time API receivers that parse alerts from SIEMs/EDRs and trigger automated triage tasks immediately in the background.
-*   **Wow-Factor Dashboard UI**: High-end cyberpunk-styled dark interface with glassmorphic cards, execution chain processes viewer, active agent checklists, and interactive timeline components.
+ASIP combines traditional vector retrieval with graph-native intelligence:
+
+*   **Vector RAG**: Indexing of MITRE ATT&CK mitigation manuals and internal enterprise playbooks into Qdrant vector databases.
+*   **GraphRAG**: Contextualizes entity relationships:
+    `[User] ──(Logon)──► [Host] ──(Spawned)──► [Process] ──(Connected)──► [C2 IP]`
+*   **Investigation Memory**: Completed markdown reports and threat trees are stored inside the vector index. New alerts check memory for semantic overlap, instantly surfacing similar historical vectors (e.g., *"Same Tor C2 beacon was investigated 90 days ago on server04"*).
 
 ---
 
-## 📁 Project Directory Layout
+## 📁 Project Structure
 
 ```
 Helios/
-├── requirements.txt            # Python dependencies (fastapi, langgraph, EVTX, aiosqlite)
-├── docker-compose.yml          # Services definition (Postgres, Redis, Qdrant)
-├── asip/                       # Core python backend module
+├── requirements.txt            # Python backend requirements
+├── docker-compose.yml          # Container configuration (Postgres, Redis, Qdrant)
+├── asip/                       # Core backend package
 │   ├── core/
-│   │   ├── config.py           # Configuration model and directory setup
-│   │   ├── database.py         # Async engine factory (PostgreSQL / SQLite)
-│   │   └── models.py           # UES and Investigation schemas
+│   │   ├── config.py           # Settings and credentials manager
+│   │   ├── database.py         # DB engines session factory
+│   │   └── models.py           # Database and UES tables
 │   ├── intake/
-│   │   ├── gateway.py          # Recursive zip/7z extraction gateway
-│   │   ├── normalizer.py       # Normalizer coordinator
-│   │   └── parsers/            # Sysmon, splunk, wazuh, crowdstrike formats
+│   │   ├── gateway.py          # Recursive archive handler (zip/7z password prompt)
+│   │   ├── normalizer.py       # Format routing coordinator
+│   │   └── parsers/            # Platform-specific parsers (EVTX, CSV, JSON)
 │   ├── graph/
-│   │   └── entity_graph.py     # NetworkX forensic correlation tree builder
+│   │   └── entity_graph.py     # NetworkX execution chain tree builder
 │   ├── enrichment/
-│   │   ├── virustotal.py       # IP/Hash enrichment client
-│   │   └── manager.py          # Threat intelligence manager
+│   │   └── manager.py          # VirusTotal & AbuseIPDB enrichment manager
 │   ├── rag/
-│   │   ├── vector_store.py     # Vector store client (Qdrant & shared mock)
-│   │   ├── playbook_rag.py     # Indexer for ATT&CK techniques & playbooks
-│   │   └── incident_memory.py  # Cross-incident semantic storage
+│   │   ├── vector_store.py     # Vector indexing (Qdrant & shared mock cache)
+│   │   ├── playbook_rag.py     # Indices for ATT&CK & playbooks
+│   │   └── incident_memory.py  # Incident indexing & semantic lookup
 │   ├── agents/
-│   │   ├── orchestrator.py     # LangGraph orchestrator state-machine
-│   │   ├── triage_agent.py     # Classification agent
-│   │   ├── rca_agent.py        # Correlation & RCA agent
-│   │   ├── qa_agent.py         # Verification QA validator
-│   │   └── report_agent.py     # Case playbook compiler
+│   │   ├── orchestrator.py     # LangGraph Swarm State Machine
+│   │   ├── triage_agent.py     # Triage node
+│   │   ├── rca_agent.py        # Analysis reasoning node
+│   │   ├── qa_agent.py         # Verification check node
+│   │   └── report_agent.py     # Report writing node
 │   ├── api/
-│   │   ├── main.py             # FastAPI entry point
+│   │   ├── main.py             # App initialization and startup lifespans
 │   │   └── routes/
-│   │       ├── investigate.py  # File upload and triage endpoint
-│   │       └── webhooks.py     # SIEM Alert ingestion endpoint
+│   │       ├── investigate.py  # Standard forensic file ingestions
+│   │       └── webhooks.py     # SIEM Alert webhook endpoints
 │   └── models/
-│       └── llm_clients.py      # OpenAI/Anthropic/Ollama routers with fallback
-└── frontend/                   # React web dashboard
-    ├── src/
-    │   ├── App.jsx             # Main dashboard UI
-    │   ├── index.css           # Glassmorphism styling & color tokens
-    │   └── main.jsx            # React mounting hook
-    ├── index.html
-    └── vite.config.js
+│       └── llm_clients.py      # LLM API Client router with mock fallbacks
+└── frontend/                   # React web client dashboard
 ```
 
 ---
 
-## ⚙️ Core Flow Diagram
+## ⚙️ Installation & Setup
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Analyst as Security Analyst
-    participant API as FastAPI Backend
-    participant Gateway as Intake Gateway
-    participant Normalizer as Log Normalizer
-    participant Graph as Entity Graph Builder
-    participant Store as Vector Store Manager
-    participant LangGraph as LangGraph Agent Swarm
-
-    Analyst->>API: Post /upload (ZIP Archive / Alert Details)
-    API->>Gateway: Recursive Unpack (magic bytes checking)
-    alt Archive is Password Protected
-        Gateway-->>API: Throw PasswordRequiredError
-        API-->>Analyst: Return status "awaiting_password" & prompt UI
-        Analyst->>API: Post /password (Decryption password)
-        API->>Gateway: Retry Unpack with Password
-    end
-    Gateway->>API: Yield Extracted Logs list
-    API->>Normalizer: Parse and map records to UES
-    Normalizer->>API: Save normalized logs in SQLite/Postgres DB
-    API->>Graph: Map UES records into network flows
-    Graph-->>API: Return Nodes & Edges (SPAWNED, CONNECTED_TO)
-    API->>LangGraph: TriggerSwarm (state context + logs + graph)
-    
-    rect rgb(20, 24, 33)
-        note right of LangGraph: Multi-Agent Reason Iteration
-        LangGraph->>Store: Query similar incidents & playbook vectors
-        Store-->>LangGraph: Return matching contextual vectors
-        LangGraph->>LangGraph: RCA CoT Reasoning (triage -> rca)
-        LangGraph->>LangGraph: Validate findings (qa verification check)
-        loop QA Validator Rejections
-            LangGraph->>LangGraph: Correct inaccuracies and cite line counts
-        end
-        LangGraph->>LangGraph: Compile containment playbooks
-    end
-
-    LangGraph->>API: Update investigation row & save compiled Markdown report
-    API-->>Analyst: Stream complete Incident Summary & Mitigation widgets
-```
-
----
-
-## 🛠️ Installation & Setup
-
-### Prerequisites
+### 1. Prerequisites
 *   **Python**: `>= 3.10`
 *   **Node.js**: `>= 18.0`
-*   **Ollama (Optional for local analysis)**: Standard install running `qwen2.5:14b` or `llama3.3`
+*   **Ollama (Optional for fully offline air-gapped runs)**: Standard installer configured with `qwen2.5:14b` or `llama3.3`.
 
-### 1. Configure the Environment
-Create a `.env` file in the root workspace folder:
+### 2. Configure Settings
+Create a `.env` file in the root project folder:
 ```env
-# Application Settings
 PROJECT_NAME="ASIP Swarm"
-
-# Database Configuration (Postgres or local SQLite fallback)
 DATABASE_URL="sqlite+aiosqlite:///asip.db"
 
-# API Keys (Provide keys for actual LLM runs, otherwise mock mocks run)
-OPENAI_API_KEY="sk-proj-..."
+# API Keys (Optional. If missing, safe fallback mock logic executes)
+OPENAI_API_KEY="sk-..."
 ANTHROPIC_API_KEY="sk-ant-..."
 
-# Local Inference Setup
+# Local Models
 OLLAMA_BASE_URL="http://localhost:11434"
 LOCAL_MODEL="qwen2.5:14b"
 CLOUD_MODEL="claude-3-5-sonnet-20241022"
 
-# Vector DB & Embeddings Config
+# RAG & Webhook settings
 EMBEDDING_PROVIDER="mock"  # Options: mock, openai, ollama
 QDRANT_HOST="localhost"
 QDRANT_PORT=6333
 ```
 
-### 2. Install Backend Dependencies
-Set up your virtual environment and install package packages:
+### 3. Start Backend Server
 ```bash
+# Set up virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 3. Run the Backend API
-Start FastAPI server running locally:
-```bash
+# Run FastAPI with reload enabled
 uvicorn asip.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-*   Backend API documentation will be available at: [http://localhost:8000/docs](http://localhost:8000/docs)
+*   Backend documentation page is hosted at: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-### 4. Install & Launch the Frontend
-Navigate to the frontend folder, install npm modules, and run the developer server:
+### 4. Build and Run Web Client
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-*   Open your browser to: [http://localhost:5173/](http://localhost:5173/)
+*   Web portal runs at: [http://localhost:5173/](http://localhost:5173/)
 
 ---
 
 ## 📡 Webhook Integration Specifications
 
-You can register ASIP's webhooks endpoint directly within your platform alert configurations (Splunk triggers, CrowdStrike event webhooks, or Wazuh server hooks).
+Enterprise alerts can be directed straight to `/api/v1/webhooks/alerts`. The system automatically normalizes severities and initiates asynchronous swarms.
 
 *   **Endpoint**: `POST http://localhost:8000/api/v1/webhooks/alerts`
-*   **Payload Formats**: Supports native formats out-of-the-box:
-    *   **Splunk Alert Trigger**:
-        ```json
-        {
-          "search_name": "Suspicious Winword shell spawn",
-          "result": {
-            "ComputerName": "server01",
-            "CommandLine": "powershell -enc IEX (New-Object Net.WebClient).DownloadString(...)"
-          }
-        }
-        ```
-    *   **CrowdStrike webhook**:
-        ```json
-        {
-          "event": {
-            "DetectId": "12345",
-            "DetectName": "Encoded PowerShell Execution",
-            "SeverityName": "high",
-            "ComputerName": "prod-server-01",
-            "CommandLine": "powershell.exe -enc ..."
-          }
-        }
-        ```
+*   **Example Splunk Alert Inbound Payload**:
+    ```json
+    {
+      "search_name": "Suspicious PowerShell Execution Rule",
+      "result": {
+        "ComputerName": "server01.domain.local",
+        "CommandLine": "powershell.exe -enc SUVYIChOZXctT2JqZWN0IE5ldC5XZWJDbGllbnQp..."
+      }
+    }
+    ```
 
 ---
 
 ## 🧪 Verification & Testing
 
-You can run automated test scripts to verify recursive zip extraction, evtx normalizations, NetworkX process correlation, and Vector RAG searches:
+Verify that all ingestion normalizers, NetworkX process correlation, and Vector RAG incident lookups compile and execute successfully using these verification command sets:
 
 ```bash
-# Activate Virtual Environment
+# Activate virtual environment
 source .venv/bin/activate
 
-# Run Ingestion, Decryption and Graph Correlation verification suite
+# Test 1: Ingestion, Decryption, UES Normalization and NetworkX Graphing
 python /Users/dharanidharan/.gemini/antigravity-ide/brain/8f65266a-cf06-4b0e-afdf-3801699145f3/scratch/test_pipeline.py
 
-# Run Vector Store, Incident Memory indexing and Webhooks verification suite
+# Test 2: Playbook RAG, Webhook parsing, Swarm Orchestration, and Incident Memory Lookup
 python /Users/dharanidharan/.gemini/antigravity-ide/brain/8f65266a-cf06-4b0e-afdf-3801699145f3/scratch/test_rag_webhooks.py
 ```
+
+---
+
+## 🛣️ Development Roadmap
+
+*   **Phase 1**: Core Engine & Archive Handling (Ingestion normalizers and decryption gateway).
+*   **Phase 2**: Forensics Correlation (NetworkX process mapping and threat intelligence manager).
+*   **Phase 3**: Swarm Orchestration (Consolidated 4-agent LangGraph state machine).
+*   **Phase 4**: Vector Knowledge Bases (Playbook and ATT&CK indexings, Incident memory, webhooks).
+*   **Phase 5**: Autonomous SOC Operations (Sigma rule compilers, SOAR response containment connectors).
+
+---
+
+## 📜 License & Copyright
+
+**Enterprise License**  
+Copyright © ASIP. All rights reserved.
