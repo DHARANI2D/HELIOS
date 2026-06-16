@@ -27,22 +27,45 @@ ASIP is an **autonomous investigation operating system** designed to think and o
 
 ---
 
-## 🖼️ Analyst Portal Interface
+## 🖼️ Analyst Portal Showcase & Visual Walkthrough
 
-### 1. Ingest Queue & Event Stream
-Upload forensic archives, specify severity metrics, or paste telemetry payloads. Ingestion maps logs to a structured Universal Event Schema (UES).
+The **ASIP Analyst Portal** provides a premium, responsive glassmorphism UI for investigating incoming threats. Below is a detailed visual guide of the core features:
+
+### 1. Ingest Queue & Event Stream Preview
+The ingestion system allows analysts to upload forensic archives (ZIP, 7z), specify severity parameters, or paste raw JSON telemetry. Raw telemetry is mapped deterministically to a **Universal Event Schema (UES)**.
+*   **Queue Panel (Left)**: Displays ongoing and completed investigations, their status (e.g., pending, running, completed, failed, or awaiting password), event counts, and timestamp logs.
+*   **Log Stream View (Right)**: Shows a paginated list of normalized telemetry events. Analysts can filter through events using the search bar, inspecting attributes such as Event Type, Process Name, commandline strings, destination IPs, and destination ports.
+
 ![Ingest and Log Preview](assets/demo_loaded_logs.png)
 
-### 2. Multi-Agent Swarm Root Cause Analysis (RCA) & MITRE Mappings
-The RCA interface renders dynamic reconstructed forensic timelines and maps tactics and techniques directly to the MITRE ATT&CK framework.
+---
+
+### 2. Swarm Root Cause Analysis (RCA) & MITRE ATT&CK Mapping
+The reasoning core of the AI Swarm translates raw data into executive-level and technical summaries.
+*   **Root Cause Thesis**: A detailed explanation of the threat delivery vector, execution chains, command & control beaconing, and dropper persistence metrics.
+*   **Reconstructed Forensic Timeline**: Combines and orders events chronologically across files, processes, and network socket creations, mapping them to exact Sysmon/Windows Event IDs (e.g., Sysmon Event ID 1 for Process Create, Event ID 3 for Network Connect).
+*   **MITRE ATT&CK Techniques**: Displays technique cards representing tactic categories (Initial Access, Execution, Command and Control) mapped directly to active evidence with confidence scores.
+
 ![RCA and MITRE Mapping](assets/mitre_mapping_rca.png)
 
-### 3. Forensic Process Trees
-Interactive process graph visualizer tracing execution hierarchy from initial entry points down to dropper payloads and malicious command and control (C2) nodes.
+---
+
+### 3. Forensic Process Tree Visualization
+Processes, network sockets, and file writes are plotted onto an interactive, node-link graph mapping out process lineage:
+*   **Process Nodes (Teal)**: Represent processes with attributes like PID, command-line arguments, host, and executing user.
+*   **Network Targets (Blue)**: Show outbound TCP/UDP destination IPs and ports connected to by execution threads.
+*   **Dropped Files (Green)**: Highlight new binary creations, indicating file paths and SHA256 hashes.
+*   **Directed Edges**: Graph linkages showing parent-child process actions (`SPAWNED`), network sockets (`CONNECTED_TO`), and dropper file actions (`CREATED` / `LOADED`).
+
 ![Forensic Process Tree](assets/forensic_process_tree_view.png)
 
-### 4. Response & Containment Playbook
-Generates immediate asset isolation workflows, AD credential revocations, and firewall/proxy rules.
+---
+
+### 4. Response & Containment Playbooks
+The platform writes automated mitigation instructions divided into logical remediation phases:
+*   **Phase 1: Immediate Containment**: Critical actions designed to halt malware spreading immediately. Features interactive containment checkboxes such as host isolation rules (dropping network segments at EDR layers), user session revocations, and firewall proxy blocks.
+*   **Phase 2: Short-Term Sweeps & Threat Hunting**: Secondary containment tactics, including indicators to sweep active directories for malicious run keys and phishing attachment hashes.
+
 ![Mitigation Playbook](assets/response_playbook_view.png)
 
 ---
