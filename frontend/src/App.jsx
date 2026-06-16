@@ -21,7 +21,8 @@ import {
   Play,
   FileText,
   AlertOctagon,
-  Settings
+  Settings,
+  Sparkles
 } from 'lucide-react';
 
 const API_BASE = "http://localhost:8000/api/v1";
@@ -135,6 +136,34 @@ export default function App() {
       console.error("Failed to save settings", err);
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleLoadDemoSettings = async () => {
+    const demoPayload = {
+      OPENAI_API_KEY: "demo_openai_key",
+      ANTHROPIC_API_KEY: "demo_anthropic_key",
+      VIRUSTOTAL_API_KEY: "demo_vt_key",
+      ABUSEIPDB_API_KEY: "demo_abuseipdb_key",
+      OLLAMA_BASE_URL: "http://localhost:11434",
+      LOCAL_MODEL: "qwen2.5:14b",
+      CLOUD_MODEL: "claude-3-5-sonnet-20241022",
+      EMBEDDING_PROVIDER: "mock",
+      EMBEDDING_MODEL: "text-embedding-3-small"
+    };
+    
+    try {
+      const res = await fetch(`${API_BASE}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(demoPayload)
+      });
+      if (res.ok) {
+        alert("Demo Mode Activated! Mock keys and model configurations loaded successfully.");
+        fetchSettings();
+      }
+    } catch (err) {
+      console.error("Failed to load demo settings", err);
     }
   };
 
@@ -376,6 +405,26 @@ export default function App() {
           <span style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '8px' }}>
             <Activity size={14} color="var(--color-primary)" /> Correlation Engine: Active
           </span>
+          <button 
+            onClick={handleLoadDemoSettings}
+            title="Activate Demo Mode (Load Mock Keys)"
+            style={{ 
+              background: 'rgba(0, 240, 255, 0.15)', 
+              border: '1px solid var(--color-primary)', 
+              color: 'var(--color-primary)', 
+              padding: '6px 10px', 
+              borderRadius: '6px',
+              fontSize: '12px',
+              fontWeight: '700',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+              boxShadow: '0 0 10px rgba(0, 240, 255, 0.1)'
+            }}
+          >
+            <Sparkles size={12} /> Demo Mode
+          </button>
           <button 
             onClick={() => setShowSettingsModal(true)}
             title="ASIP Configuration"
