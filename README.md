@@ -1,393 +1,163 @@
-# 🛡️ ASIP
-
-# Autonomous Security Investigation Platform
+# 🛡️ ASIP: Autonomous Security Investigation Platform
 
 <div align="center">
 
-### AI-Powered Autonomous Security Operations & Investigation Platform
+### Enterprise-Grade Multi-Agent Security Operations & GraphRAG Platform
 
-Transform alerts into evidence-backed investigations using Multi-Agent AI, GraphRAG, Threat Intelligence, Investigation Memory, and Autonomous Reasoning.
+Transform cybersecurity alerts and telemetry into evidence-backed investigations using Multi-Agent AI Swarms, GraphRAG, Threat Intelligence, Investigation Memory, and Autonomous Reasoning.
 
 ---
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green)
-![LangGraph](https://img.shields.io/badge/LangGraph-Agent%20Orchestration-purple)
-![Neo4j](https://img.shields.io/badge/Neo4j-GraphRAG-blue)
-![Qdrant](https://img.shields.io/badge/Qdrant-Vector%20Database-orange)
-![OpenSearch](https://img.shields.io/badge/OpenSearch-Search-red)
-![MITRE](https://img.shields.io/badge/MITRE-ATT%26CK-darkgreen)
-![Docker](https://img.shields.io/badge/Docker-Ready-blue)
-![Kubernetes](https://img.shields.io/badge/Kubernetes-Enterprise-blue)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green.svg?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/React-JS%20Frontend-61DAFB.svg?style=for-the-badge&logo=react)](https://react.dev/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Agent%20Orchestrator-purple.svg?style=for-the-badge)](https://www.langchain.com/langgraph)
+[![SQLite / Postgres](https://img.shields.io/badge/SQL-Engine-blue.svg?style=for-the-badge&logo=sqlite)](https://sqlite.org/)
+[![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK%20Mapping-darkgreen.svg?style=for-the-badge)](https://attack.mitre.org/)
 
 </div>
 
 ---
 
-# 🚀 Vision
+## 🚀 Vision
 
-ASIP is not a chatbot.
+ASIP is not a chatbot. 
 
-ASIP is an autonomous investigation operating system designed to think and operate like a senior SOC analyst, threat hunter, incident responder, malware analyst, and detection engineer simultaneously.
-
-Instead of simply summarizing alerts, ASIP:
-
-* Collects evidence
-* Correlates telemetry
-* Extracts IOCs
-* Maps MITRE ATT&CK techniques
-* Reconstructs attack timelines
-* Determines root cause
-* Validates findings through adversarial QA
-* Generates containment recommendations
-* Learns from previous investigations
-* Builds attack graphs
-* Creates detection content
-* Supports automated response workflows
+ASIP is an **autonomous investigation operating system** designed to think and operate like a senior Security Operations Center (SOC) analyst, threat hunter, and incident responder simultaneously. It processes security telemetry (EVTX, logs, CSVs, JSON), maps IOCs, queries Threat Intelligence, runs dynamic correlation processes, and performs adversarial validation before rendering containment recommendations and technical incident reports.
 
 ---
 
-# 🎯 Why ASIP Exists
+## 🖼️ Analyst Portal Interface
 
-Modern SOC teams face:
+### 1. Ingest Queue & Event Stream
+Upload forensic archives, specify severity metrics, or paste telemetry payloads. Ingestion maps logs to a structured Universal Event Schema (UES).
+![Ingest and Log Preview](assets/demo_loaded_view.png)
 
-| Challenge                    | Impact                                                            |
-| ---------------------------- | ----------------------------------------------------------------- |
-| Alert Fatigue                | Analysts overwhelmed by thousands of alerts                       |
-| Tool Fragmentation           | Data spread across SIEM, EDR, Cloud, Email and Identity platforms |
-| Manual Investigations        | Hours spent correlating telemetry                                 |
-| Knowledge Silos              | Historical investigations not reused                              |
-| Talent Shortage              | Limited senior analysts                                           |
-| Threat Intelligence Overload | Too much data, not enough context                                 |
+### 2. Multi-Agent Swarm Root Cause Analysis (RCA) & MITRE Mappings
+The RCA interface renders dynamic reconstructed forensic timelines and maps tactics and techniques directly to the MITRE ATT&CK framework.
+![RCA and MITRE Mapping](assets/mitre_mapping_rca.png)
 
-ASIP addresses these challenges through autonomous investigation workflows and AI-driven reasoning.
+### 3. Forensic Process Trees
+Interactive process graph visualizer tracing execution hierarchy from initial entry points down to dropper payloads and malicious command and control (C2) nodes.
+![Forensic Process Tree](assets/forensic_process_tree_view.png)
 
----
-
-# ⚡ Core Capabilities
-
-## Autonomous Investigation
-
-✓ Alert Understanding
-
-✓ Root Cause Analysis
-
-✓ IOC Extraction
-
-✓ Threat Intelligence Enrichment
-
-✓ Timeline Reconstruction
-
-✓ MITRE ATT&CK Mapping
-
-✓ Attack Chain Generation
-
-✓ Threat Hunting
-
-✓ Detection Engineering
-
-✓ Incident Reporting
-
-✓ Response Recommendations
-
-✓ Investigation Memory
+### 4. Response & Containment Playbook
+Generates immediate asset isolation workflows, AD credential revocations, and firewall/proxy rules.
+![Mitigation Playbook](assets/response_playbook_view.png)
 
 ---
 
-## Multi-Source Ingestion
+## 🏗️ Advanced System Architecture
 
-### SIEM
+The platform separates ingestion, analytical reasoning, memory caching, and presentation layers to maintain low latency and high consistency.
 
-* Splunk
-* Google SecOps
-* Microsoft Sentinel
-* IBM QRadar
-* Elastic Security
+```mermaid
+graph TD
+    %% Ingestion Layer
+    subgraph Ingestion
+        A[Forensic Uploads: ZIP, 7Z, EVTX, CSV, JSON] --> B[Intake Gateway & Decryptor]
+        B --> C[Universal Log Normalizer]
+    end
 
-### EDR/XDR
+    %% Data Layer
+    subgraph Storage [Data & Correlation Layer]
+        C --> D[(PostgreSQL / SQLite Fallback)]
+        D --> E[Entity Graph Builder]
+    end
 
-* CrowdStrike Falcon
-* Microsoft Defender
-* SentinelOne
-* Wazuh
+    %% AI reasoning loop
+    subgraph Swarm [LangGraph AI Swarm Orchestrator]
+        F[1. Triage & Classify Agent] --> G[2. Correlation & RCA Agent]
+        G --> H[3. Adversarial QA Agent]
+        H -->|Validation Fails| G
+        H -->|Validated| I[4. Playbook & Report Writer]
+    end
 
-### Cloud Platforms
+    %% Memory and Intelligence
+    subgraph Intelligence [Enrichment & Memory Store]
+        J[Threat Intel APIs: VirusTotal / AbuseIPDB]
+        K[Qdrant Semantic Memory]
+    end
 
-* AWS
-* Azure
-* GCP
-
-### Identity Platforms
-
-* Active Directory
-* Microsoft Entra ID
-* Okta
-
-### Email Platforms
-
-* Microsoft 365
-* Google Workspace
-
----
-
-# 📁 Supported File Types
-
-| Type | Status |
-| ---- | ------ |
-| CSV  | ✅      |
-| XLSX | ✅      |
-| JSON | ✅      |
-| TXT  | ✅      |
-| LOG  | ✅      |
-| EVTX | ✅      |
-| XML  | ✅      |
-| ZIP  | ✅      |
-| 7Z   | ✅      |
-| TAR  | ✅      |
-| PCAP | ✅      |
-| PDF  | ✅      |
-| DOCX | ✅      |
-
----
-
-# 🧠 AI Investigation Swarm
-
-ASIP uses specialized AI agents coordinated through LangGraph workflows.
-
-| Agent                       | Purpose                  |
-| --------------------------- | ------------------------ |
-| Investigation Director      | Workflow orchestration   |
-| Intake Agent                | File ingestion           |
-| Parsing Agent               | Log normalization        |
-| Alert Understanding Agent   | Alert classification     |
-| IOC Agent                   | IOC extraction           |
-| Threat Intelligence Agent   | IOC enrichment           |
-| Correlation Agent           | Event correlation        |
-| Root Cause Agent            | Root cause analysis      |
-| MITRE Agent                 | ATT&CK mapping           |
-| Timeline Agent              | Timeline reconstruction  |
-| Attack Chain Agent          | Kill chain generation    |
-| Threat Hunting Agent        | Historical investigation |
-| Detection Engineering Agent | Sigma/KQL generation     |
-| QA Validation Agent         | Evidence verification    |
-| Report Agent                | Executive reporting      |
-| Recommendation Agent        | Response guidance        |
-
----
-
-# 🏗 High-Level Architecture
-
-```text
-┌──────────────────────────────────────────────────────────────┐
-│                       Analyst Portal                         │
-└──────────────────────────────┬───────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│                 Investigation Director Agent                │
-└──────────────────────────────┬───────────────────────────────┘
-                               │
-           ┌───────────────────┴───────────────────┐
-           ▼                                       ▼
-
-┌───────────────────────┐           ┌─────────────────────────┐
-│ Investigation Swarm   │           │ Intelligence Layer      │
-│                       │           │                         │
-│ IOC Agent             │           │ GraphRAG               │
-│ RCA Agent             │           │ Incident Memory        │
-│ Timeline Agent        │           │ Threat Intelligence    │
-│ MITRE Agent           │           │ Playbooks              │
-│ QA Agent              │           │ MITRE ATT&CK           │
-└───────────────────────┘           └─────────────────────────┘
-
-           └───────────────────┬───────────────────┘
-                               │
-                               ▼
-
-┌──────────────────────────────────────────────────────────────┐
-│                         Data Layer                           │
-│ PostgreSQL • Neo4j • Qdrant • OpenSearch • Redis • MinIO    │
-└──────────────────────────────────────────────────────────────┘
-
-                               ▲
-                               │
-
-┌──────────────────────────────────────────────────────────────┐
-│                      Ingestion Layer                         │
-│ Splunk • CrowdStrike • Wazuh • Sentinel • APIs • Uploads    │
-└──────────────────────────────────────────────────────────────┘
+    %% Interconnections
+    D -->|Telemetry Streams| Swarm
+    E -->|Attack Process Trees| Swarm
+    Swarm <-->|Indicators & Hashes| J
+    Swarm <-->|Incident Playbook RAG| K
+    I -->|Final Reports & Graphs| L[Analyst Portal React UI]
 ```
 
+### Flow Breakdown:
+1. **Intake Gateway**: Supports recursive archive extraction and prompts the analyst if encrypted files require a password.
+2. **Universal Normalizer**: Maps multi-source vendor structures (CrowdStrike, Windows Sysmon, Splunk, Wazuh) into a standard relational schema.
+3. **LangGraph Swarm**: Coordinates reasoning. An Adversarial QA Agent validates every statement in the RCA against the raw DB events to prevent model hallucinations.
+4. **Graph & Semantic Memory**: Connects execution trees and updates a semantic vector cache (Qdrant) with incident metadata for past investigation recalls.
+
 ---
 
-# 🔍 Investigation Lifecycle
+## ⚡ Core Capabilities
 
-```text
-Alert
-  ↓
-Normalization
-  ↓
-IOC Extraction
-  ↓
-Threat Intelligence
-  ↓
-Correlation
-  ↓
-Timeline Reconstruction
-  ↓
-Root Cause Analysis
-  ↓
-MITRE ATT&CK Mapping
-  ↓
-Attack Graph Generation
-  ↓
-Adversarial Validation
-  ↓
-Containment Recommendations
-  ↓
-Executive & Technical Reports
+*   **Multi-Agent Orchestration**: LangGraph state machine coordinating specialized agents for triage, process correlation, QA verification, and playbook writing.
+*   **Database Autonomy**: Out-of-the-box local SQLite fallback (`asip.db` via `aiosqlite`) when PostgreSQL services are offline.
+*   **Offline Demo Mode**: Instantly simulate complete forensic investigations, pre-populating mock configurations, events, IOCs, timelines, and MITRE maps with zero API keys or external models.
+*   **Adversarial QA**: Programmatic citation matching ensuring every claim in the report corresponds to validated log database entries.
+*   **Threat Intel Integration**: Dynamic VT and AbuseIPDB indicator scoring.
+
+---
+
+## ⚙️ Configuration & Environment
+
+The platform reads settings dynamically from a `.env` file or in-memory updates:
+
+| Environment Variable | Description | Default |
+| --- | --- | --- |
+| `DATABASE_URL` | SQLAlchemy Connection URL | `postgresql+asyncpg://asip:asip@localhost/asip` |
+| `REDIS_URL` | Caching & Task Broker URL | `redis://localhost:6379` |
+| `EMBEDDING_PROVIDER` | Embeddings Engine | `mock` (Optional: `openai`, `ollama`) |
+| `OLLAMA_BASE_URL` | Local Model Host | `http://localhost:11434` |
+| `LOCAL_MODEL` | Offloaded Offline LLM | `qwen2.5:14b` |
+| `CLOUD_MODEL` | Enterprise Reasoning LLM | `claude-3-5-sonnet-20241022` |
+
+---
+
+## 🚀 Quickstart Guide
+
+### Prerequisite Setup
+
+Ensure Python 3.11+ and Node.js 18+ are installed.
+
+```bash
+# Clone the repository
+git clone https://github.com/DHARANI2D/helios-asip.git
+cd helios-asip
 ```
 
----
+### 1. Run the Backend Server
+```bash
+# Set up Python virtual environment
+python -m venv .venv
+source .venv/bin/activate
 
-# 🕸 GraphRAG & Investigation Memory
+# Install dependencies
+pip install -r requirements.txt
 
-ASIP combines traditional RAG with graph-native intelligence.
-
-## Vector RAG
-
-Stores:
-
-* MITRE ATT&CK
-* Threat Reports
-* Playbooks
-* Detection Rules
-* Response Procedures
-
-## GraphRAG
-
-Represents relationships between:
-
-```text
-User
- ↓
-Host
- ↓
-Process
- ↓
-File
- ↓
-Hash
- ↓
-Threat Actor
+# Start backend (starts on http://localhost:8000)
+# Automatically initializes schema on local SQLite fallback if Postgres is down
+python -m asip.api.main
 ```
 
-## Investigation Memory
+### 2. Run the Frontend Dev Server
+```bash
+cd frontend
 
-Stores:
+# Install Node dependencies
+npm install
 
-* Previous Incidents
-* Historical IOCs
-* RCA Reports
-* Analyst Feedback
-* Threat Hunting Results
+# Run frontend (starts on http://localhost:5173)
+npm run dev
+```
 
-Enabling cross-incident correlation and historical context retrieval.
-
----
-
-# 🤖 Hybrid AI Architecture
-
-ASIP supports cloud, hybrid, and fully air-gapped deployments.
-
-## Cloud
-
-* OpenAI
-* Anthropic
-* Gemini
-
-## Hybrid
-
-* Qwen
-* OpenAI
-* Claude
-
-## Air-Gapped
-
-* Qwen
-* Llama
-* Ollama
-
-Model routing automatically selects the optimal model based on:
-
-* Task complexity
-* Data sensitivity
-* Context size
-* Cost optimization
-
----
-
-# 🛡 Security Controls
-
-* Multi-Tenant Isolation
-* Role-Based Access Control
-* Audit Logging
-* Encryption At Rest
-* Encryption In Transit
-* Secrets Management
-* Air-Gapped Deployment Support
-* SOC2 Ready Architecture
-* Enterprise SSO Integration
-
-
----
-
-# 🚀 Deployment Modes
-
-## SaaS
-
-Cloud-native deployment using managed services.
-
-## Hybrid
-
-Sensitive data processed locally while advanced reasoning uses cloud models.
-
-## Air-Gapped
-
-Fully offline deployment for government, defense, and critical infrastructure environments.
-
----
-
-# 🛣 Roadmap
-
-### Phase 1
-
-Alert Triage & Investigation
-
-### Phase 2
-
-Threat Intelligence & MITRE Mapping
-
-### Phase 3
-
-GraphRAG & Investigation Memory
-
-### Phase 4
-
-Threat Hunting & Detection Engineering
-
-### Phase 5
-
-Autonomous SOC Operations
-
-### Phase 6
-
-Self-Learning Security Operations Platform
-
----
-
-# 📜 License
-
-Enterprise License
-
-Copyright © ASIP
+### 3. Launch Offline Demo
+1. Open `http://localhost:5173` in your browser.
+2. Click **Demo Mode** in the top header.
+3. The platform will automatically load simulated API configurations, instantiate mock telemetry events inside the DB, and render a complete investigation in the analyst portal!
