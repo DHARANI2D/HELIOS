@@ -44,6 +44,7 @@ export default function App() {
   const [title, setTitle] = useState("");
   const [severity, setSeverity] = useState("high");
   const [archivePassword, setArchivePassword] = useState("");
+  const [alertDetails, setAlertDetails] = useState("");
   
   // Password dialog state
   const [passwordPromptInv, setPasswordPromptInv] = useState(null);
@@ -122,15 +123,20 @@ export default function App() {
 
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file && !alertDetails) return;
 
     setUploading(true);
     const formData = new FormData();
-    formData.append("file", file);
+    if (file) {
+      formData.append("file", file);
+    }
     formData.append("title", title);
     formData.append("severity", severity);
     if (archivePassword) {
       formData.append("password", archivePassword);
+    }
+    if (alertDetails) {
+      formData.append("alert_details", alertDetails);
     }
 
     try {
@@ -143,6 +149,7 @@ export default function App() {
         setFile(null);
         setTitle("");
         setArchivePassword("");
+        setAlertDetails("");
         fetchInvestigations();
         setSelectedId(data.investigation_id);
         setActiveTab("logs");
@@ -384,6 +391,17 @@ export default function App() {
                 </div>
               </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--color-text-muted)', marginBottom: '4px', fontWeight: '600' }}>Alert Details (JSON/XML/Text)</label>
+                <textarea 
+                  placeholder="Paste alert payload from Google SecOps, Splunk, CrowdStrike, Wazuh, etc." 
+                  value={alertDetails} 
+                  onChange={e => setAlertDetails(e.target.value)}
+                  rows={3}
+                  style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '13px', fontFamily: 'monospace', resize: 'vertical' }}
+                />
+              </div>
+
               <div style={{ 
                 border: '2px dashed var(--border-color)', 
                 borderRadius: '8px', 
@@ -410,7 +428,7 @@ export default function App() {
 
               <button 
                 type="submit" 
-                disabled={uploading || !file}
+                disabled={uploading || (!file && !alertDetails)}
                 style={{ 
                   width: '100%', 
                   padding: '10px', 
@@ -424,7 +442,7 @@ export default function App() {
                   alignItems: 'center', 
                   justifyContent: 'center', 
                   gap: '8px',
-                  opacity: file ? 1 : 0.5
+                  opacity: (file || alertDetails) ? 1 : 0.5
                 }}
               >
                 {uploading ? (
@@ -569,6 +587,21 @@ export default function App() {
                   )}
                 </div>
               </div>
+
+              {selectedDetails.alert_details && (
+                <div style={{ 
+                  background: 'rgba(0, 0, 0, 0.2)', 
+                  border: '1px solid var(--border-color)', 
+                  borderRadius: '8px', 
+                  padding: '12px 16px', 
+                  marginBottom: '20px',
+                  maxHeight: '120px',
+                  overflowY: 'auto'
+                }}>
+                  <span style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontWeight: '700', marginBottom: '6px' }}>Ingested Alert Telemetry Details</span>
+                  <pre style={{ margin: 0, fontSize: '11px', fontFamily: 'monospace', color: '#fff', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{selectedDetails.alert_details}</pre>
+                </div>
+              )}
 
               {/* Status Information Box */}
               {selectedDetails.status === "awaiting_password" && (

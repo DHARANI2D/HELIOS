@@ -93,40 +93,61 @@ async def run_pipeline_bg(
 @router.post("/upload")
 async def upload_evidence(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
     title: Optional[str] = Form(None),
     severity: SeverityEnum = Form(SeverityEnum.info),
     password: Optional[str] = Form(None),
+    alert_details: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload alert logs or zip archives and initiate background ingestion."""
-    # 1. Save uploaded file to temp path
+    """Upload alert logs or zip archives, or paste alert details and initiate background workflows."""
     investigation_id = str(uuid.uuid4())
-    temp_dir = os.path.join(settings.UPLOAD_DIR, investigation_id)
-    os.makedirs(temp_dir, exist_ok=True)
     
-    file_path = os.path.join(temp_dir, file.filename)
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    file_path = None
+    if file and file.filename:
+        temp_dir = os.path.join(settings.UPLOAD_DIR, investigation_id)
+        os.makedirs(temp_dir, exist_ok=True)
+        file_path = os.path.join(temp_dir, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    # 2. Create investigation row
+    # Resolve Title
+    resolved_title = title
+    if not resolved_title:
+        if file and file.filename:
+            resolved_title = f"Investigation - {file.filename}"
+        else:
+            resolved_title = f"Investigation - Alert Influx ({datetime.utcnow().strftime('%Y-%m-%d %H:%M')})"
+
+    # Create investigation row
     investigation = Investigation(
         id=investigation_id,
-        title=title or f"Investigation - {file.filename}",
+        title=resolved_title,
         status=InvestigationStatusEnum.pending,
-        severity=severity
+        severity=severity,
+        alert_details=alert_details
     )
     db.add(investigation)
     await db.commit()
     await db.refresh(investigation)
 
-    # 3. Add ingestion to background queue
-    background_tasks.add_task(
-        run_pipeline_bg,
-        investigation_id=investigation_id,
-        file_path=file_path,
-        password=password
-    )
+    # Route background processes
+    if file_path:
+        background_tasks.add_task(
+            run_pipeline_bg,
+            investigation_id=investigation_id,
+            file_path=file_path,
+            password=password
+        )
+    else:
+        # Directly mark ingestion parsing complete (no files to normalize) and trigger swarming agents
+        investigation.status = InvestigationStatusEnum.completed
+        investigation.attack_summary = "Pasted alert metadata successfully ingested. Swarm triage triggered."
+        await db.commit()
+        background_tasks.add_task(
+            run_agent_triage_bg,
+            investigation_id=investigation_id
+        )
 
     return {
         "investigation_id": investigation_id,
@@ -363,10 +384,11 @@ async def run_agent_triage_bg(investigation_id: str):
             graph_data = builder.build_graph(logs)
 
             # 4. Trigger LangGraph orchestrator flow
+            details = inv.alert_details or f"Alert severity set to {inv.severity.value}. Investigation initiated with {len(logs)} log entries."
             inputs = {
                 "investigation_id": investigation_id,
                 "alert_title": inv.title,
-                "alert_details": f"Alert severity set to {inv.severity.value}. Investigation initiated with {len(logs)} log entries.",
+                "alert_details": details,
                 "triage_data": {},
                 "graph_data": graph_data,
                 "logs": logs,

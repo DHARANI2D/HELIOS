@@ -36,6 +36,9 @@ class Investigation(Base):
     password_required = Column(String(255), nullable=True)  # Name of archive requiring password
     archive_paths = Column(JSON, default=list)  # List of paths to extract
     
+    # Raw alert details pasted by user
+    alert_details = Column(Text, nullable=True)
+    
     # Summary results
     root_cause = Column(Text, nullable=True)
     attack_summary = Column(Text, nullable=True)
