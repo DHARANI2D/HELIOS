@@ -31,7 +31,7 @@ ASIP is an **autonomous investigation operating system** designed to think and o
 
 ### 1. Ingest Queue & Event Stream
 Upload forensic archives, specify severity metrics, or paste telemetry payloads. Ingestion maps logs to a structured Universal Event Schema (UES).
-![Ingest and Log Preview](assets/demo_loaded_view.png)
+![Ingest and Log Preview](assets/demo_loaded_logs.png)
 
 ### 2. Multi-Agent Swarm Root Cause Analysis (RCA) & MITRE Mappings
 The RCA interface renders dynamic reconstructed forensic timelines and maps tactics and techniques directly to the MITRE ATT&CK framework.
@@ -92,6 +92,49 @@ graph TD
 2. **Universal Normalizer**: Maps multi-source vendor structures (CrowdStrike, Windows Sysmon, Splunk, Wazuh) into a standard relational schema.
 3. **LangGraph Swarm**: Coordinates reasoning. An Adversarial QA Agent validates every statement in the RCA against the raw DB events to prevent model hallucinations.
 4. **Graph & Semantic Memory**: Connects execution trees and updates a semantic vector cache (Qdrant) with incident metadata for past investigation recalls.
+
+### 🤖 Multi-Agent Swarm Execution Flow
+
+The sequence diagram below displays the execution logic, tracing information flow and context handover across the autonomous swarming agents:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Analyst as Analyst / Webhook
+    participant Gateway as Intake Gateway
+    participant DB as SQLite / Postgres DB
+    participant Graph as Entity Graph Builder
+    participant Triage as Triage Agent
+    participant RCA as Correlation & RCA Agent
+    participant QA as Adversarial QA Agent
+    participant Report as Report & Playbook Agent
+
+    Analyst->>Gateway: Upload Forensic Logs / Telemetry
+    Gateway->>Gateway: Extract recursively & Parse logs
+    Gateway->>DB: Ingest normalized events (UES)
+    
+    Analyst->>Triage: Trigger Swarm Analysis
+    DB-->>Triage: Fetch alert & normalized logs
+    Triage->>Triage: Classify alert & map initial MITRE Tactics
+    Triage->>RCA: Pass classified alert & telemetry context
+
+    Graph-->>RCA: Load Process Tree & Network connections
+    RCA->>RCA: Correlate processes, track parent-child, reconstruct timeline
+    RCA->>QA: Pass reconstructed Root Cause Thesis & Timeline
+
+    DB-->>QA: Fetch raw database events for assertions
+    QA->>QA: Verify assertions against raw database IDs
+    alt Verification Fails (Hallucination detected)
+        QA-->>RCA: Send validation error & revision instructions
+        RCA->>RCA: Recorrelate details and rewrite thesis
+        RCA->>QA: Resubmit thesis
+    end
+    QA->>Report: Approve and pass verified thesis
+
+    Report->>Report: Format containment playbook, mitigation rules & Sigma detections
+    Report->>DB: Save incident reports, timeline, and MITRE maps
+    Report-->>Analyst: Present technical briefings on Analyst Portal React UI
+```
 
 ---
 
