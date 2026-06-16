@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from ..core.database import init_db
 from ..core.config import settings
-from .routes import investigate, webhooks
+from .routes import investigate, webhooks, settings as settings_route
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -37,6 +37,7 @@ app.add_middleware(
 # Mount endpoints
 app.include_router(investigate.router, prefix=settings.API_V1_STR)
 app.include_router(webhooks.router, prefix=settings.API_V1_STR)
+app.include_router(settings_route.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

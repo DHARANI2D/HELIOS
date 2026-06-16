@@ -46,6 +46,22 @@ export default function App() {
   const [archivePassword, setArchivePassword] = useState("");
   const [alertDetails, setAlertDetails] = useState("");
   
+  // Settings States
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [settingsData, setSettingsData] = useState({
+    OPENAI_API_KEY: "",
+    ANTHROPIC_API_KEY: "",
+    VIRUSTOTAL_API_KEY: "",
+    ABUSEIPDB_API_KEY: "",
+    OLLAMA_BASE_URL: "",
+    LOCAL_MODEL: "",
+    CLOUD_MODEL: "",
+    EMBEDDING_PROVIDER: "",
+    EMBEDDING_MODEL: ""
+  });
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSuccess, setSettingsSuccess] = useState("");
+  
   // Password dialog state
   const [passwordPromptInv, setPasswordPromptInv] = useState(null);
   const [promptPasswordValue, setPromptPasswordValue] = useState("");
@@ -54,6 +70,7 @@ export default function App() {
 
   useEffect(() => {
     fetchInvestigations();
+    fetchSettings();
     const interval = setInterval(fetchInvestigations, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -84,6 +101,40 @@ export default function App() {
       console.error("Failed to fetch investigations", e);
     } finally {
       setLoadingList(false);
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/settings`);
+      if (res.ok) {
+        const data = await res.json();
+        setSettingsData(data);
+      }
+    } catch (e) {
+      console.error("Failed to load settings", e);
+    }
+  };
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    setSettingsSuccess("");
+    try {
+      const res = await fetch(`${API_BASE}/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settingsData)
+      });
+      if (res.ok) {
+        setSettingsSuccess("Configuration saved successfully!");
+        fetchSettings(); // Refresh masked keys
+        setTimeout(() => setSettingsSuccess(""), 3000);
+      }
+    } catch (err) {
+      console.error("Failed to save settings", err);
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -321,12 +372,13 @@ export default function App() {
             ASIP ANALYST PORTAL
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <span style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '8px' }}>
             <Activity size={14} color="var(--color-primary)" /> Correlation Engine: Active
           </span>
           <button 
-            onClick={fetchInvestigations}
+            onClick={() => setShowSettingsModal(true)}
+            title="ASIP Configuration"
             style={{ 
               background: 'rgba(255,255,255,0.05)', 
               border: '1px solid var(--border-color)', 
@@ -335,7 +387,25 @@ export default function App() {
               borderRadius: '6px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              cursor: 'pointer'
+            }}
+          >
+            <Settings size={14} />
+          </button>
+          <button 
+            onClick={fetchInvestigations}
+            title="Refresh Ingest List"
+            style={{ 
+              background: 'rgba(255,255,255,0.05)', 
+              border: '1px solid var(--border-color)', 
+              color: '#fff', 
+              padding: '6px', 
+              borderRadius: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer'
             }}
           >
             <RefreshCw size={14} />
@@ -1180,6 +1250,158 @@ export default function App() {
                   ) : (
                     "Decrypt Ingestion"
                   )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div className="glass-panel glow-cyan" style={{ width: '640px', padding: '24px', position: 'relative' }}>
+            <h2 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--color-primary)', textTransform: 'uppercase', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Settings size={18} /> ASIP Configuration Panel
+            </h2>
+
+            <form onSubmit={handleSaveSettings}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+                {/* Left Side: Keys */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <h3 style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>Threat Intel & Cloud Keys</h3>
+                  
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>OpenAI Key</label>
+                    <input 
+                      type="password" 
+                      placeholder={settingsData.OPENAI_API_KEY ? "••••••••" : "Pasting key enables OpenAI API"}
+                      value={settingsData.OPENAI_API_KEY}
+                      onChange={e => setSettingsData({...settingsData, OPENAI_API_KEY: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Anthropic (Claude) Key</label>
+                    <input 
+                      type="password" 
+                      placeholder={settingsData.ANTHROPIC_API_KEY ? "••••••••" : "Pasting key enables Anthropic API"}
+                      value={settingsData.ANTHROPIC_API_KEY}
+                      onChange={e => setSettingsData({...settingsData, ANTHROPIC_API_KEY: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>VirusTotal Key</label>
+                    <input 
+                      type="password" 
+                      placeholder={settingsData.VIRUSTOTAL_API_KEY ? "••••••••" : "Hash reputation lookup key"}
+                      value={settingsData.VIRUSTOTAL_API_KEY}
+                      onChange={e => setSettingsData({...settingsData, VIRUSTOTAL_API_KEY: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>AbuseIPDB Key</label>
+                    <input 
+                      type="password" 
+                      placeholder={settingsData.ABUSEIPDB_API_KEY ? "••••••••" : "IP reputation lookup key"}
+                      value={settingsData.ABUSEIPDB_API_KEY}
+                      onChange={e => setSettingsData({...settingsData, ABUSEIPDB_API_KEY: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                </div>
+
+                {/* Right Side: Model Selection */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <h3 style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>AI Swarm Inference Models</h3>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Ollama Endpoint</label>
+                    <input 
+                      type="text" 
+                      value={settingsData.OLLAMA_BASE_URL}
+                      onChange={e => setSettingsData({...settingsData, OLLAMA_BASE_URL: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Local Triage Model</label>
+                    <input 
+                      type="text" 
+                      value={settingsData.LOCAL_MODEL}
+                      onChange={e => setSettingsData({...settingsData, LOCAL_MODEL: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Cloud Reasoning Model</label>
+                    <input 
+                      type="text" 
+                      value={settingsData.CLOUD_MODEL}
+                      onChange={e => setSettingsData({...settingsData, CLOUD_MODEL: e.target.value})}
+                      style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Embed Provider</label>
+                      <select 
+                        value={settingsData.EMBEDDING_PROVIDER}
+                        onChange={e => setSettingsData({...settingsData, EMBEDDING_PROVIDER: e.target.value})}
+                        style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                      >
+                        <option value="mock">mock</option>
+                        <option value="openai">openai</option>
+                        <option value="ollama">ollama</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Embed Model</label>
+                      <input 
+                        type="text" 
+                        value={settingsData.EMBEDDING_MODEL}
+                        onChange={e => setSettingsData({...settingsData, EMBEDDING_MODEL: e.target.value})}
+                        style={{ width: '100%', padding: '8px 12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-color)', borderRadius: '6px', color: '#fff', fontSize: '12px' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {settingsSuccess && (
+                <div style={{ color: 'var(--color-secondary)', fontSize: '12px', marginBottom: '15px', fontWeight: '700' }}>
+                  {settingsSuccess}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '10px' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowSettingsModal(false)}
+                  style={{ padding: '8px 16px', borderRadius: '6px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: '#fff', fontSize: '13px', cursor: 'pointer' }}
+                >
+                  Close
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={savingSettings}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: 0, background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', color: '#090a0f', fontWeight: '700', fontSize: '13px', cursor: 'pointer' }}
+                >
+                  {savingSettings ? "Saving..." : "Save Settings"}
                 </button>
               </div>
             </form>
