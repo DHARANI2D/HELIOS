@@ -16,7 +16,7 @@ DESAS is a production-grade **Dynamic Email Sandbox Analysis System** designed f
 
 DESAS is built as a robust **Electron-based Desktop Application** for seamless analyst workflows:
 
-- ✅ **Integrated Backend**: Automatically spawns Python FastAPI analysis engine on startup.
+- ✅ **Integrated Backend**: Automatically spawns the Python (`eel`) analysis engine on startup.
 - ✅ **Cross-Platform**: Optimized for Windows and macOS (Apple Silicon & Intel).
 - ✅ **Advanced Forensics**: Real-time detection of polyglots, appended payloads, and XLM macros.
 - ✅ **Multi-Format Extraction**: Automatic OCR and text parsing for PDF, DOCX, and Excel.
@@ -68,7 +68,7 @@ DESAS/
 │   │   ├── config.py         # Environment & API management
 │   │   └── scoring.py        # Verdict calculation logic (MITRE-aligned)
 │   ├── sandbox/              # Detonation Engine
-│   │   └── browser.py        # Playwright browser automation
+│   │   └── browser.py        # Selenium browser automation
 │   ├── api/                  # FastAPI Endpoints
 │   │   └── endpoints.py      # Analysis, reporting, and toolkit routes
 │   └── templates/            # Electron UI (HTML/CSS/JS)
@@ -87,8 +87,8 @@ DESAS/
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Frontend** | Electron + Vanilla CSS/JS | High-performance, low-dependency desktop UI |
-| **Backend** | FastAPI (Python 3.12+) | Async RESTful analysis engine |
-| **Detonation** | Playwright (Chromium) | Isolated browser sandbox for URL inspection |
+| **Backend** | Python (`eel`) | Async analysis engine bridged directly to the Electron UI |
+| **Detonation** | Selenium + headless Chrome (`webdriver-manager`) | Local browser automation for URL inspection |
 | **OCR** | Tesseract OCR | Visual text extraction from phishing screenshots |
 | **Extraction** | `openpyxl`, `python-docx`, `pdfminer.six` | Multi-format office document parsing |
 | **Intelligence** | VirusTotal, MxToolbox, IP-API | Global threat reputation & DNS validation |
@@ -102,7 +102,7 @@ DESAS/
 - **Python 3.12+**
 - **Node.js 20+**
 - **Tesseract OCR**: Required for image text extraction (`brew install tesseract` on Mac).
-- **Playwright**: Installed via `playwright install chromium`.
+- **Chrome/Chromium**: `webdriver-manager` downloads a matching ChromeDriver automatically on first run.
 
 ### Installation
 
@@ -139,10 +139,10 @@ DESAS/
 ## 🛡 Security & Isolation
 
 DESAS follows the "Clean Room" analysis principle:
-- ✅ **Ephemeral Sandboxes**: Browser contexts are wiped after every detonation.
-- ✅ **Strict Egress Control**: Intelligence API calls are the only permitted outbound traffic.
-- ✅ **No Local DB**: Forensic data is kept in-memory or exported as PDF, reducing local footprint.
-- ✅ **Process Isolation**: The backend server runs as a separate process from the UI for stability.
+- ✅ **Ephemeral Sandboxes**: Each detonation launches a fresh headless Chrome instance (Selenium) that is fully torn down afterward — no persisted cookies/local storage between runs.
+- ✅ **No Local DB**: Forensic data is kept in-memory or exported as HTML/ZIP, reducing local footprint.
+- ⚠️ **No Network-Level Isolation (current)**: The sandbox runs as a local headless-Chrome process on the analyst's machine — there is no VM/Proxmox-level kernel isolation or enforced egress firewall in the current codebase. Detonating a URL gives it the same network path as the host. Treat this like any other browser on the analyst workstation, not like a hardened detonation appliance.
+- 🗺️ **Roadmap**: True network isolation (dedicated VM/Proxmox snapshot, default-deny egress) is a planned hardening step, not yet implemented. Until then, run DESAS on an isolated analyst VM/VLAN if detonating untrusted URLs.
 
 ---
 

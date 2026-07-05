@@ -9,7 +9,7 @@ DESAS follows a layered architecture, optimized for isolation and analyst-driven
 ```mermaid
 graph TD
     A[Analyst Interface - Desktop UI] --> B[Analysis Backend - FastAPI]
-    B --> C[Sandbox Execution - Playwright/Chromium]
+    B --> C[Sandbox Execution - Selenium/Chromium]
     B --> D[Forensic Analysis Layer - Signatures/Heuristics]
     B --> E[Scoring & Reporting Engine]
     C --> B
@@ -21,7 +21,7 @@ graph TD
 ### 2.1 Component Description
 - **Analyst Interface**: A local web interface (FastAPI/JS) for file upload and result visualization.
 - **Analysis Backend**: Orchestrates the analysis flow, manages the sandbox lifecycle, and stores results.
-- **Sandbox Execution Layer**: Uses Playwright with Headless Chromium to navigate URLs extracted from emails.
+- **Sandbox Execution Layer**: Uses Selenium with headless Chrome (via `webdriver-manager`) to navigate URLs extracted from emails.
 - **Forensic Analysis Layer**: Perforams deep inspection for Polyglots, OLE anomalies, XLM macros, and appended payloads.
 - **Scoring & Reporting Engine**: A rule-based engine that maps observed behaviors to risk scores and MITRE ATT&CK techniques.
 
@@ -51,10 +51,14 @@ Unlike black-box ML systems, DESAS uses deterministic scoring for transparency.
 | POST to Non-Root Domain | High | Evidence of data exfiltration. |
 
 ## 5. Security and Isolation
-- **Network Isolation**: The VM environment has no access to the corporate internal network.
-- **Ephemeral Contexts**: Every analysis run uses a clean browser state; no cookies or local storage persist.
-- **Execution Limits**: Time-boxed execution (e.g., 30s) prevents infinity loops or resource exhaustion.
-- **Reset Mechanism**: Designed for Proxmox snapshots to allow instant rollback to a clean state.
+
+**Current implementation:**
+- **Ephemeral Contexts**: Every analysis run spins up a new headless Chrome instance and quits it afterward; no cookies or local storage persist between runs.
+- **Execution Limits**: Fixed sleep-based waits (~2-3s) bound each navigation step, preventing indefinite hangs.
+
+**Not yet implemented (roadmap):**
+- **Network Isolation**: There is no VM/hypervisor boundary in the codebase today — the sandbox is a local headless-Chrome process with the same network access as the host running DESAS. Deploying DESAS on an isolated analyst VM/VLAN with restricted egress is a recommended *operational* mitigation, not something the app enforces itself.
+- **Reset Mechanism**: Proxmox-snapshot-based rollback is a proposed deployment pattern for hardened installs, not a feature built into DESAS.
 
 ## 6. Conclusion
 DESAS is designed as a focused, surgical tool for the SOC, emphasizing explainability and safety over mass automation.

@@ -82,19 +82,9 @@ echo "Python dependencies OK"
 echo ""
 
 # ============================================================================
-# [5/7] Install Playwright Chromium
+# [5/6] Build Python backend
 # ============================================================================
-echo "[5/7] Installing Playwright Chromium..."
-
-python -m playwright install chromium
-
-echo "Playwright OK"
-echo ""
-
-# ============================================================================
-# [6/7] Build Python backend
-# ============================================================================
-echo "[6/7] Building Python backend..."
+echo "[5/6] Building Python backend..."
 
 # Clean previous builds and temporary samples
 rm -rf build dist release system_verify advanced_samples verification_samples
@@ -111,9 +101,9 @@ echo "Backend build OK"
 echo ""
 
 # ============================================================================
-# [7/7] Build Electron application
+# [6/6] Build Electron application
 # ============================================================================
-echo "[7/7] Building Electron application..."
+echo "[6/6] Building Electron application..."
 
 # Clean node_modules for fresh install - SKIP for optimization
 # rm -rf node_modules

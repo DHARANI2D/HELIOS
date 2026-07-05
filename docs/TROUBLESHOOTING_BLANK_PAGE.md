@@ -97,10 +97,10 @@ If it crashes or shows errors, that's the root cause.
 3. Verify `dist/backend_server` (or `.exe`) exists before running `npm run dist`
 
 ### Issue 2: Backend crashes immediately
-**Cause:** Missing dependencies or Playwright not bundled
+**Cause:** Missing dependencies (e.g. Chrome/ChromeDriver) not bundled
 
 **Solution:**
-1. Check if Playwright Chromium is included in the build
+1. Check if Chrome/ChromeDriver resolution (webdriver-manager) is working in the packaged build
 2. Verify all Python dependencies are in `requirements.txt`
 3. Check PyInstaller `hiddenimports` in `backend.spec`
 

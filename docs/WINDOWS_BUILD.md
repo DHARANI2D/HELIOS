@@ -34,7 +34,6 @@ build_windows.bat
 That's it! The script will:
 - ✅ Create a Python virtual environment (`.venv/`)
 - ✅ Install all Python dependencies
-- ✅ Download Playwright Chromium browser
 - ✅ Build the Python backend executable
 - ✅ Install Node.js dependencies
 - ✅ Create the `release/` folder
@@ -79,10 +78,6 @@ These are all listed in `.gitignore` and will be created fresh on your Windows m
 ### "Build fails at PyInstaller"
 - Disable antivirus temporarily (it may block PyInstaller)
 - Run Command Prompt as Administrator
-
-### "Build fails at Playwright"
-- Ensure you have at least 1 GB free disk space
-- Check internet connection
 
 ## What's Included in the Build
 

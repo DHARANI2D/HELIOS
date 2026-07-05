@@ -58,7 +58,7 @@ The page is divided into specialized investigation cards:
 
 ### 2.3 Sandbox Detonation <a name="sandbox-detonation"></a>
 The **Smart Sandbox** is the core of the dynamic analysis:
-*   **Execution**: URLs are opened in a dedicated, isolated Playwright instance.
+*   **Execution**: URLs are opened in a dedicated, isolated headless Chrome instance (Selenium).
 *   **Evidence Collection**: Automatically takes screenshots of the page (important for credential harvesting detection).
 *   **Behavioral Tracking**: Monitors the DOM for "Suspicious Forms" (e.g., a Microsoft Login form on a non-Microsoft domain).
 
@@ -110,7 +110,7 @@ This is where the analyst configures the engine's external brain:
 *   **VirusTotal**: Malware reputation.
 *   **MxToolbox**: DNS/Email security validation.
 *   **IP-API**: Sender IP geolocation.
-*   **Playwright**: Browser sandboxing.
+*   **Selenium + headless Chrome**: Browser sandboxing.
 
 ### 6.2 MITRE ATT&CK Mapping
 Detections are automatically tagged with the following techniques:
