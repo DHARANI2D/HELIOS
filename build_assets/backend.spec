@@ -15,6 +15,7 @@ a = Analysis(
     datas=[
         (os.path.join(project_root, 'app', 'templates'), 'app/templates'),
         (os.path.join(project_root, 'app', 'static'), 'app/static'),
+        (os.path.join(project_root, 'app', 'core', 'scoring_rules.yaml'), 'app/core'),
     ],
     hiddenimports=[
         'uvicorn.logging',

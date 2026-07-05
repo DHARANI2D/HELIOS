@@ -31,3 +31,4 @@ requests
 bcrypt
 dnspython
 py7zr
+pyyaml

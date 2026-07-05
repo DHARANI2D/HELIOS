@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import threading
 import time
 import uuid
 import tldextract
@@ -19,9 +21,76 @@ from app.sandbox.exfiltration import ExfiltrationEngine
 
 logger = logging.getLogger("uvicorn")
 
+
+_DUMMY_FIRST_NAMES = ["jsmith", "mwilson", "achen", "rpatel", "kbrown", "tnguyen", "lgarcia", "dokafor"]
+# RFC 2606 reserved domains: guaranteed non-existent/non-deliverable, so a
+# randomized local part can never accidentally reach a real mailbox.
+_DUMMY_EMAIL_DOMAINS = ["example.com", "example.org", "example.net"]
+
+
+def _generate_dummy_credentials() -> tuple[str, str]:
+    """
+    Generates a fresh, obviously-fake but non-static test identity for each
+    sandbox run. A fixed literal (e.g. always 'forensic-test@example.com')
+    is exactly the kind of thing a phishing kit operator could hardcode a
+    filter against to silently swallow DESAS's credential-harvesting probes;
+    varying it per run keeps the automated probe indistinguishable from what
+    a human analyst would type ad hoc.
+    """
+    import random
+    import string
+    local = random.choice(_DUMMY_FIRST_NAMES) + str(random.randint(100, 999))
+    domain = random.choice(_DUMMY_EMAIL_DOMAINS)
+    email = f"{local}@{domain}"
+    password = (
+        "".join(random.choices(string.ascii_uppercase, k=1))
+        + "".join(random.choices(string.ascii_lowercase, k=5))
+        + str(random.randint(10, 99))
+        + random.choice("!@#$")
+    )
+    return email, password
+
+
+def _default_worker_count() -> int:
+    """
+    A human analyst can only open one link at a time; DESAS can parallelize
+    detonations across a small pool instead. Sized to the VM's CPU count
+    (each headless Chrome instance is its own process/RAM footprint), capped
+    at 2 by default since most analyst VMs are modest (2-4 vCPU). Override
+    with the SANDBOX_MAX_WORKERS env var for larger VMs.
+    """
+    override = os.environ.get("SANDBOX_MAX_WORKERS")
+    if override:
+        try:
+            return max(1, int(override))
+        except ValueError:
+            pass
+    return max(1, min(2, os.cpu_count() or 1))
+
+
 class Sandbox:
     def __init__(self):
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._executor = ThreadPoolExecutor(max_workers=_default_worker_count())
+        self._driver_path = None
+        self._driver_path_lock = threading.Lock()
+
+    def _get_driver_path(self) -> str:
+        """
+        Resolves the ChromeDriver path once and reuses it for every run, instead
+        of hitting webdriver-manager's version-check/download on every single
+        detonation. This matters more on an analyst VM than it would on a always-on
+        server: it removes a live network dependency from the hot path (each
+        detonation no longer needs to phone home to resolve a driver) and avoids
+        every concurrent worker independently racing to download the same file.
+        Thread-safe so the small worker pool (see _default_worker_count) can share it.
+        """
+        if self._driver_path and os.path.exists(self._driver_path):
+            return self._driver_path
+        with self._driver_path_lock:
+            if not self._driver_path or not os.path.exists(self._driver_path):
+                self._driver_path = ChromeDriverManager().install()
+                logger.info(f"Resolved ChromeDriver: {self._driver_path}")
+        return self._driver_path
 
     async def analyze_url(self, url: str) -> SandboxResult:
         loop = asyncio.get_event_loop()
@@ -29,11 +98,13 @@ class Sandbox:
 
     def _analyze_sync(self, url: str) -> SandboxResult:
         import hashlib
+        import tempfile
         url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
         run_id = f"{int(time.time())}_{uuid.uuid4().hex[:6]}"
         screenshot_rel_path = f"sandbox_{url_hash}_{run_id}_final.png"
-        
+
         driver = None
+        profile_dir = tempfile.mkdtemp(prefix=f"desas_chrome_{run_id}_")
         try:
             # Setup Chrome Options
             chrome_options = Options()
@@ -43,14 +114,19 @@ class Sandbox:
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--ignore-certificate-errors")
-            
+            # Explicit throwaway profile per run: guarantees this automated session
+            # never touches the analyst's own Chrome profile/cookies/history on the
+            # same VM, and that concurrent runs (see ThreadPoolExecutor pool) don't
+            # collide on the same profile directory.
+            chrome_options.add_argument(f"--user-data-dir={profile_dir}")
+
             # Enable Performance Logging for CDP
             chrome_options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
-            
+
             # Initialize Driver
-            service = Service(ChromeDriverManager().install())
+            service = Service(self._get_driver_path())
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            
+
             # Helper for screenshots
             screenshot_chain = []
             
@@ -94,31 +170,42 @@ class Sandbox:
 
             # --- Network Analysis (CDP via Performance Logs) ---
             network_logs = []
+            document_chains = {}  # requestId -> ordered list of URLs for top-level navigations
             logs = driver.get_log("performance")
-            
+
             for entry in logs:
                 try:
                     message_obj = json.loads(entry["message"])
                     message = message_obj.get("message", {})
                     method = message.get("method")
-                    
+
                     if method == "Network.requestWillBeSent":
                         params = message.get("params", {})
                         request = params.get("request", {})
                         req_url = request.get("url")
                         req_method = request.get("method")
                         post_data = request.get("postData", "")
-                        
+                        res_type = params.get("type", "Unknown")
+                        request_id = params.get("requestId")
+
                         if not req_url: continue
 
                         ext = tldextract.extract(req_url)
                         domain = f"{ext.domain}.{ext.suffix}"
-                        
+
                         network_logs.append(NetworkRequest(
-                            url=req_url, 
-                            method=req_method, 
+                            url=req_url,
+                            method=req_method,
                             domain=domain
                         ))
+
+                        # Track the real hop-by-hop chain for the top-level document navigation.
+                        # CDP emits one Network.requestWillBeSent per hop for the same requestId,
+                        # each carrying the URL it redirected *to* (redirectResponse holds the prior hop).
+                        if res_type == "Document" and request_id:
+                            chain = document_chains.setdefault(request_id, [])
+                            if not chain or chain[-1] != req_url:
+                                chain.append(req_url)
 
                         # Exfiltration Checks
                         is_suspicious_method = req_method in ["POST", "PUT", "PATCH"]
@@ -180,6 +267,17 @@ class Sandbox:
 
                 except Exception: pass
 
+            # Resolve the real redirect chain: pick the document-navigation chain whose
+            # first hop matches the URL we actually navigated to, falling back to the
+            # simplified [url, final_url] pair if CDP didn't give us anything usable.
+            redirect_chain = [url]
+            for chain in document_chains.values():
+                if chain and chain[0].rstrip('/') == url.rstrip('/'):
+                    redirect_chain = chain
+                    break
+            if redirect_chain[-1].rstrip('/') != final_url.rstrip('/'):
+                redirect_chain.append(final_url)
+
             # --- DOM / JS Analysis ---
             js_analysis = []
             try:
@@ -205,8 +303,7 @@ class Sandbox:
             # --- Form Interaction ---
             detected_forms = []
             dom_mutations = []
-            DUMMY_EMAIL = "forensic-test@example.com"
-            DUMMY_PASSWORD = "Password123!"
+            DUMMY_EMAIL, DUMMY_PASSWORD = _generate_dummy_credentials()
 
             try:
                 forms = driver.find_elements(By.TAG_NAME, "form")
@@ -257,17 +354,20 @@ class Sandbox:
             # Final Screenshot
             driver.save_screenshot(os.path.join("app", "static", screenshot_rel_path))
 
+            interacted = any(m.startswith("interacted_with_form") for m in dom_mutations)
+
             return SandboxResult(
                 url=url,
                 expanded_url=final_url,
-                redirect_chain=[url, final_url], # Simplified chain
+                redirect_chain=redirect_chain,
                 screenshot_path=screenshot_rel_path,
                 screenshot_chain=screenshot_chain,
                 network_requests=network_logs,
                 dom_mutations=dom_mutations,
                 detected_forms=detected_forms,
                 exfiltration_detected=exfiltrated,
-                js_analysis=js_analysis
+                js_analysis=js_analysis,
+                test_credentials_used={"email": DUMMY_EMAIL} if interacted else None
             )
 
         except Exception as e:
@@ -287,6 +387,7 @@ class Sandbox:
         finally:
             if driver:
                 driver.quit()
+            shutil.rmtree(profile_dir, ignore_errors=True)
 
     async def screenshot_html(self, html: str, path: str):
         """
@@ -296,8 +397,10 @@ class Sandbox:
         await loop.run_in_executor(self._executor, self._screenshot_html_sync, html, path)
 
     def _screenshot_html_sync(self, html: str, path: str):
+        import tempfile
         driver = None
         temp_file = None
+        profile_dir = tempfile.mkdtemp(prefix="desas_chrome_shot_")
         try:
              # Setup Chrome Options
             chrome_options = Options()
@@ -305,20 +408,20 @@ class Sandbox:
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=800,600")
-            
+            chrome_options.add_argument(f"--user-data-dir={profile_dir}")
+
             # Initialize Driver
-            service = Service(ChromeDriverManager().install())
+            service = Service(self._get_driver_path())
             driver = webdriver.Chrome(service=service, options=chrome_options)
 
             # Create temp HTML file
-            import tempfile
             fd, temp_path = tempfile.mkstemp(suffix=".html", text=True)
             with os.fdopen(fd, 'w') as f:
                 f.write(html)
-            
+
             driver.get(f"file://{temp_path}")
             driver.save_screenshot(path)
-            
+
             temp_file = temp_path
 
         except Exception as e:
@@ -326,5 +429,6 @@ class Sandbox:
         finally:
             if driver:
                 driver.quit()
+            shutil.rmtree(profile_dir, ignore_errors=True)
             if temp_file and os.path.exists(temp_file):
                 os.remove(temp_file)

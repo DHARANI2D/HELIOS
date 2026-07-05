@@ -39,6 +39,7 @@ class SandboxResult(BaseModel):
     status: str = "pending" # pending, complete, error
     whitelisted: bool = False
     dns_details: List[str] = []
+    test_credentials_used: Optional[Dict[str, str]] = None  # dummy email submitted, for evidentiary traceability
 
 class AnalysisResult(BaseModel):
     # Meta
@@ -84,6 +85,7 @@ class AnalysisResult(BaseModel):
     url_intel: Dict[str, Dict] = {} # url/domain -> detailed intel (hits, age, etc)
     ip_intel: Dict = {} # ip -> intel
     whitelisted_domains: List[str] = []
+    prior_sightings: List[Dict] = []  # past cases from the same sender domain (case history)
     
     # Advanced Sandbox Evidence (Legacy)
     detected_forms: List[Dict] = []

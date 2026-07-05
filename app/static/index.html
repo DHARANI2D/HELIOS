@@ -899,6 +899,13 @@
                         </div>
                     </div>
 
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer;">
+                            <input type="checkbox" id="skipSandboxToggle" onchange="skipSandboxMode = this.checked;">
+                            Static-only (skip sandbox detonation)
+                        </label>
+                    </div>
+
                     <div class="drop-area-box" id="sidebarDropArea"
                         onclick="document.getElementById('fileInput').click()">
                         <div style="font-size: 2rem; margin-bottom: 8px;">📥</div>
@@ -1192,64 +1199,19 @@
         </div>
     </div>
 
-    <!-- PLAYWRIGHT INSTALL MODAL -->
-    <div id="playwrightModal" class="modal" style="z-index: 2100;">
-        <div class="modal-content" style="max-width: 500px; text-align: center;">
-            <div style="font-size: 4rem; margin-bottom: 16px;">🧩</div>
-            <h2 style="font-size: 1.5rem; margin-bottom: 12px; letter-spacing: -0.01em;">Forensic Engine Setup</h2>
-            <p style="color: var(--text-muted); font-size: 1rem; margin-bottom: 24px; line-height: 1.5;">
-                To enable advanced sandbox detonation, the forensic browser engine (Chromium) must be installed.
-            </p>
-            <div id="pwInstallStatus" style="margin-bottom:24px; font-weight:700; color:var(--primary); display:none;">
-                <div class="loader" style="margin:0 auto 12px auto;"></div>
-                Installing... This may take a few minutes.
-            </div>
-            <button id="pwInstallBtn" class="btn btn-primary" onclick="installPlaywright()"
-                style="width: 100%; padding: 16px; font-size: 1.1rem; border-radius: 12px;">Install Component</button>
-        </div>
-    </div>
-
     <script>
         let currentAnalysisMode = 'direct';
+        let skipSandboxMode = false;
         let currentSessionId = null;
         let selectedTargetAtt = null;
         let selectedHeaderAtt = null;
 
-        async function installPlaywright() {
-            const btn = document.getElementById('pwInstallBtn');
-            const status = document.getElementById('pwInstallStatus');
-            btn.style.display = 'none';
-            status.style.display = 'block';
-
-            try {
-                const res = await eel.install_playwright_browsers()();
-                if (res.status === 'success') {
-                    document.getElementById('playwrightModal').style.display = 'none';
-                    showToast("✅ Forensic Engine installed successfully");
-                } else {
-                    status.innerHTML = `<span style="color:var(--danger)">Error: ${res.message}</span>`;
-                    btn.innerText = "Retry Install";
-                    btn.style.display = 'block';
-                }
-            } catch (e) {
-                status.innerHTML = `<span style="color:var(--danger)">Error: ${e}</span>`;
-                btn.style.display = 'block';
-            }
-        }
-
         window.onload = async () => {
             console.log('DESAS initialized 🚀');
             try {
-                // Check Playwright
-                const pwInstalled = await eel.check_playwright_status()();
-                if (!pwInstalled) {
-                    document.getElementById('playwrightModal').style.display = 'flex';
-                }
-
                 const settings = await eel.get_app_settings()();
                 if (!settings || (!settings.VIRUSTOTAL_API_KEY && !settings.ABUSEIPDB_API_KEY)) {
-                    // Only show API check if PW check is passed or closed, to avoid stacking
-                    if (pwInstalled) document.getElementById('apiCheckModal').style.display = 'flex';
+                    document.getElementById('apiCheckModal').style.display = 'flex';
                 }
                 // Pre-load global whitelist for real-time marking
                 await loadWhitelistInModal();
@@ -1417,7 +1379,8 @@
                 session_id: currentSessionId,
                 analysis_mode: 'attachment',
                 target_attachment: selectedTargetAtt,
-                header_attachment: selectedHeaderAtt
+                header_attachment: selectedHeaderAtt,
+                skip_sandbox: skipSandboxMode
             });
         }
 
@@ -1433,7 +1396,7 @@
         async function runFinalAnalysis(filename, content, forensicOptions = null) {
             isAnalysisInProgress = true;
             updateProgress(30, "Parsing headers...", "step_parse");
-            const options = forensicOptions || { analysis_mode: 'direct' };
+            const options = forensicOptions || { analysis_mode: 'direct', skip_sandbox: skipSandboxMode };
             try {
                 const data = await eel.analyze_email_eel(filename, content, options)();
 
@@ -1773,7 +1736,10 @@
                     sandboxGrid.appendChild(noSandboxMsg);
                 }
 
-                if (sbUrls.length) {
+                if (skipSandboxMode) {
+                    noSandboxMsg.style.display = 'block';
+                    noSandboxMsg.innerHTML = '<div style="font-size:2rem; margin-bottom:12px;">\u{1F6E1}️</div><div>Static-only mode: sandbox detonation was skipped. Uncheck "Static-only" and re-run to detonate extracted URLs.</div>';
+                } else if (sbUrls.length) {
                     noSandboxMsg.style.display = 'none';
                     sbUrls.slice(0, 5).forEach(async (url, idx) => {
                         const card = document.createElement('div');

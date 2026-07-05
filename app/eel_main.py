@@ -53,6 +53,7 @@ from app.core.whitelist_manager import (
     export_whitelist_to_excel, import_whitelist_from_excel
 )
 from app.core.settings_manager import save_settings, get_dynamic_settings, AppSettings
+from app.core.case_history import record_case, search_case_history, get_recent_cases, check_prior_sightings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -101,6 +102,24 @@ def remove_domain_from_whitelist(domain):
     """Removes a domain from the whitelist."""
     updated_list = remove_from_whitelist(domain)
     return {"status": "success", "whitelist": updated_list}
+
+@eel.expose
+def search_case_history_eel(query=""):
+    """Searches past cases by sender, domain, subject, URL, or file hash."""
+    try:
+        return {"status": "success", "cases": search_case_history(query)}
+    except Exception as e:
+        logger.error(f"Error searching case history: {e}")
+        return {"status": "error", "message": str(e), "cases": []}
+
+@eel.expose
+def get_recent_case_history_eel(limit=20):
+    """Returns the most recent recorded cases."""
+    try:
+        return {"status": "success", "cases": get_recent_cases(limit)}
+    except Exception as e:
+        logger.error(f"Error fetching case history: {e}")
+        return {"status": "error", "message": str(e), "cases": []}
 
 @eel.expose
 def download_forensic_report(data):
@@ -187,12 +206,6 @@ def open_external_url(url):
     except Exception as e:
         logger.error(f"Error opening URL {url}: {e}")
         return {"status": "error", "message": str(e)}
-        
-        os.remove(temp_path)
-        return {"status": "success", "content": b64_content, "filename": "desas_whitelist_export.xlsx"}
-    except Exception as e:
-        logger.error(f"Error exporting whitelist: {e}")
-        return {"status": "error", "message": str(e)}
 
 @eel.expose
 def import_whitelist_xl(file_content_base64):
@@ -267,7 +280,8 @@ def inspect_email_file(file_name, file_content_base64):
 def analyze_email_eel(file_name, file_content_base64, options):
     """
     Main analysis function for Eel.
-    `options` includes: analysis_mode, target_attachment, header_attachment, session_id.
+    `options` includes: analysis_mode, target_attachment, header_attachment,
+    session_id, skip_sandbox.
     """
     # Wrap async logic to be reachable from sync Eel
     return asyncio.run(_analyze_email_logic(file_name, file_content_base64, options))
@@ -278,7 +292,11 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
         target_attachment = options.get("target_attachment")
         header_attachment = options.get("header_attachment")
         session_id = options.get("session_id")
-        
+        # Static-only fast path: mirrors manual triage order (headers/body/attachments
+        # first, only detonate a URL if something already looks suspicious). Skips the
+        # slowest and riskiest step - opening links in the sandbox - by default off.
+        skip_sandbox = bool(options.get("skip_sandbox", False))
+
         parsed_data = None
         content = None
         
@@ -445,6 +463,19 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
                  result.header_score += 50
                  result.header_reasons.append(f"MxToolbox: Domain {sender_domain} is on BLACKLIST")
 
+            # Case history: automates "have we seen this sender before?"
+            try:
+                result.prior_sightings = check_prior_sightings(sender_domain)
+                if result.prior_sightings:
+                    prior_malicious = [c for c in result.prior_sightings if c.get("verdict") == "Malicious"]
+                    if prior_malicious:
+                        result.header_score += 15
+                        result.header_reasons.append(
+                            f"Case History: {sender_domain} was flagged Malicious in {len(prior_malicious)} prior case(s)"
+                        )
+            except Exception as e:
+                logger.warning(f"Session {session_id}: Case history lookup failed: {e}")
+
         # 6. Attachments
         filtered_attachments = [att for att in parsed_data.get("attachments", []) 
                                if not (att.get("filename", "").lower() in ["headers.txt", "body.txt", "body.html"])]
@@ -457,22 +488,26 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
 
             if att_urls:
                 result.extracted_urls.extend(att_urls)
-                # Deduplicate and Sandbox
-                for url in set(att_urls):
-                     try:
-                         logger.info(f"Session {session_id}: Sandboxing attachment URL {url}")
-                         sb_result = await sandbox.analyze_url(url)
-                         sb_score, sb_reasons, _ = calculate_sandbox_score(sb_result)
-                         sb_result.score = sb_score
-                         sb_result.reasons = sb_reasons
-                         sb_result.status = "complete"
-                         result.sandbox_results.append(sb_result)
-                         
-                         if sb_score > 0:
-                            result.sandbox_score += sb_score
-                            result.sandbox_reasons.extend(sb_reasons)
-                     except Exception as e:
-                         logger.error(f"Sandbox failed for {url}: {e}")
+                if skip_sandbox:
+                    logger.info(f"Session {session_id}: Static-only mode - skipping sandbox detonation for {len(set(att_urls))} URL(s)")
+                    result.sandbox_status = "skipped"
+                else:
+                    # Deduplicate and Sandbox
+                    for url in set(att_urls):
+                         try:
+                             logger.info(f"Session {session_id}: Sandboxing attachment URL {url}")
+                             sb_result = await sandbox.analyze_url(url)
+                             sb_score, sb_reasons, _ = calculate_sandbox_score(sb_result)
+                             sb_result.score = sb_score
+                             sb_result.reasons = sb_reasons
+                             sb_result.status = "complete"
+                             result.sandbox_results.append(sb_result)
+
+                             if sb_score > 0:
+                                result.sandbox_score += sb_score
+                                result.sandbox_reasons.extend(sb_reasons)
+                         except Exception as e:
+                             logger.error(f"Sandbox failed for {url}: {e}")
 
             if att_domains:
                 # Add unique domains to suspicious_domains list
@@ -503,7 +538,10 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
         logger.info(f"Session {session_id}: Aggregating final verdict")
         final_result = aggregate_verdict(result)
         logger.info(f"Session {session_id}: Analysis complete. Verdict: {final_result.verdict}")
-        return final_result.model_dump()
+
+        result_dict = final_result.model_dump()
+        record_case(result_dict)
+        return result_dict
 
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -551,37 +589,6 @@ async def _analyze_standalone_logic(type, input_data):
     except Exception as e:
         logger.error(f"Standalone tool error: {e}")
         return {"error": str(e)}
-
-# --- Startup Logic ---
-
-@eel.expose
-def check_playwright_status():
-    """Checks if Playwright browsers are installed. Returns boolean."""
-    marker_path = os.path.join(tempfile.gettempdir(), "desas_playwright_installed.marker")
-    return os.path.exists(marker_path)
-
-@eel.expose
-def install_playwright_browsers():
-    """Installs Playwright browsers via subprocess."""
-    try:
-        import subprocess
-        logger.info("Installing Playwright Chromium...")
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = 0x08000000 # CREATE_NO_WINDOW
-            
-        subprocess.check_call(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            creationflags=creationflags
-        )
-        
-        marker_path = os.path.join(tempfile.gettempdir(), "desas_playwright_installed.marker")
-        with open(marker_path, "w") as f:
-            f.write("installed")
-        return {"status": "success"}
-    except Exception as e:
-        logger.error(f"Playwright install failed: {e}")
-        return {"status": "error", "message": str(e)}
 
 def start_app():
     if getattr(sys, 'frozen', False):
