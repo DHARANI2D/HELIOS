@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     
     # Static Configuration (Fallbacks)
     VIRUSTOTAL_API_KEY: str = ""
-    ABUSEIPDB_API_KEY: str = "c2049f09aecf31dfa290c809f63d4b2ef0f029d3161d61bfe47c9ff0d6be9ce63caa59986eabd4bc"
+    ABUSEIPDB_API_KEY: str = ""
     URLSCAN_API_KEY: str = ""
     MXTOOLBOX_API_KEY: str = ""
     
