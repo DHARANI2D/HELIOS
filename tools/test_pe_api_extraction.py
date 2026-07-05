@@ -2,8 +2,8 @@
 import os
 import sys
 
-# Add the project directory to sys.path
-sys.path.append('/Users/dharanidharansenthilkumar/Projects/DESAS')
+# Add the project root (parent of tools/) to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.analyzer.pe_analyzer import PEAnalyzer
 import unittest

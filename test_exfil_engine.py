@@ -1,5 +1,7 @@
 from app.sandbox.exfiltration import ExfiltrationEngine
 import base64
+import gzip
+import io
 
 def test_engine():
     engine = ExfiltrationEngine()
@@ -7,17 +9,22 @@ def test_engine():
 
     # 1. Test PII Detection
     print("\n[1] Testing PII Detection (Credit Card + Luhn)")
-    # Valid-looking but dummy CC
-    test_data = "Target acquired. User CC: 4539 1234 5678 9101" # 4539 is a common Visa prefix
+    # 4111 1111 1111 1111 is the standard industry test Visa number - Luhn-valid, never a real card
+    test_data = "Target acquired. User CC: 4111 1111 1111 1111"
     res = engine.process_payload(test_data)
     print(f"PII Detected: {res['pii_detected']}")
+    assert any("Credit Card" in p for p in res['pii_detected']), "Expected a validated credit card match"
 
     # 2. Test Recursive Decoding
     print("\n[2] Testing Recursive Decoding (B64 -> Gzip)")
-    # 'H4sIAAAAAAAA/8vMKy3JzEtXyEgsLgYAK98fXwwAAAA=' is 'Sensitive Data' gzipped then b64
-    inner_secret = "Confidential_API_Key_ABC1234567890"
-    res = engine.process_payload(inner_secret)
-    print(f"Direct Secret Detection: {res['pii_detected']}")
+    inner_secret = "AWS Key Leak: AKIAIOSFODNN7EXAMPLE"  # AWS's own docs example key, safe dummy
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+        f.write(inner_secret.encode())
+    encoded_payload = base64.b64encode(buf.getvalue()).decode()
+    res = engine.process_payload(encoded_payload)
+    print(f"Decoded Secret Detection: {res['pii_detected']} (layers: {res['obfuscation_layers']}, signals: {res['obfuscation_signals']})")
+    assert res["pii_detected"], "Expected the recursive decoder to unwrap the gzip+base64 payload and find the AWS key"
     
     # 3. Test DNS Tunneling
     print("\n[3] Testing DNS Tunneling")
