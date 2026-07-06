@@ -33,8 +33,11 @@ if %errorlevel% neq 0 (
 :: actually needs (selenium, oletools, olefile, pefile, pyyaml, etc.) - a
 :: hand-picked package list here previously drifted out of sync and left
 :: PyInstaller unable to bundle modules that were never even installed.
+:: "setuptools<81": eel's own CLI wrapper (python -m eel) does
+:: `import pkg_resources`, which setuptools removed in 81.0 - without this
+:: pin, the build fails before PyInstaller even starts.
 echo [1/3] Installing/Updating required Python packages...
-pip install -r requirements.txt pyinstaller
+pip install -r requirements.txt pyinstaller "setuptools<81"
 if %errorlevel% neq 0 (
     echo [!] Failed to install dependencies.
     pause

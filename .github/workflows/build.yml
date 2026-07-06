@@ -30,10 +30,13 @@ jobs:
         architecture: 'x64'
 
     - name: Install dependencies
+      # "setuptools<81": eel's own CLI wrapper (python -m eel) does
+      # `import pkg_resources`, which setuptools removed in 81.0 - without
+      # this pin, the build fails before PyInstaller even starts.
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pyinstaller eel
+        pip install pyinstaller eel "setuptools<81"
 
     - name: Build with PyInstaller (via Eel)
       # 'python -m eel' forwards unrecognized args straight to PyInstaller.
