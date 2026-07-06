@@ -11,8 +11,8 @@ jobs:
   build-windows:
     runs-on: windows-latest
     permissions:
-      contents: read
-    
+      contents: write
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -30,13 +30,60 @@ jobs:
         pip install pyinstaller eel
 
     - name: Build with PyInstaller (via Eel)
-      # We rely on 'python -m eel' to handle static assets and spec generation.
-      # We explicitly point to app/static/icon.png.
+      # 'python -m eel' forwards unrecognized args straight to PyInstaller.
+      # --hidden-import: PyInstaller's static analyzer misses these even
+      # though they're directly imported (same list as build_eel.bat /
+      # build_assets/backend.spec - keep all three in sync).
+      # --add-data bundles the analyst-tunable scoring rules config.
       run: |
-        python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean
+        python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean `
+          --add-data "app/core/scoring_rules.yaml;app/core" `
+          --hidden-import uvicorn.logging `
+          --hidden-import uvicorn.loops `
+          --hidden-import uvicorn.loops.auto `
+          --hidden-import uvicorn.protocols `
+          --hidden-import uvicorn.protocols.http `
+          --hidden-import uvicorn.protocols.http.auto `
+          --hidden-import uvicorn.protocols.websockets `
+          --hidden-import uvicorn.protocols.websockets.auto `
+          --hidden-import uvicorn.lifespan `
+          --hidden-import uvicorn.lifespan.on `
+          --hidden-import email.mime.text `
+          --hidden-import email.mime.multipart `
+          --hidden-import extract_msg `
+          --hidden-import pypdf `
+          --hidden-import docx `
+          --hidden-import reportlab `
+          --hidden-import reportlab.pdfgen `
+          --hidden-import reportlab.lib `
+          --hidden-import reportlab.platypus `
+          --hidden-import openpyxl `
+          --hidden-import app.analyzer.report_generator
 
-    - name: Upload Windows Exe
+    - name: Upload Windows Exe (build artifact)
       uses: actions/upload-artifact@v4
       with:
         name: desas-windows-exe
         path: dist/desas.exe
+
+    - name: Publish rolling "latest" release
+      # Only on pushes to main/master, not on PRs or manual test dispatches
+      # from other branches - overwrites a single "latest" release each time
+      # so the Releases page always has the newest build, with no version
+      # history to manage.
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: ncipollo/release-action@v1
+      with:
+        tag: latest
+        name: "Latest Build"
+        body: |
+          Automated rolling build from commit ${{ github.sha }}.
+          This release is overwritten on every push to main - it is not a
+          versioned release. See commit history for what changed.
+        commit: ${{ github.sha }}
+        artifacts: dist/desas.exe
+        allowUpdates: true
+        removeArtifacts: true
+        replacesArtifacts: true
+        prerelease: true
+        makeLatest: false
