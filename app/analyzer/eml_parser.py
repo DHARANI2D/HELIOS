@@ -101,6 +101,17 @@ def parse_eml(content: bytes) -> dict:
             "content": payload
         })
 
+    subject = _safe_header(msg, compat_msg, "Subject")
+    sender = _safe_header(msg, compat_msg, "From")
+    recipient = _safe_header(msg, compat_msg, "To")
+
+    if not subject and not sender:
+        header_names = [k for k, _ in msg.items()]
+        logger.warning(
+            f"parse_eml: Subject/From both empty after all fallbacks. "
+            f"Raw header names present: {header_names}"
+        )
+
     return {
         "headers": dict(msg.items()),
         "raw_headers": list(msg.items()), # Preserves order and duplicates
@@ -108,7 +119,7 @@ def parse_eml(content: bytes) -> dict:
         "body_html": body_html,
         "primary_body": primary_body,
         "attachments": attachments,
-        "subject": _safe_header(msg, compat_msg, "Subject"),
-        "from": _safe_header(msg, compat_msg, "From"),
-        "to": _safe_header(msg, compat_msg, "To")
+        "subject": subject,
+        "from": sender,
+        "to": recipient
     }
