@@ -17,6 +17,7 @@ from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from webdriver_manager.chrome import ChromeDriverManager
 
 from app.core.schemas import SandboxResult, NetworkRequest
+from app.core.paths import get_static_dir
 from app.sandbox.exfiltration import ExfiltrationEngine
 
 logger = logging.getLogger("uvicorn")
@@ -134,10 +135,11 @@ class Sandbox:
                 try:
                     idx = len(screenshot_chain)
                     path = f"hop_{url_hash}_{run_id}_{idx}.png"
-                    full_path = os.path.join("app", "static", path)
+                    full_path = os.path.join(get_static_dir(), path)
                     driver.save_screenshot(full_path)
                     screenshot_chain.append({"url": u, "path": path, "label": label or f"Hop {idx}"})
-                except Exception: pass
+                except Exception as e:
+                    logger.warning(f"Screenshot capture failed for {u}: {e}")
 
             # Initialize Exfiltration Engine
             exfil_engine = ExfiltrationEngine()
@@ -352,7 +354,7 @@ class Sandbox:
             except Exception: pass
 
             # Final Screenshot
-            driver.save_screenshot(os.path.join("app", "static", screenshot_rel_path))
+            driver.save_screenshot(os.path.join(get_static_dir(), screenshot_rel_path))
 
             interacted = any(m.startswith("interacted_with_form") for m in dom_mutations)
 

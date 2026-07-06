@@ -2,12 +2,41 @@ import email
 from email import policy
 import re
 
+logger = __import__("logging").getLogger("uvicorn")
+
+
+def _safe_header(msg, compat_msg, name: str) -> str:
+    """
+    email.policy.default parses From/To/Subject into structured header
+    objects (AddressHeader, etc.) with strict RFC 5322 validation - real-world
+    corporate mail (Exchange/Proofpoint relays, distribution lists, unusual
+    display-name encoding) regularly violates that strictness, which can
+    raise or silently yield an empty string even though the raw header is
+    clearly present. Falls back to the lenient compat32 policy (treats
+    headers as plain strings, no structural parsing) when that happens.
+    """
+    try:
+        value = msg.get(name, "")
+        if value:
+            return str(value)
+    except Exception as e:
+        logger.warning(f"Strict header parse failed for '{name}': {e}")
+
+    try:
+        value = compat_msg.get(name, "")
+        return str(value) if value else ""
+    except Exception:
+        return ""
+
+
 def parse_eml(content: bytes) -> dict:
     """
     Parses raw .eml bytes into a structured dictionary.
     """
     msg = email.message_from_bytes(content, policy=policy.default)
-    
+    # Lenient fallback parse for headers the strict policy above chokes on.
+    compat_msg = email.message_from_bytes(content, policy=policy.compat32)
+
     # Extract body
     body_text = ""
     body_html = ""
@@ -79,7 +108,7 @@ def parse_eml(content: bytes) -> dict:
         "body_html": body_html,
         "primary_body": primary_body,
         "attachments": attachments,
-        "subject": msg.get("Subject", ""),
-        "from": msg.get("From", ""),
-        "to": msg.get("To", "")
+        "subject": _safe_header(msg, compat_msg, "Subject"),
+        "from": _safe_header(msg, compat_msg, "From"),
+        "to": _safe_header(msg, compat_msg, "To")
     }

@@ -54,6 +54,7 @@ from app.core.whitelist_manager import (
 )
 from app.core.settings_manager import save_settings, get_dynamic_settings, AppSettings
 from app.core.case_history import record_case, search_case_history, get_recent_cases, check_prior_sightings
+from app.core.paths import get_static_dir
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -166,24 +167,24 @@ def bundle_forensic_case(data):
             
             # Primary body screenshot if exists
             if data.get("primary_body_screenshot"):
-                s_path = os.path.join("app", "static", data["primary_body_screenshot"])
+                s_path = os.path.join(get_static_dir(), data["primary_body_screenshot"])
                 if os.path.exists(s_path):
                     zip_file.write(s_path, f"{screenshots_dir}/Email_Body.png")
-            
+
             # Sandbox results
             sandbox_results = data.get("sandbox_results", [])
             for i, res in enumerate(sandbox_results):
                 # Final screenshot
                 if res.get("screenshot_path"):
-                    s_path = os.path.join("app", "static", res["screenshot_path"])
+                    s_path = os.path.join(get_static_dir(), res["screenshot_path"])
                     if os.path.exists(s_path):
                         zip_file.write(s_path, f"{screenshots_dir}/Sandbox_{i}_Final.png")
-                
+
                 # Screenshot chain (hops)
                 chain = res.get("screenshot_chain", [])
                 for j, hop in enumerate(chain):
                     if hop.get("path"):
-                        h_path = os.path.join("app", "static", hop["path"])
+                        h_path = os.path.join(get_static_dir(), hop["path"])
                         if os.path.exists(h_path):
                             label = hop.get("label", f"Hop_{j}").replace(" ", "_")
                             zip_file.write(h_path, f"{screenshots_dir}/Sandbox_{i}_{label}_{j}.png")
@@ -591,12 +592,7 @@ async def _analyze_standalone_logic(type, input_data):
         return {"error": str(e)}
 
 def start_app():
-    if getattr(sys, 'frozen', False):
-        web_folder = os.path.join(sys._MEIPASS, 'app', 'static')
-        if not os.path.exists(web_folder):
-             web_folder = os.path.join(sys._MEIPASS, 'static')
-    else:
-        web_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+    web_folder = get_static_dir()
 
     logger.info(f"Starting Eel with web folder: {web_folder}")
     eel.init(web_folder)

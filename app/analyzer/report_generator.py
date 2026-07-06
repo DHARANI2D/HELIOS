@@ -2,6 +2,8 @@ import os
 import json
 from datetime import datetime
 
+from app.core.paths import get_static_dir
+
 def generate_html_report(data: dict) -> str:
     """Generates a standalone, styled HTML report from AnalysisResult data."""
     
@@ -70,7 +72,7 @@ def generate_html_report(data: dict) -> str:
         screenshot_embed = ""
         s_path = res.get("screenshot_path")
         if s_path:
-            full_path = os.path.join("app", "static", s_path)
+            full_path = os.path.join(get_static_dir(), s_path)
             if os.path.exists(full_path):
                 with open(full_path, "rb") as f:
                     b64_img = b6.b64encode(f.read()).decode('utf-8')
