@@ -14,6 +14,20 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+:: Require Python 3.12+ - app/analyzer/report_generator.py uses PEP 701
+:: f-string syntax (quote reuse in nested f-strings), a hard SyntaxError
+:: before 3.12. On an older Python, PyInstaller silently fails to compile
+:: that one module and drops it from the exe with no build error at all -
+:: the exe builds "successfully" but crashes at runtime on first use.
+python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"
+if %errorlevel% neq 0 (
+    echo [!] Python 3.12+ is required ^(this build uses newer f-string syntax^).
+    echo [!] Your version:
+    python --version
+    pause
+    exit /b
+)
+
 :: Install dependencies
 :: Uses requirements.txt so this build gets every runtime dependency the app
 :: actually needs (selenium, oletools, olefile, pefile, pyyaml, etc.) - a
