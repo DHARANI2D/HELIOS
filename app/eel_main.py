@@ -387,10 +387,14 @@ async def _analyze_email_logic(file_name, file_content_base64, options):
 
         # 2. Build Result
         result = AnalysisResult(
-            subject=parsed_data.get("subject", "Unknown"),
-            sender=parsed_data.get("from", "Unknown"),
-            recipient=parsed_data.get("to", "Unknown"),
-            date=parsed_data.get("headers", {}).get("Date", "Unknown"),
+            # .get(key, default) only falls back on a *missing* key, not a
+            # present-but-falsy (None/"") one, which is exactly the shape
+            # of bug that caused Subject/From/To to end up empty even with
+            # a default specified. `or` catches both cases.
+            subject=parsed_data.get("subject") or "Unknown",
+            sender=parsed_data.get("from") or "Unknown",
+            recipient=parsed_data.get("to") or "Unknown",
+            date=(parsed_data.get("headers", {}) or {}).get("Date") or "Unknown",
             url="",
             expanded_url="",
             redirect_chain=[],

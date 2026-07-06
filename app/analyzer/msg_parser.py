@@ -1,30 +1,53 @@
 import extract_msg
 import io
+import logging
+
+logger = logging.getLogger("uvicorn")
+
 
 def parse_msg(file_content: bytes) -> dict:
     """
     Parses an Outlook .msg file and returns a structured dictionary compatible with the .eml parser.
     """
     msg = extract_msg.Message(io.BytesIO(file_content))
-    
+
     # Extract Headers
     # .msg headers are less structured than .eml, often found in 'transport_headers'
     headers_dict = {}
-    
-    # Basic Properties
-    headers_dict["Subject"] = msg.subject
-    headers_dict["From"] = msg.sender
-    headers_dict["To"] = msg.to
-    headers_dict["Date"] = str(msg.date)
-    headers_dict["Message-ID"] = msg.messageId
 
-    # Try to get raw headers if available
+    # Basic Properties. extract_msg's own properties can be None for plenty
+    # of real-world .msg files (complex Exchange/Proofpoint relay chains) -
+    # setting a dict key to None (instead of omitting it) defeats any later
+    # `.get(key, "")` fallback, since that only kicks in for a *missing*
+    # key, not a falsy value. Guard with `or ""` here.
+    headers_dict["Subject"] = msg.subject or ""
+    headers_dict["From"] = msg.sender or ""
+    headers_dict["To"] = msg.to or ""
+    headers_dict["Date"] = str(msg.date) if msg.date else ""
+    headers_dict["Message-ID"] = msg.messageId or ""
+
+    # Try to get raw headers if available. msg.header is a real
+    # email.message.Message (extract_msg parses the raw transport header
+    # block with policy.compat32 internally), so it's a reliable fallback
+    # source when the library's own subject/sender/to properties come back
+    # empty - the raw header text is often more complete for mail that
+    # passed through several relays.
     raw_headers = msg.header
     if raw_headers:
         # Simple parsing for other headers if needed
         # Often raw_headers is a key-value object in extract-msg
         for k, v in raw_headers.items():
-            headers_dict[k] = v
+            headers_dict[k] = v or ""
+
+        if not headers_dict["Subject"]:
+            headers_dict["Subject"] = raw_headers.get("Subject", "") or ""
+        if not headers_dict["From"]:
+            headers_dict["From"] = raw_headers.get("From", "") or ""
+        if not headers_dict["To"]:
+            headers_dict["To"] = raw_headers.get("To", "") or ""
+
+    if not headers_dict["Subject"] and not headers_dict["From"]:
+        logger.warning("parse_msg: Subject/From both empty after all fallbacks - check the .msg's header stream")
 
     # Extract Body
     # Prefer HTML, fallback to Text
@@ -68,9 +91,9 @@ def parse_msg(file_content: bytes) -> dict:
         "primary_body": primary_body,
         "attachments": attachments,
         "raw_headers": list(raw_headers.items()) if raw_headers else [],
-        "subject": headers_dict.get("Subject", ""),
-        "from": headers_dict.get("From", ""),
-        "to": headers_dict.get("To", "")
+        "subject": headers_dict.get("Subject") or "",
+        "from": headers_dict.get("From") or "",
+        "to": headers_dict.get("To") or ""
     }
 
 def extract_attachments_to_dir(file_path: str, output_dir: str) -> list:
