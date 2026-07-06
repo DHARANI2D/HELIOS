@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_all
 
 # Get the project root directory (parent of build_assets)
 spec_root = os.path.abspath(SPECPATH)
@@ -22,15 +22,23 @@ app_submodules = (
     + collect_submodules('app.sandbox')
 )
 
+# Selenium's webdriver classes (selenium.webdriver.chrome.webdriver etc.)
+# aren't caught by modulegraph's static analysis either - a frozen build
+# crashed at runtime with "No module named
+# selenium.webdriver.chrome.webdriver" despite being imported directly.
+# collect_all() is the blanket fix (submodules + data + binaries).
+selenium_datas, selenium_binaries, selenium_hidden = collect_all('selenium')
+wdm_datas, wdm_binaries, wdm_hidden = collect_all('webdriver_manager')
+
 a = Analysis(
     [os.path.join(project_root, 'app', 'eel_main.py')],
     pathex=[project_root],
-    binaries=[],
+    binaries=selenium_binaries + wdm_binaries,
     datas=[
         (os.path.join(project_root, 'app', 'static'), 'app/static'),
         (os.path.join(project_root, 'app', 'core', 'scoring_rules.yaml'), 'app/core'),
-    ],
-    hiddenimports=app_submodules + [
+    ] + selenium_datas + wdm_datas,
+    hiddenimports=app_submodules + selenium_hidden + wdm_hidden + [
         'uvicorn.logging',
         'uvicorn.loops',
         'uvicorn.loops.auto',

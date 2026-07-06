@@ -55,6 +55,11 @@ echo [!] This may take a few minutes...
 :: Note: --onefile bundles everything, --noconsole hides the cmd window
 :: --add-data includes the static folder and the scoring rules config.
 :: On Windows, the syntax is source;dest.
+:: --collect-all selenium/webdriver_manager: Selenium's webdriver classes
+:: (selenium.webdriver.chrome.webdriver etc.) aren't caught by
+:: modulegraph's static analysis - a frozen build crashed at runtime with
+:: "No module named selenium.webdriver.chrome.webdriver". --collect-all
+:: is the blanket fix (submodules + data + binaries).
 :: --collect-submodules: app.analyzer.report_generator was silently dropped
 :: from the frozen bundle even with an explicit --hidden-import for it and
 :: no warning logged - collect-submodules walks the actual package on disk
@@ -67,6 +72,8 @@ set ICON_ARG=
 if exist app\static\favicon.ico set ICON_ARG=--icon app/static/favicon.ico
 
 python -m eel app/eel_main.py app/static --onefile --noconsole --name desas %ICON_ARG% --workpath build --distpath dist ^
+    --collect-all selenium ^
+    --collect-all webdriver_manager ^
     --collect-submodules app.analyzer ^
     --collect-submodules app.core ^
     --collect-submodules app.sandbox ^

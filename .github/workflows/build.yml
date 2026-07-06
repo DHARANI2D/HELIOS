@@ -40,15 +40,24 @@ jobs:
 
     - name: Build with PyInstaller (via Eel)
       # 'python -m eel' forwards unrecognized args straight to PyInstaller.
-      # --collect-submodules: extra insurance so every submodule of these
-      # packages gets bundled via pkgutil.walk_packages, not just what
-      # modulegraph's static analysis or --hidden-import happens to catch.
+      # --collect-all selenium/webdriver_manager: Selenium's webdriver
+      # classes (selenium.webdriver.chrome.webdriver etc.) are loaded in a
+      # way modulegraph's static analysis doesn't catch - a frozen build
+      # crashed at runtime with "No module named
+      # selenium.webdriver.chrome.webdriver" despite the app importing
+      # Selenium directly. --collect-all is the blanket fix (submodules +
+      # data + binaries), used instead of enumerating individual
+      # hidden-imports since that approach already proved unreliable once
+      # this session (app.analyzer.report_generator).
+      # --collect-submodules: same insurance for our own packages.
       # --hidden-import: PyInstaller's static analyzer misses these even
       # though they're directly imported (same list as build_eel.bat /
       # build_assets/backend.spec - keep all three in sync).
       # --add-data bundles the analyst-tunable scoring rules config.
       run: |
         python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean `
+          --collect-all selenium `
+          --collect-all webdriver_manager `
           --collect-submodules app.analyzer `
           --collect-submodules app.core `
           --collect-submodules app.sandbox `
