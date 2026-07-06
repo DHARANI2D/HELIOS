@@ -30,9 +30,23 @@ import zipfile
 import io
 from pydantic import BaseModel
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+from app.core.settings_manager import get_data_dir
+
+# Configure logging. A packaged build runs with --noconsole (no visible
+# console window), so a bare StreamHandler writes to a stream nobody can
+# see - every failure was previously invisible to both users and remote
+# debugging. Always also write to a file in the app data dir.
+log_file = os.path.join(get_data_dir(), "desas.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(log_file, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
 logger = logging.getLogger("eel-backend")
+logger.info(f"DESAS starting. Log file: {log_file}")
 logger.info(f"Python Search Path: {sys.path}")
 
 # Modular Analyzers
@@ -55,10 +69,6 @@ from app.core.whitelist_manager import (
 from app.core.settings_manager import save_settings, get_dynamic_settings, AppSettings
 from app.core.case_history import record_case, search_case_history, get_recent_cases, check_prior_sightings
 from app.core.paths import get_static_dir
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("eel-backend")
 
 sandbox = Sandbox()
 
@@ -207,6 +217,23 @@ def open_external_url(url):
     except Exception as e:
         logger.error(f"Error opening URL {url}: {e}")
         return {"status": "error", "message": str(e)}
+
+@eel.expose
+def get_log_file_path():
+    """Returns the path to the app's log file, for troubleshooting."""
+    return log_file
+
+@eel.expose
+def open_log_file():
+    """Opens the log file with the OS default handler (e.g. Notepad)."""
+    try:
+        if sys.platform == "win32":
+            os.startfile(log_file)
+        else:
+            webbrowser.open(f"file://{log_file}")
+        return {"status": "success", "path": log_file}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "path": log_file}
 
 @eel.expose
 def import_whitelist_xl(file_content_base64):
