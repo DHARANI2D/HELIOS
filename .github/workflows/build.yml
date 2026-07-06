@@ -17,10 +17,16 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Python 3.10
+    - name: Set up Python 3.12
+      # Must be 3.12+ (matches README's stated prerequisite): app/analyzer/
+      # report_generator.py uses PEP 701 f-string syntax (quote reuse in
+      # nested f-strings), which is a hard SyntaxError before 3.12. That's
+      # why this one module kept silently vanishing from the frozen exe
+      # while building with 3.10 - PyInstaller couldn't even compile it, and
+      # apparently didn't surface that as a build-breaking error/warning.
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.12'
         architecture: 'x64'
 
     - name: Install dependencies
@@ -29,29 +35,17 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller eel
 
-    - name: DIAGNOSTIC - verify source file on runner pre-build
-      run: |
-        Get-ChildItem app/analyzer/report_generator.py | Format-List *
-        Get-FileHash app/analyzer/report_generator.py
-        python -c "import ast; ast.parse(open('app/analyzer/report_generator.py', encoding='utf-8').read()); print('parses OK as Python')"
-
     - name: Build with PyInstaller (via Eel)
       # 'python -m eel' forwards unrecognized args straight to PyInstaller.
-      # --collect-submodules: app.analyzer.report_generator was silently
-      # dropped from the frozen bundle on Windows even with an explicit
-      # --hidden-import for it and no warning logged - collect-submodules
-      # walks the actual package on disk (pkgutil.walk_packages) instead of
-      # relying on modulegraph's static analysis, which is more reliable for
-      # whatever this was. Applied to all three app subpackages as insurance.
+      # --collect-submodules: extra insurance so every submodule of these
+      # packages gets bundled via pkgutil.walk_packages, not just what
+      # modulegraph's static analysis or --hidden-import happens to catch.
       # --hidden-import: PyInstaller's static analyzer misses these even
       # though they're directly imported (same list as build_eel.bat /
       # build_assets/backend.spec - keep all three in sync).
       # --add-data bundles the analyst-tunable scoring rules config.
-      # --log-level DEBUG + Tee-Object: still investigating why this one
-      # module keeps getting dropped with zero warnings at INFO level -
-      # captured as an artifact for full inspection.
       run: |
-        python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean --log-level DEBUG `
+        python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean `
           --collect-submodules app.analyzer `
           --collect-submodules app.core `
           --collect-submodules app.sandbox `
@@ -76,15 +70,7 @@ jobs:
           --hidden-import reportlab.lib `
           --hidden-import reportlab.platypus `
           --hidden-import openpyxl `
-          --hidden-import app.analyzer.report_generator *>&1 | Tee-Object -FilePath pyinstaller_debug.log
-        Select-String -Path pyinstaller_debug.log -Pattern "report_generator" | ForEach-Object { $_.Line }
-
-    - name: Upload debug log (diagnostic)
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: pyinstaller-debug-log
-        path: pyinstaller_debug.log
+          --hidden-import app.analyzer.report_generator
 
     - name: Upload Windows Exe (build artifact)
       uses: actions/upload-artifact@v4
