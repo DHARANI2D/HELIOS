@@ -38,6 +38,11 @@ echo [!] This may take a few minutes...
 :: Note: --onefile bundles everything, --noconsole hides the cmd window
 :: --add-data includes the static folder and the scoring rules config.
 :: On Windows, the syntax is source;dest.
+:: --collect-submodules: app.analyzer.report_generator was silently dropped
+:: from the frozen bundle even with an explicit --hidden-import for it and
+:: no warning logged - collect-submodules walks the actual package on disk
+:: instead of relying on modulegraph's static analysis. Applied to all
+:: three app subpackages as insurance.
 :: --hidden-import: PyInstaller's static analyzer misses these even though
 :: they're directly imported - the same list already used by
 :: build_assets/backend.spec for the other (FastAPI-style) build path.
@@ -45,6 +50,9 @@ set ICON_ARG=
 if exist app\static\favicon.ico set ICON_ARG=--icon app/static/favicon.ico
 
 python -m eel app/eel_main.py app/static --onefile --noconsole --name desas %ICON_ARG% --workpath build --distpath dist ^
+    --collect-submodules app.analyzer ^
+    --collect-submodules app.core ^
+    --collect-submodules app.sandbox ^
     --add-data "app/core/scoring_rules.yaml;app/core" ^
     --hidden-import uvicorn.logging ^
     --hidden-import uvicorn.loops ^

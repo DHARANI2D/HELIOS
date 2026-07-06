@@ -31,12 +31,21 @@ jobs:
 
     - name: Build with PyInstaller (via Eel)
       # 'python -m eel' forwards unrecognized args straight to PyInstaller.
+      # --collect-submodules: app.analyzer.report_generator was silently
+      # dropped from the frozen bundle on Windows even with an explicit
+      # --hidden-import for it and no warning logged - collect-submodules
+      # walks the actual package on disk (pkgutil.walk_packages) instead of
+      # relying on modulegraph's static analysis, which is more reliable for
+      # whatever this was. Applied to all three app subpackages as insurance.
       # --hidden-import: PyInstaller's static analyzer misses these even
       # though they're directly imported (same list as build_eel.bat /
       # build_assets/backend.spec - keep all three in sync).
       # --add-data bundles the analyst-tunable scoring rules config.
       run: |
         python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean `
+          --collect-submodules app.analyzer `
+          --collect-submodules app.core `
+          --collect-submodules app.sandbox `
           --add-data "app/core/scoring_rules.yaml;app/core" `
           --hidden-import uvicorn.logging `
           --hidden-import uvicorn.loops `
