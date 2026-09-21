@@ -129,7 +129,7 @@ AEGIS provides **5 layers of defense** without accessing sensitive data:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/aegis.git
+git clone https://github.com/DHARANI2D/aegis.git
 cd aegis
 
 # Install backend dependencies
