@@ -1,0 +1,403 @@
+// HELIOS unified schema
+// Consolidates aegis (agent governance), asip (SOC investigations),
+// desas (email/file forensics), and signal-fusion (SIEM alerts) into
+// one shared data model. See /legacy/components/* for the four
+// original per-app schemas this replaces.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ANALYST
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  role          UserRole  @default(ANALYST)
+  createdAt     DateTime  @default(now())
+
+  accounts      Account[]
+  sessions      Session[]
+  assignedCases Case[]           @relation("CaseAssignee")
+  auditLogs     AuditLog[]
+  approvals     PlaybookApproval[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// ---------------------------------------------------------------------------
+// Unified case model — replaces aegis.BreachInvestigation, asip.Investigation,
+// desas's per-email AnalysisResult, and signal-fusion.Alert.
+// ---------------------------------------------------------------------------
+
+enum CaseSource {
+  AGENT_GOVERNANCE // aegis
+  SOC_INVESTIGATION // asip
+  EMAIL_ANALYSIS // desas
+  SIEM_ALERT // signal-fusion
+}
+
+enum CaseSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum CaseStatus {
+  OPEN
+  TRIAGING
+  INVESTIGATING
+  AWAITING_APPROVAL
+  CONTAINED
+  RESOLVED
+  FALSE_POSITIVE
+}
+
+model Case {
+  id              String       @id @default(cuid())
+  sourceType      CaseSource
+  title           String
+  summary         String?      @db.Text
+  severity        CaseSeverity @default(MEDIUM)
+  status          CaseStatus   @default(OPEN)
+  confidence      Float? // 0-1, e.g. asip's QA-validated confidence score
+  verdict         String? // e.g. desas "malicious"/"suspicious"/"clean"
+  riskScore       Float?
+  assignedToId    String?
+  sourceRef       String? // originating agentId / investigationId / alertId / emailId
+  rootCauseNarrative String?   @db.Text
+  metadata        Json? // source-specific payload (headers, IOC lists, etc.)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  resolvedAt      DateTime?
+
+  assignedTo      User?             @relation("CaseAssignee", fields: [assignedToId], references: [id])
+  detections      Detection[]
+  timeline        TimelineEntry[]
+  mitreTechniques CaseMitreTechnique[]
+  indicators      CaseIndicator[]
+  playbookRuns    PlaybookExecution[]
+  auditLogs       AuditLog[]
+
+  @@index([sourceType, status])
+  @@index([severity])
+  @@map("cases")
+}
+
+// One shared timeline for every case, replacing asip.TimelineEntry,
+// aegis's JSON evidence blob, and desas's per-analysis narrative.
+model TimelineEntry {
+  id        String   @id @default(cuid())
+  caseId    String
+  occurredAt DateTime
+  actor     String? // process/user/agent name
+  action    String
+  detail    String?  @db.Text
+  evidence  Json?
+  createdAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, occurredAt])
+  @@map("timeline_entries")
+}
+
+// Replaces signal-fusion's 11 detector outputs, aegis's DLP/reasoning/
+// behavioral/trust triggers, and desas's forensic rule hits.
+enum DetectionSource {
+  GEO_VELOCITY
+  FSM_CHAIN
+  ANOMALOUS_ACTION
+  THREAT_INTEL_MATCH
+  RECONNAISSANCE
+  CREDENTIAL_HARVESTING
+  LATERAL_MOVEMENT
+  DATA_EXFILTRATION
+  PERSISTENCE
+  DEFENSE_EVASION
+  IMPACT
+  AGENT_INTENT_POLICY
+  AGENT_DLP
+  AGENT_REASONING_DRIFT
+  AGENT_TRUST_DECAY
+  EMAIL_HEADER_AUTH
+  EMAIL_BODY_URL
+  EMAIL_ATTACHMENT_FORENSICS
+  EMAIL_SANDBOX_DETONATION
+}
+
+model Detection {
+  id        String          @id @default(cuid())
+  caseId    String
+  source    DetectionSource
+  ruleId    String
+  title     String
+  severity  CaseSeverity
+  evidence  Json
+  createdAt DateTime        @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([source])
+  @@map("detections")
+}
+
+// ---------------------------------------------------------------------------
+// MITRE ATT&CK — one shared reference set for asip, desas, and signal-fusion
+// mappings instead of three separate copies.
+// ---------------------------------------------------------------------------
+
+model MitreTactic {
+  id         String            @id // e.g. "TA0001"
+  name       String
+  techniques MitreTechnique[]
+
+  @@map("mitre_tactics")
+}
+
+model MitreTechnique {
+  id          String @id // e.g. "T1566" or "T1566.001"
+  tacticId    String
+  name        String
+  description String? @db.Text
+  isSubtechnique Boolean @default(false)
+  parentId    String?
+
+  tactic MitreTactic          @relation(fields: [tacticId], references: [id])
+  cases  CaseMitreTechnique[]
+
+  @@map("mitre_techniques")
+}
+
+model CaseMitreTechnique {
+  caseId      String
+  techniqueId String
+  confidence  Float?
+
+  case      Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  technique MitreTechnique @relation(fields: [techniqueId], references: [id])
+
+  @@id([caseId, techniqueId])
+  @@map("case_mitre_techniques")
+}
+
+// ---------------------------------------------------------------------------
+// Threat intelligence — one shared IOC cache for asip, desas, signal-fusion
+// (VirusTotal / AbuseIPDB / MxToolbox) instead of three ad hoc caches.
+// ---------------------------------------------------------------------------
+
+enum IndicatorType {
+  IP
+  DOMAIN
+  URL
+  FILE_HASH
+  EMAIL_ADDRESS
+}
+
+model ThreatIndicator {
+  id            String        @id @default(cuid())
+  type          IndicatorType
+  value         String
+  maliciousScore Float? // normalized 0-1 across providers
+  providerData  Json // raw VT / AbuseIPDB / MxToolbox responses
+  lastCheckedAt DateTime      @default(now())
+  expiresAt     DateTime // cache TTL (24h default, matching signal-fusion)
+
+  caseLinks CaseIndicator[]
+
+  @@unique([type, value])
+  @@index([expiresAt])
+  @@map("threat_indicators")
+}
+
+model CaseIndicator {
+  caseId      String
+  indicatorId String
+  role        String? // e.g. "c2_destination", "sender_ip", "dropped_file_hash"
+
+  case      Case            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  indicator ThreatIndicator @relation(fields: [indicatorId], references: [id])
+
+  @@id([caseId, indicatorId])
+  @@map("case_indicators")
+}
+
+// ---------------------------------------------------------------------------
+// Agent governance (aegis) — distinct concept, kept close to source model.
+// ---------------------------------------------------------------------------
+
+enum AgentStatus {
+  ACTIVE
+  ISOLATED
+  REVOKED
+}
+
+model Agent {
+  id           String      @id @default(cuid())
+  name         String      @unique
+  publicKey    String
+  trust        Float       @default(100)
+  level        Int         @default(10) // L0 (isolated) - L10 (full access)
+  status       AgentStatus @default(ACTIVE)
+  mode         String?
+  createdAt    DateTime    @default(now())
+  lastUpdateAt DateTime    @updatedAt
+
+  @@map("agents")
+}
+
+// ---------------------------------------------------------------------------
+// Response playbooks (signal-fusion) — generalized to trigger from any
+// Case, not just SIEM alerts.
+// ---------------------------------------------------------------------------
+
+model Playbook {
+  id               String   @id @default(cuid())
+  name             String
+  description      String?  @db.Text
+  triggerCondition Json // e.g. { severity: "CRITICAL", sourceType: "SIEM_ALERT" }
+  enabled          Boolean  @default(true)
+  autoExecute      Boolean  @default(false)
+  requireApproval  Boolean  @default(true)
+  priority         Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  actions    PlaybookAction[]
+  executions PlaybookExecution[]
+
+  @@map("playbooks")
+}
+
+enum PlaybookActionType {
+  ISOLATE_HOST
+  BLOCK_IP
+  NOTIFY_SLACK
+  CREATE_TICKET
+  KILL_PROCESS
+  COLLECT_LOGS
+  REVOKE_AGENT
+  RESTORE_AGENT
+}
+
+model PlaybookAction {
+  id         String             @id @default(cuid())
+  playbookId String
+  name       String
+  actionType PlaybookActionType
+  parameters Json
+  order      Int
+
+  playbook Playbook @relation(fields: [playbookId], references: [id], onDelete: Cascade)
+
+  @@map("playbook_actions")
+}
+
+enum PlaybookExecutionStatus {
+  PENDING_APPROVAL
+  RUNNING
+  SUCCEEDED
+  FAILED
+  REJECTED
+}
+
+model PlaybookExecution {
+  id         String                  @id @default(cuid())
+  playbookId String
+  caseId     String
+  status     PlaybookExecutionStatus @default(PENDING_APPROVAL)
+  results    Json?
+  startedAt  DateTime                @default(now())
+  finishedAt DateTime?
+
+  playbook   Playbook             @relation(fields: [playbookId], references: [id])
+  case       Case                 @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  approvals  PlaybookApproval[]
+
+  @@map("playbook_executions")
+}
+
+model PlaybookApproval {
+  id          String            @id @default(cuid())
+  executionId String
+  approverId  String
+  decision    String // "approved" | "rejected"
+  notes       String?
+  decidedAt   DateTime          @default(now())
+
+  execution PlaybookExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  approver  User              @relation(fields: [approverId], references: [id])
+
+  @@map("playbook_approvals")
+}
+
+// ---------------------------------------------------------------------------
+// Audit log — one hash-chained trail for every write action app-wide
+// (generalized from aegis.AuditLog).
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  caseId     String?
+  action     String
+  detail     Json?
+  prevHash   String
+  currentHash String
+  signature  String?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+  case  Case? @relation(fields: [caseId], references: [id])
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}
