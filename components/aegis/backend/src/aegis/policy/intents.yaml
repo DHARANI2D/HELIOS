@@ -1,0 +1,39 @@
+# AEGIS Intent Taxonomy
+# This defines the structured actions an AI can propose.
+
+intents:
+  - name: MODIFY_RESOURCE
+    description: "Modify an existing infrastructure resource (e.g., VM, DB, S3 bucket)"
+    required_fields: [target, action_type, change_size]
+    risk_level: HIGH
+
+  - name: DELETE_RESOURCE
+    description: "Permanent deletion of an infrastructure resource"
+    required_fields: [target, reasoning_hash]
+    risk_level: CRITICAL
+
+  - name: EXECUTE_COMMAND
+    description: "Execute a shell command or script"
+    required_fields: [command, context]
+    risk_level: HIGH
+
+  - name: READ_PII
+    description: "Access data containing Personally Identifiable Information"
+    required_fields: [data_source, justification]
+    risk_level: MEDIUM
+
+  - name: SEND_EXTERNAL_REQUEST
+    description: "Call an external API or endpoint"
+    required_fields: [url, method, payload_sample]
+    risk_level: MEDIUM
+
+# Default constraints for policy evaluation
+constraints:
+  confidence_threshold: 0.9
+  environment_defaults:
+    production:
+      human_approval_required: true
+      max_risk: MEDIUM
+    staging:
+      human_approval_required: false
+      max_risk: HIGH
