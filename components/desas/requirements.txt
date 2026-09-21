@@ -1,0 +1,34 @@
+# DESAS Clean Workstation Requirements
+# Web/Desktop GUI
+eel==0.18.2
+gevent-websocket==0.10.1
+selenium
+webdriver-manager
+
+# Analysis Engine
+tldextract
+pydantic-settings
+aiohttp
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+
+
+# Forensic Libraries
+extract-msg
+pdfminer.six
+python-docx
+olefile
+oletools
+Pillow
+openpyxl
+openpyxl
+pefile
+
+# Utilities
+python-dotenv
+requests
+bcrypt
+dnspython
+py7zr
+pyyaml

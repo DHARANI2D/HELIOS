@@ -1,0 +1,29 @@
+Subject: Original Subject
+From: original@sender.com
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============8067296295071011306=="
+
+--===============8067296295071011306==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Original content
+
+--===============8067296295071011306==
+Content-Type: text/plain
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="headers-forensic.txt"
+MIME-Version: 1.0
+
+RnJvbTogc3Bvb2ZlZEBiYW5rLmNvbQpTdWJqZWN0OiBSZWFsIFBoaXNo
+
+--===============8067296295071011306==
+Content-Type: text/html
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="bodyhtml-phish.html"
+MIME-Version: 1.0
+
+PGh0bWw+PGJvZHk+T3ZlcnJpZGUgQm9keTogaHR0cDovL292ZXJyaWRlLWV2aWwuY29tPC9ib2R5
+PjwvaHRtbD4=
+
+--===============8067296295071011306==--

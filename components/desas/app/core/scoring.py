@@ -1,0 +1,315 @@
+import os
+import sys
+import shutil
+import logging
+
+from app.core.schemas import AnalysisResult, NetworkRequest, SandboxResult
+from app.core.settings_manager import get_data_dir
+
+logger = logging.getLogger("uvicorn")
+
+# Built-in fallback, used if the YAML file is missing, unreadable, or PyYAML
+# isn't installed. Keep these in sync with app/core/scoring_rules.yaml.
+_DEFAULT_RULES = {
+    "sandbox": {
+        "password_field_detected": 40,
+        "redirect_chain": {"min_hops_to_flag": 2, "points": 10},
+        "exfiltration": {
+            "all_three_pillars": 100,
+            "pillar_1_and_2": 80,
+            "pillar_1_only": 40,
+            "pillar_2_only": 30,
+            "pii_detected": 30,
+            "dns_tunneling": 50,
+            "pillar_3_only": 20,
+            "generic_post_fallback": 20,
+        },
+        "js_flag_points_each": 10,
+        "block_recommendation_threshold": 20,
+    },
+    "verdict": {
+        "malicious_threshold": 71,
+        "suspicious_threshold": 31,
+    },
+}
+
+
+def _bundled_rules_path() -> str:
+    """Path to the default scoring_rules.yaml shipped alongside the app."""
+    if getattr(sys, "frozen", False):
+        base = os.path.join(sys._MEIPASS, "app", "core")
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "scoring_rules.yaml")
+
+
+def _user_rules_path() -> str:
+    """Analyst-editable copy that survives app updates/reinstalls."""
+    return os.path.join(get_data_dir(), "scoring_rules.yaml")
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def load_scoring_rules() -> dict:
+    """
+    Loads analyst-tunable scoring rules. Resolution order:
+    1. User-editable copy in the app data dir (created from the bundled
+       default on first run so analysts can tweak it without a code change).
+    2. Bundled default shipped with the app.
+    3. Hardcoded _DEFAULT_RULES, if YAML support or both files are unavailable.
+    """
+    try:
+        import yaml
+    except ImportError:
+        logger.warning("PyYAML not installed; using built-in default scoring rules.")
+        return _DEFAULT_RULES
+
+    user_path = _user_rules_path()
+    bundled_path = _bundled_rules_path()
+
+    try:
+        if not os.path.exists(user_path) and os.path.exists(bundled_path):
+            os.makedirs(os.path.dirname(user_path), exist_ok=True)
+            shutil.copyfile(bundled_path, user_path)
+    except Exception as e:
+        logger.warning(f"Could not seed user scoring_rules.yaml: {e}")
+
+    for path in (user_path, bundled_path):
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    loaded = yaml.safe_load(f) or {}
+                return _deep_merge(_DEFAULT_RULES, loaded)
+        except Exception as e:
+            logger.warning(f"Failed to load scoring rules from {path}: {e}")
+
+    return _DEFAULT_RULES
+
+
+RULES = load_scoring_rules()
+
+
+def calculate_sandbox_score(result_obj: SandboxResult) -> tuple[int, list[str], list[str]]:
+    """
+    Recalculates just the sandbox portion of the score for a specific result.
+    Returns: (score, reasons, blocking_recs)
+    """
+    score = 0
+    reasons = []
+    recs = []
+    sb_rules = RULES["sandbox"]
+
+    # Rule 1: Password field detected
+    if "interacted_with_form" in str(result_obj.dom_mutations) or any("password" in f.get("name", "").lower() for form in result_obj.detected_forms for f in form.get("fields", [])):
+        score += sb_rules["password_field_detected"]
+        reasons.append(f"Sandbox ({result_obj.url}): Password input field detected (Credential Harvesting)")
+        recs.append(f"Block URL: {result_obj.expanded_url}")
+
+    # Rule 2: Redirect chain length
+    redirect_rules = sb_rules["redirect_chain"]
+    if len(result_obj.redirect_chain) > redirect_rules["min_hops_to_flag"]:
+        score += redirect_rules["points"]
+        reasons.append(f"Sandbox ({result_obj.url}): Long redirect chain ({len(result_obj.redirect_chain)} hops)")
+
+    # Rule 4: Data Exfiltration (3-Pillar Model)
+    exfil_rules = sb_rules["exfiltration"]
+    if result_obj.exfiltration_detected and "pillars" in result_obj.exfiltration_detected:
+        ex_data = result_obj.exfiltration_detected
+        p1 = ex_data["pillars"]["pillar_1"]["detected"]
+        p2 = ex_data["pillars"]["pillar_2"]["detected"]
+        p3 = ex_data["pillars"]["pillar_3"]["detected"]
+
+        if p1 and p2 and p3:
+            score += exfil_rules["all_three_pillars"]
+            reasons.append(f"CRITICAL ({result_obj.url}): Confirmed Data Exfiltration (Sensitive data + Unauthorized target + Stealthy behavior)")
+        elif p1 and p2:
+            score += exfil_rules["pillar_1_and_2"]
+            reasons.append(f"HIGH ({result_obj.url}): Unauthorized sensitive data submission detected")
+        elif p1:
+            score += exfil_rules["pillar_1_only"]
+            reasons.append(f"Suspicious ({result_obj.url}): Attempted submission of sensitive credentials")
+        elif p2:
+            score += exfil_rules["pillar_2_only"]
+            reasons.append(f"Suspicious ({result_obj.url}): Communication with unauthorized external domain")
+
+        # New: Advanced Exfiltration Indicators
+        if ex_data.get("pii_detected"):
+            score += exfil_rules["pii_detected"]
+            reasons.append(f"PII Leak ({result_obj.url}): Detected sensitive information ({', '.join(set(ex_data['pii_detected']))}) in network traffic")
+
+        if ex_data.get("dns_tunneling"):
+            score += exfil_rules["dns_tunneling"]
+            reasons.append(f"DNS Tunneling ({result_obj.url}): Stealthy data exfiltration via complex DNS patterns detected")
+
+        if p3 and not (p1 and p2 and p3):
+            score += exfil_rules["pillar_3_only"]
+            reasons.append(f"Forensic Alert ({result_obj.url}): Stealthy network behavior (background beaconing/beacons)")
+
+        if "target_url" in ex_data:
+            recs.append(f"Block Data Exfil Target: {ex_data['target_url']}")
+    elif any(req.method == "POST" for req in result_obj.network_requests):
+        # Legacy/Fallback if pillar data missing but POSTs seen
+        score += exfil_rules["generic_post_fallback"]
+        reasons.append(f"Sandbox ({result_obj.url}): Generic POST requests detected (Potential Exfil)")
+
+    # Rule 5: JS Behavioral Analysis
+    for script in result_obj.js_analysis:
+        if script.get("flags"):
+            score += sb_rules["js_flag_points_each"] * len(script["flags"])
+            for flag in script["flags"]:
+                reasons.append(f"Sandbox ({result_obj.url}): High-risk JS detected: {flag} in {script['script']}")
+
+    # Block original URL if suspicious
+    if score >= sb_rules["block_recommendation_threshold"]:
+        recs.append(f"Block Entry URL: {result_obj.url}")
+
+    return score, reasons, recs
+
+def aggregate_verdict(result: AnalysisResult) -> AnalysisResult:
+    """
+    Combines Header, Body, and Sandbox scores into a final verdict.
+    """
+    total_sb_score = 0
+    total_sb_reasons = []
+    total_sb_recs = set()
+    score_breakdown = []
+
+    # Process all sandbox results
+    for i, sb_result in enumerate(result.sandbox_results):
+        score, reasons, recs = calculate_sandbox_score(sb_result)
+        sb_result.score = score
+        sb_result.reasons = reasons
+        
+        total_sb_score += score
+        total_sb_reasons.extend(reasons)
+        for r in recs:
+            total_sb_recs.add(r)
+            
+        # For legacy UI support, populate the main fields with the first result
+        if i == 0:
+            result.url = sb_result.url
+            result.expanded_url = sb_result.expanded_url
+            result.redirect_chain = sb_result.redirect_chain
+            result.screenshot_path = sb_result.screenshot_path
+            result.screenshot_chain = sb_result.screenshot_chain
+            result.network_requests = sb_result.network_requests
+            result.dom_mutations = sb_result.dom_mutations
+            result.detected_forms = sb_result.detected_forms
+            result.exfiltration_detected = sb_result.exfiltration_detected
+            result.js_analysis = sb_result.js_analysis
+
+    result.sandbox_score = total_sb_score
+    result.sandbox_reasons = total_sb_reasons
+    
+    # 2. Build Score Breakdown (Phase 7 Enhancement)
+    # Header components
+    if result.header_score > 0:
+        for reason in result.header_reasons:
+            # Extract score from reason if possible, otherwise use proportional
+            score_breakdown.append({
+                "component": "Header Analysis",
+                "points": result.header_score // max(len(result.header_reasons), 1),
+                "reason": reason,
+                "category": "authentication"
+            })
+    
+    # Body components
+    if result.body_score > 0:
+        for reason in result.body_reasons:
+            score_breakdown.append({
+                "component": "Content Analysis",
+                "points": result.body_score // max(len(result.body_reasons), 1),
+                "reason": reason,
+                "category": "content"
+            })
+    
+    # Sandbox components
+    for sb_result in result.sandbox_results:
+        if sb_result.score > 0:
+            for reason in sb_result.reasons:
+                # Parse score from reason if it contains specific values
+                points = sb_result.score // max(len(sb_result.reasons), 1)
+                
+                if "CRITICAL" in reason and "Exfiltration" in reason:
+                    points = 100
+                elif "Password input" in reason:
+                    points = 40
+                elif "POST request" in reason:
+                    points = 20
+                elif "redirect chain" in reason:
+                    points = 10
+                
+                score_breakdown.append({
+                    "component": "Sandbox Behavior",
+                    "points": points,
+                    "reason": reason,
+                    "category": "behavior"
+                })
+    
+    result.score_breakdown = score_breakdown
+    
+    # 3. Total Score
+    total_score = result.header_score + result.body_score + result.sandbox_score
+    result.total_score = total_score
+    
+    # 3. Aggregate Reasons & Recommendations
+    all_reasons = result.header_reasons + result.body_reasons + result.sandbox_reasons
+    result.risk_reasons = all_reasons
+    
+    # Merge block recommendations
+    current_recs = set(result.block_recommendations)
+    for r in total_sb_recs:
+        current_recs.add(r)
+    result.block_recommendations = list(current_recs)
+
+    # 4. Final Verdict (analyst-tunable via scoring_rules.yaml)
+    verdict_rules = RULES["verdict"]
+
+    if total_score >= verdict_rules["malicious_threshold"]:
+        result.verdict = "Malicious"
+    elif total_score >= verdict_rules["suspicious_threshold"]:
+        result.verdict = "Suspicious"
+    else:
+        result.verdict = "Benign"
+
+    # 5. Threat Classification
+    if result.verdict != "Benign":
+        # Indicators
+        mal_k = ["malicious", "flagged by", "macro", "trojan", "virus", "ransomware"]
+        phi_k = ["password", "credential", "login", "young", "newly registered"]
+        
+        has_phish = any(k in r.lower() for r in all_reasons for k in phi_k)
+        has_mal = any(k in r.lower() for r in all_reasons for k in mal_k)
+        
+        if has_phish:
+             result.threat_type = "Phishing"
+             if any(k in r.lower() for r in all_reasons for k in ["password", "credential", "login"]):
+                 result.threat_category = "Credential Harvesting"
+             elif any("young" in r.lower() or "newly registered" in r.lower() for r in all_reasons):
+                 result.threat_category = "Newly Registered Domain"
+             else:
+                 result.threat_category = "Social Engineering"
+        elif has_mal:
+            result.threat_type = "Malware"
+            result.threat_category = "Payload/Dropper"
+        else:
+            result.threat_type = "Suspicious Activity"
+            result.threat_category = "Anomalous Behavior"
+    
+    # 6. Generate Verdict Explanation (Phase 1 Enhancement)
+    from app.analyzer.verdict_explainer import explain_verdict
+    
+    explanation_data = explain_verdict(result.dict())
+    result.verdict_explanation = explanation_data["verdict_explanation"]
+    result.risk_factors = explanation_data["risk_factors"]
+    result.confidence_score = explanation_data["confidence_score"]
+
+    return result

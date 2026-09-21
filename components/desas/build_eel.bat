@@ -1,0 +1,115 @@
+@echo off
+echo.
+echo ==========================================================
+echo       DESAS - Professional Forensic Workstation
+echo          Eel Standalone Build (Single EXE)
+echo ==========================================================
+echo.
+
+:: Check for Python
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [!] Python not found. Please install Python 3.
+    pause
+    exit /b
+)
+
+:: Require Python 3.12+ - app/analyzer/report_generator.py uses PEP 701
+:: f-string syntax (quote reuse in nested f-strings), a hard SyntaxError
+:: before 3.12. On an older Python, PyInstaller silently fails to compile
+:: that one module and drops it from the exe with no build error at all -
+:: the exe builds "successfully" but crashes at runtime on first use.
+python -c "import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)"
+if %errorlevel% neq 0 (
+    echo [!] Python 3.12+ is required ^(this build uses newer f-string syntax^).
+    echo [!] Your version:
+    python --version
+    pause
+    exit /b
+)
+
+:: Install dependencies
+:: Uses requirements.txt so this build gets every runtime dependency the app
+:: actually needs (selenium, oletools, olefile, pefile, pyyaml, etc.) - a
+:: hand-picked package list here previously drifted out of sync and left
+:: PyInstaller unable to bundle modules that were never even installed.
+:: "setuptools<81": eel's own CLI wrapper (python -m eel) does
+:: `import pkg_resources`, which setuptools removed in 81.0 - without this
+:: pin, the build fails before PyInstaller even starts.
+echo [1/3] Installing/Updating required Python packages...
+pip install -r requirements.txt pyinstaller "setuptools<81"
+if %errorlevel% neq 0 (
+    echo [!] Failed to install dependencies.
+    pause
+    exit /b
+)
+
+:: Clean previous builds
+if exist build rd /s /q build
+if exist dist rd /s /q dist
+
+:: Run PyInstaller via Eel
+echo [2/3] Building standalone executable with PyInstaller...
+echo [!] This may take a few minutes...
+
+:: Note: --onefile bundles everything, --noconsole hides the cmd window
+:: --add-data includes the static folder and the scoring rules config.
+:: On Windows, the syntax is source;dest.
+:: --collect-all selenium/webdriver_manager: Selenium's webdriver classes
+:: (selenium.webdriver.chrome.webdriver etc.) aren't caught by
+:: modulegraph's static analysis - a frozen build crashed at runtime with
+:: "No module named selenium.webdriver.chrome.webdriver". --collect-all
+:: is the blanket fix (submodules + data + binaries).
+:: --collect-submodules: app.analyzer.report_generator was silently dropped
+:: from the frozen bundle even with an explicit --hidden-import for it and
+:: no warning logged - collect-submodules walks the actual package on disk
+:: instead of relying on modulegraph's static analysis. Applied to all
+:: three app subpackages as insurance.
+:: --hidden-import: PyInstaller's static analyzer misses these even though
+:: they're directly imported - the same list already used by
+:: build_assets/backend.spec for the other (FastAPI-style) build path.
+set ICON_ARG=
+if exist app\static\favicon.ico set ICON_ARG=--icon app/static/favicon.ico
+
+python -m eel app/eel_main.py app/static --onefile --noconsole --name desas %ICON_ARG% --workpath build --distpath dist ^
+    --collect-all selenium ^
+    --collect-all webdriver_manager ^
+    --collect-submodules app.analyzer ^
+    --collect-submodules app.core ^
+    --collect-submodules app.sandbox ^
+    --add-data "app/core/scoring_rules.yaml;app/core" ^
+    --hidden-import uvicorn.logging ^
+    --hidden-import uvicorn.loops ^
+    --hidden-import uvicorn.loops.auto ^
+    --hidden-import uvicorn.protocols ^
+    --hidden-import uvicorn.protocols.http ^
+    --hidden-import uvicorn.protocols.http.auto ^
+    --hidden-import uvicorn.protocols.websockets ^
+    --hidden-import uvicorn.protocols.websockets.auto ^
+    --hidden-import uvicorn.lifespan ^
+    --hidden-import uvicorn.lifespan.on ^
+    --hidden-import email.mime.text ^
+    --hidden-import email.mime.multipart ^
+    --hidden-import extract_msg ^
+    --hidden-import pypdf ^
+    --hidden-import docx ^
+    --hidden-import reportlab ^
+    --hidden-import reportlab.pdfgen ^
+    --hidden-import reportlab.lib ^
+    --hidden-import reportlab.platypus ^
+    --hidden-import openpyxl ^
+    --hidden-import app.analyzer.report_generator
+
+if %errorlevel% neq 0 (
+    echo [!] Build failed.
+    pause
+    exit /b
+)
+
+echo.
+echo [3/3] Build successful!
+echo [!] Your standalone executable is located in: dist/desas.exe
+echo.
+echo ==========================================================
+echo.
+pause

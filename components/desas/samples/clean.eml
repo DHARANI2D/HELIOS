@@ -1,0 +1,13 @@
+From: friend@example.com
+To: analyst@corp.com
+Subject: Friendly Hello
+Date: Mon, 15 Jan 2024 10:00:00 -0000
+Content-Type: text/html; charset="UTF-8"
+
+<html>
+<body>
+<p>Hey there,</p>
+<p>Check out this cool link: <a href="https://example.com">Example</a></p>
+<p>Cheers,</p>
+</body>
+</html>

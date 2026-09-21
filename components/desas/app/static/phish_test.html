@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Security Alert - Sign In</title>
+</head>
+
+<body>
+    <div style="font-family: Arial; padding: 40px; text-align: center;">
+        <h2>Session Expired</h2>
+        <p>Please re-authenticate to continue to your workspace.</p>
+        <form action="/api/test-exfil" method="POST"
+            style="display: inline-block; text-align: left; border: 1px solid #ccc; padding: 20px; border-radius: 8px;">
+            <div style="margin-bottom: 10px;">
+                <label>Email:</label><br>
+                <input type="email" name="login_email" style="width: 200px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Password:</label><br>
+                <input type="password" name="login_pass" style="width: 200px;">
+            </div>
+            <button type="submit">Sign In</button>
+        </form>
+    </div>
+    <script>
+        // Malicious script indicators
+        eval("console.log('Sandbox probe start')");
+        document.write("<!-- Sandbox hidden comment -->");
+    </script>
+</body>
+
+</html>

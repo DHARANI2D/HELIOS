@@ -1,0 +1,2 @@
+Invoice #12345 confirmed. Order confirmed for membership.
+Check your status: https://secure-login-verify.top/auth

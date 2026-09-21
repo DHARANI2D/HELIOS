@@ -1,0 +1,28 @@
+Content-Type: multipart/mixed; boundary="===============7675944235017616395=="
+MIME-Version: 1.0
+Subject: Proofpoint: Suspicious Email Quarantine
+From: reports@proofpoint.com
+To: admin@company.com
+
+--===============7675944235017616395==
+Content-Type: text/plain; charset="us-ascii"
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+
+
+    The attached email was quarantined due to suspicious content.
+    Please review the attachment.
+    
+--===============7675944235017616395==
+Content-Type: application/octet-stream; Name="quarantined_mail.eml"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="quarantined_mail.eml"
+
+U3ViamVjdDogVXJnZW50OiBJbnZvaWNlIE92ZXJkdWUKRnJvbTogYXR0YWNrZXJAYmFkLmNvbQpU
+bzogdmljdGltQGNvbXBhbnkuY29tCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbjsgY2hhcnNldD0i
+dXRmLTgiCkNvbnRlbnQtVHJhbnNmZXItRW5jb2Rpbmc6IDdiaXQKTUlNRS1WZXJzaW9uOiAxLjAK
+ClBsZWFzZSBwYXkgdGhlIGF0dGFjaGVkIGludm9pY2UgaW1tZWRpYXRlbHkuIGh0dHA6Ly9waGlz
+aGluZy1zaXRlLmNvbS9sb2dpbgo=
+
+--===============7675944235017616395==--

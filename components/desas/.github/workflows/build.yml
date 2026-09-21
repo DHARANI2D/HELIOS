@@ -1,0 +1,113 @@
+name: Build DESAS Windows EXE
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      # Must be 3.12+ (matches README's stated prerequisite): app/analyzer/
+      # report_generator.py uses PEP 701 f-string syntax (quote reuse in
+      # nested f-strings), which is a hard SyntaxError before 3.12. That's
+      # why this one module kept silently vanishing from the frozen exe
+      # while building with 3.10 - PyInstaller couldn't even compile it, and
+      # apparently didn't surface that as a build-breaking error/warning.
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        architecture: 'x64'
+
+    - name: Install dependencies
+      # "setuptools<81": eel's own CLI wrapper (python -m eel) does
+      # `import pkg_resources`, which setuptools removed in 81.0 - without
+      # this pin, the build fails before PyInstaller even starts.
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller eel "setuptools<81"
+
+    - name: Build with PyInstaller (via Eel)
+      # 'python -m eel' forwards unrecognized args straight to PyInstaller.
+      # --collect-all selenium/webdriver_manager: Selenium's webdriver
+      # classes (selenium.webdriver.chrome.webdriver etc.) are loaded in a
+      # way modulegraph's static analysis doesn't catch - a frozen build
+      # crashed at runtime with "No module named
+      # selenium.webdriver.chrome.webdriver" despite the app importing
+      # Selenium directly. --collect-all is the blanket fix (submodules +
+      # data + binaries), used instead of enumerating individual
+      # hidden-imports since that approach already proved unreliable once
+      # this session (app.analyzer.report_generator).
+      # --collect-submodules: same insurance for our own packages.
+      # --hidden-import: PyInstaller's static analyzer misses these even
+      # though they're directly imported (same list as build_eel.bat /
+      # build_assets/backend.spec - keep all three in sync).
+      # --add-data bundles the analyst-tunable scoring rules config.
+      run: |
+        python -m eel app/eel_main.py app/static --onefile --noconsole --name desas --icon app/static/icon.png --clean `
+          --collect-all selenium `
+          --collect-all webdriver_manager `
+          --collect-submodules app.analyzer `
+          --collect-submodules app.core `
+          --collect-submodules app.sandbox `
+          --add-data "app/core/scoring_rules.yaml;app/core" `
+          --hidden-import uvicorn.logging `
+          --hidden-import uvicorn.loops `
+          --hidden-import uvicorn.loops.auto `
+          --hidden-import uvicorn.protocols `
+          --hidden-import uvicorn.protocols.http `
+          --hidden-import uvicorn.protocols.http.auto `
+          --hidden-import uvicorn.protocols.websockets `
+          --hidden-import uvicorn.protocols.websockets.auto `
+          --hidden-import uvicorn.lifespan `
+          --hidden-import uvicorn.lifespan.on `
+          --hidden-import email.mime.text `
+          --hidden-import email.mime.multipart `
+          --hidden-import extract_msg `
+          --hidden-import pypdf `
+          --hidden-import docx `
+          --hidden-import reportlab `
+          --hidden-import reportlab.pdfgen `
+          --hidden-import reportlab.lib `
+          --hidden-import reportlab.platypus `
+          --hidden-import openpyxl `
+          --hidden-import app.analyzer.report_generator
+
+    - name: Upload Windows Exe (build artifact)
+      uses: actions/upload-artifact@v4
+      with:
+        name: desas-windows-exe
+        path: dist/desas.exe
+
+    - name: Publish rolling "latest" release
+      # Only on pushes to main/master, not on PRs or manual test dispatches
+      # from other branches - overwrites a single "latest" release each time
+      # so the Releases page always has the newest build, with no version
+      # history to manage.
+      if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      uses: ncipollo/release-action@v1
+      with:
+        tag: latest
+        name: "Latest Build"
+        body: |
+          Automated rolling build from commit ${{ github.sha }}.
+          This release is overwritten on every push to main - it is not a
+          versioned release. See commit history for what changed.
+        commit: ${{ github.sha }}
+        artifacts: dist/desas.exe
+        allowUpdates: true
+        removeArtifacts: true
+        replacesArtifacts: true
+        prerelease: true
+        makeLatest: false

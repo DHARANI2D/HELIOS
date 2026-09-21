@@ -1,0 +1,12 @@
+From: support@microsoft-security-check.com
+To: ceo@corp.com
+Subject: URGENT: Password Expiry
+Date: Mon, 15 Jan 2024 10:00:00 -0000
+Content-Type: text/html; charset="UTF-8"
+
+<html>
+<body>
+<p>Your password will expire in 2 hours.</p>
+<p>Click here to renew: <a href="http://malicious.example.com/login">Renew Password</a></p>
+</body>
+</html>

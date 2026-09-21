@@ -1,0 +1,27 @@
+# DESAS Scoring Rules
+#
+# Analyst-tunable point values and thresholds for the verdict engine.
+# Edit these to encode your own triage judgment calls without touching code.
+# This file is loaded at runtime by app/core/scoring.py; if it's missing or
+# fails to parse, built-in defaults (identical to the values below) are used.
+
+sandbox:
+  password_field_detected: 40
+  redirect_chain:
+    min_hops_to_flag: 2   # flag when len(redirect_chain) exceeds this
+    points: 10
+  exfiltration:
+    all_three_pillars: 100      # sensitive data + unauthorized target + stealthy behavior
+    pillar_1_and_2: 80          # unauthorized sensitive data submission
+    pillar_1_only: 40           # attempted submission of sensitive credentials
+    pillar_2_only: 30           # communication with unauthorized external domain
+    pii_detected: 30
+    dns_tunneling: 50
+    pillar_3_only: 20           # stealthy behavior alone (background beaconing)
+    generic_post_fallback: 20   # POST seen but no pillar data available
+  js_flag_points_each: 10
+  block_recommendation_threshold: 20
+
+verdict:
+  malicious_threshold: 71
+  suspicious_threshold: 31
