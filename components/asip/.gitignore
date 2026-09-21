@@ -1,0 +1,31 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Databases
+*.db
+*.sqlite3
+
+# Uploads & Extraction Directories
+uploads/
+extracted/
+scratch_test_files/
+
+# Local Environment Credentials
+.env
+
+# Frontend Dependencies & Builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+
+# OS Specific
+.DS_Store
+Thumbs.db

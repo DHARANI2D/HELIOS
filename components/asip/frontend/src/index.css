@@ -1,0 +1,107 @@
+:root {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  /* Color System */
+  --bg-dark: #090a0f;
+  --bg-panel: rgba(18, 20, 32, 0.7);
+  --bg-panel-hover: rgba(26, 29, 46, 0.85);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-glow: rgba(0, 240, 255, 0.25);
+  
+  --color-primary: #00f0ff;      /* Cyan neon */
+  --color-secondary: #bd00ff;    /* Purple neon */
+  --color-text-main: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  
+  /* Status Colors */
+  --status-completed: #10b981;
+  --status-pending: #f59e0b;
+  --status-failed: #ef4444;
+  --status-auth: #bd00ff;
+  --status-parsing: #3b82f6;
+
+  color-scheme: dark;
+  background-color: var(--bg-dark);
+  color: var(--color-text-main);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(circle at 50% 0%, #151a30 0%, var(--bg-dark) 70%);
+  overflow-x: hidden;
+}
+
+/* Glassmorphism Panel style */
+.glass-panel {
+  background: var(--bg-panel);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.glow-cyan:hover {
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.15);
+  border-color: var(--border-color-glow);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary);
+}
+
+/* Animations */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.6;
+    box-shadow: 0 0 5px rgba(0, 240, 255, 0.1);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 15px rgba(0, 240, 255, 0.3);
+  }
+}
+
+.pulse-primary {
+  animation: pulseGlow 2s infinite ease-in-out;
+}
+
+/* Standard UI components */
+button {
+  cursor: pointer;
+  outline: none;
+}
+
+input, select {
+  outline: none;
+}
