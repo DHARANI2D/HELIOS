@@ -125,6 +125,7 @@ model Case {
   indicators      CaseIndicator[]
   playbookRuns    PlaybookExecution[]
   auditLogs       AuditLog[]
+  ingestedEvents  IngestedEvent[]
 
   @@index([sourceType, status])
   @@index([severity])
@@ -188,6 +189,45 @@ model Detection {
   @@index([caseId])
   @@index([source])
   @@map("detections")
+}
+
+// ---------------------------------------------------------------------------
+// Ingested telemetry — raw normalized events the detection engine (and,
+// later, Investigations) runs against. Replaces signal-fusion's Event model;
+// unlike the original, it can carry a caseId back-reference once a
+// detection fires from it.
+// ---------------------------------------------------------------------------
+
+enum EventSource {
+  AUTH
+  ENDPOINT
+  NETWORK
+  CLOUD
+}
+
+model IngestedEvent {
+  id             String      @id @default(cuid())
+  source         EventSource
+  eventType      String
+  timestamp      DateTime
+  ingestedAt     DateTime    @default(now())
+  actorUser      String?
+  actorProcess   String?
+  actorService   String?
+  sourceIp       String?
+  destIp         String?
+  geo            String?
+  severityHint   CaseSeverity @default(INFO)
+  confidenceHint Float        @default(0.5)
+  metadata       Json
+  caseId         String?
+
+  case Case? @relation(fields: [caseId], references: [id])
+
+  @@index([timestamp])
+  @@index([actorUser])
+  @@index([sourceIp])
+  @@map("ingested_events")
 }
 
 // ---------------------------------------------------------------------------
