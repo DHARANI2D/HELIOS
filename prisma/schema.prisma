@@ -192,10 +192,14 @@ model Detection {
 }
 
 // ---------------------------------------------------------------------------
-// Ingested telemetry — raw normalized events the detection engine (and,
-// later, Investigations) runs against. Replaces signal-fusion's Event model;
-// unlike the original, it can carry a caseId back-reference once a
-// detection fires from it.
+// Ingested telemetry — raw normalized events the detection engine and
+// Investigations run against. Replaces signal-fusion's Event model.
+// caseId is a convenience marker for "has at least one detector claimed
+// this event" (used to skip already-processed events on the next
+// detection run) — it is NOT authoritative for "which events fed this
+// case", since one event can match several detectors and the field can
+// only point at one of the resulting cases. For that, read
+// Detection.evidence.matchedEventIds on the case in question instead.
 // ---------------------------------------------------------------------------
 
 enum EventSource {
