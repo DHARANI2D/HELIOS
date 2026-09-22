@@ -108,9 +108,39 @@ legacy/
 
 ## Status
 
-Foundation and the Agent Governance module are complete and verified
-end-to-end (build, lint, and a live run of all 5 governance attack
-scenarios against Postgres). Threat Intelligence, Cases & Alerts,
-Investigations, Email & File Forensics, and Response Playbooks / MITRE
-Coverage / Audit Log are in progress — their routes currently show a
-placeholder until each module lands.
+All 9 feature areas are ported and verified end-to-end against a live
+Postgres instance (build, lint, and real data flowing through each
+module — see individual commits for the specific verification each one
+ran):
+
+- **Overview** — cross-source KPI dashboard
+- **Agent Governance** (from aegis) — identity, trust, policy, DLP,
+  reasoning-drift detection, all 5 attack scenarios
+- **Threat Intelligence** (from asip/desas/signal-fusion) — shared
+  VirusTotal/AbuseIPDB lookup + cache, used by every other module
+- **Cases & Alerts** (from signal-fusion) — all 11 detectors across 12
+  MITRE tactics, ingestion pipeline, attack simulation
+- **Investigations** (from asip) — the Triage → RCA → adversarial QA →
+  Report swarm (a plain state machine, not LangGraph — see
+  `src/lib/investigations/orchestrator.ts` for why) and the entity/
+  process-graph builder rendered via Cytoscape.js
+- **Email & File Forensics** (from desas) — full JS port: header/SPF/
+  DKIM/DMARC analysis, body/URL scoring, attachment forensics (entropy,
+  obfuscation, OLE streams, polyglots, XLM macros, PDF signals), and
+  real Playwright-driven sandbox URL detonation
+- **Response Playbooks** (from signal-fusion) — trigger matching,
+  auto-execute and approval-gated execution, wired into the detection
+  engine
+- **MITRE ATT&CK Coverage** — aggregated across all four detection
+  sources
+- **Audit Log** — one hash-chained trail for every write action
+  app-wide, with a one-click integrity check
+
+Known gaps, disclosed rather than silently dropped (see the relevant
+commit for each): DESAS's modern OOXML macro extraction (`.xlsm`/
+`.docm` VBA source is compressed inside `vbaProject.bin` in MS-OVBA
+format — legacy binary `.doc`/`.xls` OLE macros are unaffected),
+signal-fusion's full 48-scenario simulation library (condensed to 16
+curated ones covering the same 12 tactics), and desas's deeper 3-pillar
+JS-behavioral exfiltration model in the sandbox (replaced with a
+simpler password-field/redirect-chain/POST-request heuristic).
