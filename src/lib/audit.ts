@@ -26,27 +26,42 @@ export interface LogActionInput {
   detail?: Record<string, unknown>;
 }
 
+// Arbitrary fixed key for the chain's advisory lock — just needs to be
+// consistent across every logAction call so they serialize against each
+// other (and only each other).
+const CHAIN_LOCK_KEY = 847_213_659;
+
 export async function logAction({ actorId, caseId, action, detail }: LogActionInput) {
-  const prevLog = await db.auditLog.findFirst({ orderBy: { createdAt: "desc" } });
-  const prevHash = prevLog?.currentHash ?? "GENESIS";
+  return db.$transaction(async (tx) => {
+    // A read-then-write hash chain is a classic race: two concurrent
+    // calls can both read the same "latest" row before either writes,
+    // then both chain off the same prevHash, forking the chain. Holding
+    // a Postgres advisory lock for the transaction's duration serializes
+    // every logAction call against every other one, so the read and the
+    // write are atomic together.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${CHAIN_LOCK_KEY})`;
 
-  const entry = { actorId: actorId ?? null, caseId: caseId ?? null, action, detail: detail ?? null, prevHash };
-  const currentHash = createHash("sha256").update(canonicalJson(entry)).digest("hex");
+    const prevLog = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
+    const prevHash = prevLog?.currentHash ?? "GENESIS";
 
-  return db.auditLog.create({
-    data: {
-      actorId,
-      caseId,
-      action,
-      detail: detail as never,
-      prevHash,
-      currentHash,
-    },
+    const entry = { actorId: actorId ?? null, caseId: caseId ?? null, action, detail: detail ?? null, prevHash };
+    const currentHash = createHash("sha256").update(canonicalJson(entry)).digest("hex");
+
+    return tx.auditLog.create({
+      data: {
+        actorId,
+        caseId,
+        action,
+        detail: detail as never,
+        prevHash,
+        currentHash,
+      },
+    });
   });
 }
 
 export async function verifyAuditChainIntegrity(): Promise<boolean> {
-  const logs = await db.auditLog.findMany({ orderBy: { createdAt: "asc" } });
+  const logs = await db.auditLog.findMany({ orderBy: { seq: "asc" } });
 
   let prevHash = "GENESIS";
   for (const log of logs) {

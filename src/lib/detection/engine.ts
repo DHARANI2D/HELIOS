@@ -1,13 +1,16 @@
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
+import { runPlaybooksForCase } from "@/lib/playbooks/engine";
 import { DETECTORS } from "./detectors";
 import type { DetectionResult, NormalizedEvent } from "./types";
 import type { CaseSeverity, DetectionSource } from "@prisma/client";
 
 // Ported from signal-fusion's detection/engine.ts DetectionEngine. Each
 // firing detection becomes a Case + Detection on the unified model instead
-// of signal-fusion's standalone Alert row; playbook auto-execution is
-// wired in task #12 once the Playbook engine is ported.
+// of signal-fusion's standalone Alert row. Playbook auto-execution/approval
+// (originally inline evaluateTriggers/executePlaybook/createApprovalRequest
+// calls) now goes through runPlaybooksForCase, generalized to trigger from
+// any Case, not just SIEM alerts.
 
 const DETECTOR_NAME_TO_SOURCE: Record<string, DetectionSource> = {
   GeoVelocityDetector: "GEO_VELOCITY",
@@ -121,6 +124,13 @@ export async function runDetections(events: NormalizedEvent[]): Promise<EngineRu
       action: "detection.case_created",
       detail: { detector: detection.detector, riskScore, severity },
     });
+
+    try {
+      await runPlaybooksForCase(kase);
+    } catch (err) {
+      // Don't fail case creation if playbook execution fails.
+      console.error(`Error running playbooks for case ${kase.id}:`, err);
+    }
 
     caseIds.push(kase.id);
   }

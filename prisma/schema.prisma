@@ -429,7 +429,17 @@ model PlaybookApproval {
 // ---------------------------------------------------------------------------
 
 model AuditLog {
-  id         String   @id @default(cuid())
+  // Strict insertion-order counter for the hash chain. createdAt (DB
+  // `now()`, millisecond precision) is NOT used for chain ordering — a
+  // burst of rapid writes (e.g. a detection run creating several cases
+  // and their playbook executions back to back) can tie at the
+  // millisecond, and without a deterministic tiebreaker `ORDER BY
+  // createdAt` can replay entries out of the order they were actually
+  // chained in, which fails verifyAuditChainIntegrity even though
+  // nothing was tampered with. seq is a DB-generated serial, so it's
+  // gapless-ordered exactly by commit order.
+  seq        Int      @id @default(autoincrement())
+  id         String   @unique @default(cuid())
   actorId    String?
   caseId     String?
   action     String
@@ -442,6 +452,5 @@ model AuditLog {
   actor User? @relation(fields: [actorId], references: [id])
   case  Case? @relation(fields: [caseId], references: [id])
 
-  @@index([createdAt])
   @@map("audit_logs")
 }
