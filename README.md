@@ -78,6 +78,20 @@ Visit `http://localhost:3000` and sign in with the seeded admin account
 | `npm run db:migrate` | Run Prisma migrations |
 | `npm run db:studio` | Open Prisma Studio |
 | `npm run db:seed` | Seed the initial admin user |
+| `npm run test` | Run the test suite (Vitest) |
+
+## Testing
+
+`src/lib/**/*.test.ts` covers the ported business logic directly — all 11
+Cases & Alerts detectors, the forensics engine's pure signal functions
+(entropy, obfuscation, polyglot/OLE/XLM/PDF detection), the governance
+pipeline (constitution, reasoning, DLP, policy, and the sidecar that chains
+them), the investigations entity-graph builder, the playbook trigger
+matcher, and the threat-intel mock-fallback paths. Most of these are pure
+unit tests with no dependencies; `src/lib/audit.test.ts` is a real
+integration test against Postgres (Prisma-backed code isn't meaningfully
+testable with a mocked database) — it needs `DATABASE_URL` pointed at a
+running instance, same as the app itself.
 
 ## Project structure
 
