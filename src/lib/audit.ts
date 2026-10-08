@@ -60,16 +60,28 @@ export async function logAction({ actorId, caseId, organizationId, action, detai
     // a column added after this chain already had real entries, and
     // folding it into the hash would invalidate every pre-existing row's
     // currentHash. It's a plain filterable column only.
-    const entry = { actorId: actorId ?? null, caseId: caseId ?? null, action, detail: detail ?? null, prevHash };
+    //
+    // Every optional field is coalesced to null up front, once, so the
+    // exact same value feeds both the hash and the Prisma write (no risk
+    // of the hash seeing `undefined ?? null` while the write sees the raw
+    // `undefined`). This wasn't the cause of the caseId-corruption bug
+    // documented on AuditLog.case in schema.prisma (that one was a
+    // Case-deletion FK cascade, not this function) but is worth keeping
+    // as the one place that invariant is enforced.
+    const coalescedActorId = actorId ?? null;
+    const coalescedCaseId = caseId ?? null;
+    const coalescedDetail = detail ?? null;
+
+    const entry = { actorId: coalescedActorId, caseId: coalescedCaseId, action, detail: coalescedDetail, prevHash };
     const currentHash = createHash("sha256").update(canonicalJson(entry)).digest("hex");
 
     return tx.auditLog.create({
       data: {
-        actorId,
-        caseId,
-        organizationId,
+        actorId: coalescedActorId,
+        caseId: coalescedCaseId,
+        organizationId: organizationId ?? null,
         action,
-        detail: detail as never,
+        detail: coalescedDetail as never,
         prevHash,
         currentHash,
       },

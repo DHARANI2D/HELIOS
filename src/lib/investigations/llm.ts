@@ -15,7 +15,7 @@
 
 export type AiTier = "ESSENTIAL" | "PROFESSIONAL" | "ENTERPRISE" | "SELF_HOSTED";
 
-const TIER_MODEL: Record<Exclude<AiTier, "SELF_HOSTED">, string> = {
+export const TIER_MODEL: Record<Exclude<AiTier, "SELF_HOSTED">, string> = {
   ESSENTIAL: "claude-haiku-4-5",
   PROFESSIONAL: "claude-sonnet-4-5",
   ENTERPRISE: "claude-opus-4-5",

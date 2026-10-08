@@ -28,19 +28,26 @@ describe("audit chain", () => {
   });
 
   it("produces a chain where each entry's prevHash matches the prior entry's currentHash", async () => {
-    // Unique-per-run action names — this dev database persists across
-    // test runs, so a fixed name would collide with rows from earlier runs.
+    // Unique-per-run action name — this dev database persists across test
+    // runs (and other test FILES write to this same shared chain
+    // concurrently, as separate Vitest worker processes), so this can't
+    // assume two of its own logAction calls land back-to-back with
+    // nothing else interleaved. Instead it looks up whatever entry
+    // actually immediately precedes this one by `seq` (committed order),
+    // however many other writers landed in between, and checks the
+    // linkage against that.
     const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const actionA = `audit.test.sequence.a.${runId}`;
-    const actionB = `audit.test.sequence.b.${runId}`;
+    const action = `audit.test.sequence.${runId}`;
 
-    await logAction({ action: actionA });
-    await logAction({ action: actionB });
+    await logAction({ action });
 
-    const a = await db.auditLog.findFirstOrThrow({ where: { action: actionA } });
-    const b = await db.auditLog.findFirstOrThrow({ where: { action: actionB } });
+    const entry = await db.auditLog.findFirstOrThrow({ where: { action } });
+    const predecessor = await db.auditLog.findFirst({
+      where: { seq: { lt: entry.seq } },
+      orderBy: { seq: "desc" },
+    });
 
-    expect(b.prevHash).toBe(a.currentHash);
+    expect(entry.prevHash).toBe(predecessor?.currentHash ?? "GENESIS");
   });
 
   it("stays verifiable when `detail` embeds a raw Date (not just an ISO string)", async () => {

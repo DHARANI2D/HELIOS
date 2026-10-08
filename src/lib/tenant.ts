@@ -1,19 +1,9 @@
 import { redirect } from "next/navigation";
-import type { UserRole } from "@prisma/client";
 
 import { auth } from "@/lib/auth";
+import { isPlatformRole, type TenantContext } from "@/lib/tenant-scope";
 
-export interface TenantContext {
-  userId: string;
-  role: UserRole;
-  organizationId: string | null;
-}
-
-const PLATFORM_ROLES: UserRole[] = ["PLATFORM_OWNER", "PLATFORM_ANALYST"];
-
-export function isPlatformRole(role: UserRole): boolean {
-  return PLATFORM_ROLES.includes(role);
-}
+export { isPlatformRole, tenantWhere, type TenantContext } from "@/lib/tenant-scope";
 
 // The one place every Server Component/Server Action reads "who is asking
 // and what tenant are they in". Mirrors the redirect-to-/login pattern
@@ -24,7 +14,7 @@ export async function requireSession(): Promise<TenantContext> {
 
   return {
     userId: session.user.id,
-    role: session.user.role as UserRole,
+    role: session.user.role as TenantContext["role"],
     organizationId: session.user.organizationId ?? null,
   };
 }
@@ -39,14 +29,4 @@ export function requirePlatformRole(ctx: TenantContext): void {
 export function requireOrgContext(ctx: TenantContext): string {
   if (isPlatformRole(ctx.role) || !ctx.organizationId) redirect("/");
   return ctx.organizationId;
-}
-
-// Spread into any Prisma `where` clause on an org-scoped model (Case,
-// Agent, IngestedEvent, Playbook, AuditLog). Platform roles get `{}`
-// (unscoped — the "minimal workforce operates every tenant" view); org
-// roles are pinned to their own organizationId so one tenant's data can
-// never leak into another's query results.
-export function tenantWhere(ctx: TenantContext): { organizationId?: string } {
-  if (isPlatformRole(ctx.role)) return {};
-  return { organizationId: ctx.organizationId ?? "__unscoped_org_user__" };
 }
