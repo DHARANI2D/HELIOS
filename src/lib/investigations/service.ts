@@ -20,11 +20,17 @@ function parseTimelineTimestamp(entry: string, baseDate: Date): Date {
   return d;
 }
 
-async function getLinkedEvents(linkedCaseId: string) {
+type Scope = { organizationId?: string };
+
+async function getLinkedEvents(linkedCaseId: string, scope: Scope) {
   // IngestedEvent.caseId is 1:1 (last detector to touch the row wins), so
   // it can't answer "which events fed this specific case" once a single
   // event matches more than one detector — Detection.evidence carries the
   // exact matched-event IDs per case, so read from there instead.
+  // `scope` guards against linking to (and pulling grounding data from)
+  // another tenant's case by id.
+  const linkedCase = await db.case.findFirst({ where: { id: linkedCaseId, ...scope } });
+  if (!linkedCase) return [];
   const detections = await db.detection.findMany({ where: { caseId: linkedCaseId } });
   const eventIds = new Set<string>();
   for (const d of detections) {
@@ -41,9 +47,11 @@ async function getLinkedEvents(linkedCaseId: string) {
 export async function createInvestigation(
   alertTitle: string,
   alertDetails: string,
+  organizationId: string | null,
   linkedCaseId?: string,
 ) {
-  const linkedEvents = linkedCaseId ? await getLinkedEvents(linkedCaseId) : [];
+  const scope: Scope = organizationId ? { organizationId } : {};
+  const linkedEvents = linkedCaseId ? await getLinkedEvents(linkedCaseId, scope) : [];
 
   const normalizedEvents = linkedEvents.map(toNormalizedEvent);
   const graphData = buildEntityGraph(normalizedEvents);
@@ -57,6 +65,7 @@ export async function createInvestigation(
 
   const kase = await db.case.create({
     data: {
+      organizationId,
       sourceType: "SOC_INVESTIGATION",
       title: alertTitle,
       summary: alertDetails,
@@ -115,6 +124,7 @@ export async function createInvestigation(
 
   await logAction({
     caseId: kase.id,
+    organizationId,
     action: "investigation.swarm_completed",
     detail: {
       qaValid: swarm.qa.is_valid,
@@ -126,9 +136,9 @@ export async function createInvestigation(
   return kase.id;
 }
 
-export async function getInvestigation(caseId: string) {
-  return db.case.findUnique({
-    where: { id: caseId },
+export async function getInvestigation(caseId: string, scope: Scope = {}) {
+  return db.case.findFirst({
+    where: { id: caseId, ...scope },
     include: {
       detections: { orderBy: { createdAt: "desc" } },
       timeline: { orderBy: { occurredAt: "asc" } },
@@ -136,9 +146,9 @@ export async function getInvestigation(caseId: string) {
   });
 }
 
-export async function listInvestigations() {
+export async function listInvestigations(scope: Scope = {}) {
   return db.case.findMany({
-    where: { sourceType: "SOC_INVESTIGATION" },
+    where: { sourceType: "SOC_INVESTIGATION", ...scope },
     orderBy: { createdAt: "desc" },
     take: 100,
   });

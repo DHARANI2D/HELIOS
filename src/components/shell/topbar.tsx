@@ -4,9 +4,10 @@ import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { LogOut, User } from "lucide-react";
 
-import { NAV_ITEMS } from "@/lib/nav";
+import { ALL_NAV_ITEMS } from "@/lib/nav";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,15 +16,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useTenant } from "@/components/providers/tenant-provider";
+
+const ROLE_LABEL: Record<string, string> = {
+  PLATFORM_OWNER: "Platform Owner",
+  PLATFORM_ANALYST: "Platform Analyst",
+  ORG_ADMIN: "Org Admin",
+  ORG_ANALYST: "Org Analyst",
+  ORG_VIEWER: "Viewer",
+};
 
 export function AppTopbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const { role } = useTenant();
 
   const current =
-    NAV_ITEMS.find((item) =>
+    ALL_NAV_ITEMS.find((item) =>
       item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
-    ) ?? NAV_ITEMS[0];
+    ) ?? ALL_NAV_ITEMS[0];
 
   const initials =
     session?.user?.name
@@ -51,6 +62,9 @@ export function AppTopbar() {
             <span className="hidden text-sm font-medium sm:inline">
               {session?.user?.name ?? session?.user?.email}
             </span>
+            <Badge variant="outline" className="hidden sm:inline-flex">
+              {ROLE_LABEL[role] ?? role}
+            </Badge>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">

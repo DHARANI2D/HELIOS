@@ -4,15 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ShieldHalf, ChevronsLeft, ChevronsRight } from "lucide-react";
 
-import { NAV_ITEMS } from "@/lib/nav";
+import { getNavItems } from "@/lib/nav";
 import { useUIStore } from "@/lib/stores/ui-store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTenant } from "@/components/providers/tenant-provider";
 
 export function AppSidebar() {
   const pathname = usePathname();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
+  const { role, organizationName } = useTenant();
+  const NAV_ITEMS = getNavItems(role);
 
   return (
     <aside
@@ -26,7 +29,12 @@ export function AppSidebar() {
           <ShieldHalf className="size-4" />
         </div>
         {!sidebarCollapsed && (
-          <span className="text-sm font-semibold tracking-tight">HELIOS</span>
+          <div className="flex min-w-0 flex-col">
+            <span className="text-sm font-semibold tracking-tight">HELIOS</span>
+            <span className="truncate text-[11px] text-sidebar-foreground/60">
+              {organizationName ?? "Platform"}
+            </span>
+          </div>
         )}
       </div>
 

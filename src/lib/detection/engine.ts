@@ -56,7 +56,10 @@ export interface EngineRunResult {
   detectionCount: number;
 }
 
-export async function runDetections(events: NormalizedEvent[]): Promise<EngineRunResult> {
+export async function runDetections(
+  events: NormalizedEvent[],
+  organizationId: string | null = null,
+): Promise<EngineRunResult> {
   const allDetections: DetectionResult[] = [];
   for (const detector of DETECTORS) {
     allDetections.push(...detector.run(events));
@@ -72,6 +75,7 @@ export async function runDetections(events: NormalizedEvent[]): Promise<EngineRu
 
     const kase = await db.case.create({
       data: {
+        organizationId,
         sourceType: "SIEM_ALERT",
         title: `${detection.detector}: ${detection.reasoning[0] ?? detection.signals[0]}`,
         summary: detection.reasoning.join(" "),
@@ -121,6 +125,7 @@ export async function runDetections(events: NormalizedEvent[]): Promise<EngineRu
 
     await logAction({
       caseId: kase.id,
+      organizationId: kase.organizationId,
       action: "detection.case_created",
       detail: { detector: detection.detector, riskScore, severity },
     });

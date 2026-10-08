@@ -34,7 +34,7 @@ export function matchesTrigger(playbook: Playbook, kase: Case): boolean {
 
 export async function evaluateTriggers(kase: Case): Promise<Playbook[]> {
   const playbooks = await db.playbook.findMany({
-    where: { enabled: true },
+    where: { enabled: true, organizationId: kase.organizationId },
     orderBy: { priority: "desc" },
   });
   return playbooks.filter((p) => matchesTrigger(p, kase));
@@ -111,7 +111,7 @@ export async function executePlaybook(playbookId: string, caseId: string, existi
         where: { id: execution.id },
         data: { status: "FAILED", finishedAt: new Date(), results: results as never },
       });
-      await logAction({ caseId, action: "playbook.execution_failed", detail: { playbookId, results } });
+      await logAction({ caseId, organizationId: kase.organizationId, action: "playbook.execution_failed", detail: { playbookId, results } });
       return execution.id;
     }
   }
@@ -131,16 +131,17 @@ export async function executePlaybook(playbookId: string, caseId: string, existi
     },
   });
 
-  await logAction({ caseId, action: "playbook.executed", detail: { playbookId, results } });
+  await logAction({ caseId, organizationId: kase.organizationId, action: "playbook.executed", detail: { playbookId, results } });
 
   return execution.id;
 }
 
 export async function requestApproval(playbookId: string, caseId: string) {
+  const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { organizationId: true } });
   const execution = await db.playbookExecution.create({
     data: { playbookId, caseId, status: "PENDING_APPROVAL" },
   });
-  await logAction({ caseId, action: "playbook.approval_requested", detail: { playbookId } });
+  await logAction({ caseId, organizationId: kase.organizationId, action: "playbook.approval_requested", detail: { playbookId } });
   return execution.id;
 }
 
@@ -149,8 +150,12 @@ export async function decideApproval(
   approverId: string,
   decision: "approved" | "rejected",
   notes?: string,
+  scope: { organizationId?: string } = {},
 ) {
-  const execution = await db.playbookExecution.findUniqueOrThrow({ where: { id: executionId } });
+  const execution = await db.playbookExecution.findFirstOrThrow({
+    where: { id: executionId, case: scope },
+    include: { case: { select: { organizationId: true } } },
+  });
 
   await db.playbookApproval.create({
     data: { executionId, approverId, decision, notes },
@@ -158,7 +163,12 @@ export async function decideApproval(
 
   if (decision === "rejected") {
     await db.playbookExecution.update({ where: { id: executionId }, data: { status: "REJECTED" } });
-    await logAction({ caseId: execution.caseId, action: "playbook.approval_rejected", detail: { executionId, approverId } });
+    await logAction({
+      caseId: execution.caseId,
+      organizationId: execution.case.organizationId,
+      action: "playbook.approval_rejected",
+      detail: { executionId, approverId },
+    });
     return;
   }
 

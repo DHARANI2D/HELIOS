@@ -1,6 +1,7 @@
 import { ShieldAlert, Siren, Radar, Activity } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { requireSession, tenantWhere, type TenantContext } from "@/lib/tenant";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { SimulatePanel } from "@/components/cases/simulate-panel";
 import { CaseTable } from "@/components/cases/case-table";
@@ -12,18 +13,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-async function getCaseStats() {
+async function getCaseStats(ctx: TenantContext) {
+  const scope = tenantWhere(ctx);
   const [total, open, critical, eventCount] = await Promise.all([
-    db.case.count({ where: { sourceType: "SIEM_ALERT" } }),
-    db.case.count({ where: { sourceType: "SIEM_ALERT", status: "OPEN" } }),
-    db.case.count({ where: { sourceType: "SIEM_ALERT", severity: "CRITICAL" } }),
-    db.ingestedEvent.count(),
+    db.case.count({ where: { sourceType: "SIEM_ALERT", ...scope } }),
+    db.case.count({ where: { sourceType: "SIEM_ALERT", status: "OPEN", ...scope } }),
+    db.case.count({ where: { sourceType: "SIEM_ALERT", severity: "CRITICAL", ...scope } }),
+    db.ingestedEvent.count({ where: scope }),
   ]);
   return { total, open, critical, eventCount };
 }
 
 export default async function CasesPage() {
-  const stats = await getCaseStats();
+  const ctx = await requireSession();
+  const stats = await getCaseStats(ctx);
 
   return (
     <div className="flex flex-col gap-6">

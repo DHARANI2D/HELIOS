@@ -213,7 +213,7 @@ export const SCENARIOS: Scenario[] = [
   },
 ];
 
-export async function runSimulation(count = 6): Promise<{
+export async function runSimulation(count = 6, organizationId: string | null = null): Promise<{
   scenariosRun: string[];
   ingestedCount: number;
   caseIds: string[];
@@ -225,17 +225,17 @@ export async function runSimulation(count = 6): Promise<{
   let ingestedCount = 0;
   for (const scenario of selected) {
     for (const log of scenario.logs) {
-      await ingestRawLog(log.source, log.data);
+      await ingestRawLog(log.source, log.data, organizationId);
       ingestedCount++;
     }
   }
 
   const uncasedEvents = await db.ingestedEvent.findMany({
-    where: { caseId: null },
+    where: { caseId: null, organizationId },
     orderBy: { timestamp: "asc" },
   });
 
-  const { caseIds, detectionCount } = await runDetections(uncasedEvents.map(toNormalizedEvent));
+  const { caseIds, detectionCount } = await runDetections(uncasedEvents.map(toNormalizedEvent), organizationId);
 
   return {
     scenariosRun: selected.map((s) => s.name),

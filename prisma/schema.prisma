@@ -14,28 +14,84 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Auth
+// Auth + tenancy
 // ---------------------------------------------------------------------------
 
+// PLATFORM_* roles have organizationId = null and operate across every
+// tenant (the "minimal workforce operates everything" model). ORG_* roles
+// are scoped to exactly one Organization. There is no generic "ADMIN"
+// anymore — platform vs. tenant admin are distinct, since they see
+// different data and different nav.
 enum UserRole {
-  ANALYST
-  ADMIN
+  PLATFORM_OWNER
+  PLATFORM_ANALYST
+  ORG_ADMIN
+  ORG_ANALYST
+  ORG_VIEWER
+}
+
+enum OrganizationStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+// Which AI tier powers this org's investigations/governance LLM calls.
+// Priced via Plan (one Plan row per ServiceType x AiTier combination) —
+// this field is the operative setting the platform owner flips after a
+// plan is purchased; see src/lib/investigations/llm.ts for the tier ->
+// model mapping.
+enum AiTier {
+  ESSENTIAL // Claude Haiku — cheapest/fastest, triage-grade automation
+  PROFESSIONAL // Claude Sonnet — default, real investigation work
+  ENTERPRISE // Claude Opus — deepest reasoning, highest price
+  SELF_HOSTED // customer's own Ollama endpoint (selfHostedOllamaUrl)
+}
+
+// A customer tenant of the MSSP platform. Admin-provisioned only (no
+// public signup) — created by a PLATFORM_OWNER via /admin/organizations.
+model Organization {
+  id                  String             @id @default(cuid())
+  name                String
+  slug                String             @unique
+  status              OrganizationStatus @default(TRIAL)
+  aiTier              AiTier             @default(ESSENTIAL)
+  selfHostedOllamaUrl String?
+  createdAt           DateTime           @default(now())
+
+  users           User[]
+  cases           Case[]
+  agents          Agent[]
+  ingestedEvents  IngestedEvent[]
+  playbooks       Playbook[]
+  auditLogs       AuditLog[]
+  subscriptions   Subscription[]
+  invoices        Invoice[]
+  pentestRequests PentestRequest[]
+  integrations    Integration[]
+
+  @@map("organizations")
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  passwordHash  String?
-  role          UserRole  @default(ANALYST)
-  createdAt     DateTime  @default(now())
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  passwordHash   String?
+  role           UserRole @default(ORG_VIEWER)
+  organizationId String? // null for PLATFORM_OWNER / PLATFORM_ANALYST
+  createdAt      DateTime @default(now())
 
-  accounts      Account[]
-  sessions      Session[]
-  assignedCases Case[]           @relation("CaseAssignee")
-  auditLogs     AuditLog[]
-  approvals     PlaybookApproval[]
+  organization            Organization?      @relation(fields: [organizationId], references: [id])
+  accounts                Account[]
+  sessions                Session[]
+  assignedCases           Case[]             @relation("CaseAssignee")
+  auditLogs               AuditLog[]
+  approvals               PlaybookApproval[]
+  pentestRequestsMade     PentestRequest[]   @relation("PentestRequestedBy")
+  pentestRequestsAssigned PentestRequest[]   @relation("PentestAssignee")
 
+  @@index([organizationId])
   @@map("users")
 }
 
@@ -80,6 +136,7 @@ enum CaseSource {
   SOC_INVESTIGATION // asip
   EMAIL_ANALYSIS // desas
   SIEM_ALERT // signal-fusion
+  PENETRATION_TEST // pentest-as-a-service findings delivery
 }
 
 enum CaseSeverity {
@@ -101,24 +158,26 @@ enum CaseStatus {
 }
 
 model Case {
-  id              String       @id @default(cuid())
-  sourceType      CaseSource
-  title           String
-  summary         String?      @db.Text
-  severity        CaseSeverity @default(MEDIUM)
-  status          CaseStatus   @default(OPEN)
-  confidence      Float? // 0-1, e.g. asip's QA-validated confidence score
-  verdict         String? // e.g. desas "malicious"/"suspicious"/"clean"
-  riskScore       Float?
-  assignedToId    String?
-  sourceRef       String? // originating agentId / investigationId / alertId / emailId
-  rootCauseNarrative String?   @db.Text
-  metadata        Json? // source-specific payload (headers, IOC lists, etc.)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  resolvedAt      DateTime?
+  id                 String       @id @default(cuid())
+  organizationId     String? // null = platform-internal/demo case; every real tenant case is scoped
+  sourceType         CaseSource
+  title              String
+  summary            String?      @db.Text
+  severity           CaseSeverity @default(MEDIUM)
+  status             CaseStatus   @default(OPEN)
+  confidence         Float? // 0-1, e.g. asip's QA-validated confidence score
+  verdict            String? // e.g. desas "malicious"/"suspicious"/"clean"
+  riskScore          Float?
+  assignedToId       String?
+  sourceRef          String? // originating agentId / investigationId / alertId / emailId
+  rootCauseNarrative String?      @db.Text
+  metadata           Json? // source-specific payload (headers, IOC lists, etc.)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  resolvedAt         DateTime?
 
-  assignedTo      User?             @relation("CaseAssignee", fields: [assignedToId], references: [id])
+  organization    Organization?        @relation(fields: [organizationId], references: [id])
+  assignedTo      User?                @relation("CaseAssignee", fields: [assignedToId], references: [id])
   detections      Detection[]
   timeline        TimelineEntry[]
   mitreTechniques CaseMitreTechnique[]
@@ -126,7 +185,9 @@ model Case {
   playbookRuns    PlaybookExecution[]
   auditLogs       AuditLog[]
   ingestedEvents  IngestedEvent[]
+  pentestRequest  PentestRequest?
 
+  @@index([organizationId])
   @@index([sourceType, status])
   @@index([severity])
   @@map("cases")
@@ -135,14 +196,14 @@ model Case {
 // One shared timeline for every case, replacing asip.TimelineEntry,
 // aegis's JSON evidence blob, and desas's per-analysis narrative.
 model TimelineEntry {
-  id        String   @id @default(cuid())
-  caseId    String
+  id         String   @id @default(cuid())
+  caseId     String
   occurredAt DateTime
-  actor     String? // process/user/agent name
-  action    String
-  detail    String?  @db.Text
-  evidence  Json?
-  createdAt DateTime @default(now())
+  actor      String? // process/user/agent name
+  action     String
+  detail     String?  @db.Text
+  evidence   Json?
+  createdAt  DateTime @default(now())
 
   case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
 
@@ -210,11 +271,12 @@ enum EventSource {
 }
 
 model IngestedEvent {
-  id             String      @id @default(cuid())
+  id             String       @id @default(cuid())
+  organizationId String?
   source         EventSource
   eventType      String
   timestamp      DateTime
-  ingestedAt     DateTime    @default(now())
+  ingestedAt     DateTime     @default(now())
   actorUser      String?
   actorProcess   String?
   actorService   String?
@@ -226,8 +288,10 @@ model IngestedEvent {
   metadata       Json
   caseId         String?
 
-  case Case? @relation(fields: [caseId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  case         Case?         @relation(fields: [caseId], references: [id])
 
+  @@index([organizationId])
   @@index([timestamp])
   @@index([actorUser])
   @@index([sourceIp])
@@ -240,7 +304,7 @@ model IngestedEvent {
 // ---------------------------------------------------------------------------
 
 model MitreTactic {
-  id         String            @id // e.g. "TA0001"
+  id         String           @id // e.g. "TA0001"
   name       String
   techniques MitreTechnique[]
 
@@ -248,12 +312,12 @@ model MitreTactic {
 }
 
 model MitreTechnique {
-  id          String @id // e.g. "T1566" or "T1566.001"
-  tacticId    String
-  name        String
-  description String? @db.Text
+  id             String  @id // e.g. "T1566" or "T1566.001"
+  tacticId       String
+  name           String
+  description    String? @db.Text
   isSubtechnique Boolean @default(false)
-  parentId    String?
+  parentId       String?
 
   tactic MitreTactic          @relation(fields: [tacticId], references: [id])
   cases  CaseMitreTechnique[]
@@ -287,13 +351,13 @@ enum IndicatorType {
 }
 
 model ThreatIndicator {
-  id            String        @id @default(cuid())
-  type          IndicatorType
-  value         String
+  id             String        @id @default(cuid())
+  type           IndicatorType
+  value          String
   maliciousScore Float? // normalized 0-1 across providers
-  providerData  Json // raw VT / AbuseIPDB / MxToolbox responses
-  lastCheckedAt DateTime      @default(now())
-  expiresAt     DateTime // cache TTL (24h default, matching signal-fusion)
+  providerData   Json // raw VT / AbuseIPDB / MxToolbox responses
+  lastCheckedAt  DateTime      @default(now())
+  expiresAt      DateTime // cache TTL (24h default, matching signal-fusion)
 
   caseLinks CaseIndicator[]
 
@@ -325,16 +389,21 @@ enum AgentStatus {
 }
 
 model Agent {
-  id           String      @id @default(cuid())
-  name         String      @unique
-  publicKey    String
-  trust        Float       @default(100)
-  level        Int         @default(10) // L0 (isolated) - L10 (full access)
-  status       AgentStatus @default(ACTIVE)
-  mode         String?
-  createdAt    DateTime    @default(now())
-  lastUpdateAt DateTime    @updatedAt
+  id             String      @id @default(cuid())
+  organizationId String?
+  name           String
+  publicKey      String
+  trust          Float       @default(100)
+  level          Int         @default(10) // L0 (isolated) - L10 (full access)
+  status         AgentStatus @default(ACTIVE)
+  mode           String?
+  createdAt      DateTime    @default(now())
+  lastUpdateAt   DateTime    @updatedAt
 
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
   @@map("agents")
 }
 
@@ -345,6 +414,7 @@ model Agent {
 
 model Playbook {
   id               String   @id @default(cuid())
+  organizationId   String?
   name             String
   description      String?  @db.Text
   triggerCondition Json // e.g. { severity: "CRITICAL", sourceType: "SIEM_ALERT" }
@@ -355,9 +425,11 @@ model Playbook {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  actions    PlaybookAction[]
-  executions PlaybookExecution[]
+  organization Organization?       @relation(fields: [organizationId], references: [id])
+  actions      PlaybookAction[]
+  executions   PlaybookExecution[]
 
+  @@index([organizationId])
   @@map("playbooks")
 }
 
@@ -402,20 +474,20 @@ model PlaybookExecution {
   startedAt  DateTime                @default(now())
   finishedAt DateTime?
 
-  playbook   Playbook             @relation(fields: [playbookId], references: [id])
-  case       Case                 @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  approvals  PlaybookApproval[]
+  playbook  Playbook           @relation(fields: [playbookId], references: [id])
+  case      Case               @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  approvals PlaybookApproval[]
 
   @@map("playbook_executions")
 }
 
 model PlaybookApproval {
-  id          String            @id @default(cuid())
+  id          String   @id @default(cuid())
   executionId String
   approverId  String
   decision    String // "approved" | "rejected"
   notes       String?
-  decidedAt   DateTime          @default(now())
+  decidedAt   DateTime @default(now())
 
   execution PlaybookExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
   approver  User              @relation(fields: [approverId], references: [id])
@@ -438,19 +510,201 @@ model AuditLog {
   // chained in, which fails verifyAuditChainIntegrity even though
   // nothing was tampered with. seq is a DB-generated serial, so it's
   // gapless-ordered exactly by commit order.
-  seq        Int      @id @default(autoincrement())
-  id         String   @unique @default(cuid())
-  actorId    String?
-  caseId     String?
-  action     String
-  detail     Json?
-  prevHash   String
-  currentHash String
-  signature  String?
-  createdAt  DateTime @default(now())
+  seq            Int      @id @default(autoincrement())
+  id             String   @unique @default(cuid())
+  organizationId String? // null = platform-level action (e.g. creating an org, managing the plan catalog)
+  actorId        String?
+  caseId         String?
+  action         String
+  detail         Json?
+  prevHash       String
+  currentHash    String
+  signature      String?
+  createdAt      DateTime @default(now())
 
-  actor User? @relation(fields: [actorId], references: [id])
-  case  Case? @relation(fields: [caseId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  actor        User?         @relation(fields: [actorId], references: [id])
+  case         Case?         @relation(fields: [caseId], references: [id])
 
+  @@index([organizationId])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Service catalog + billing — admin-provisioned tenants purchase a Plan per
+// service area; AI tier is priced into the Plan itself (one row per
+// ServiceType x AiTier combination) so "customers choose their AI model and
+// pricing follows" is a literal catalog lookup, not a side calculation.
+// No live payment processor is wired up yet — Invoice.status is advanced
+// manually by the platform owner (see src/lib/billing/). Stripe/etc. is a
+// drop-in for a later pass: it would just flip Invoice.status on webhook.
+// ---------------------------------------------------------------------------
+
+enum ServiceType {
+  ENDPOINT_SECURITY
+  CLOUD_SECURITY
+  NETWORK_SECURITY
+  EMAIL_SECURITY
+  AGENT_GOVERNANCE
+  PENETRATION_TESTING
+}
+
+model Plan {
+  id            String      @id @default(cuid())
+  name          String
+  serviceType   ServiceType
+  aiTier        AiTier
+  priceMonthly  Decimal     @db.Decimal(10, 2)
+  includedUnits Json? // e.g. { "endpoints": 25 } — display-only cap, not enforced yet
+  description   String?     @db.Text
+  active        Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  organizationId   String
+  planId           String
+  status           SubscriptionStatus @default(ACTIVE)
+  startedAt        DateTime           @default(now())
+  currentPeriodEnd DateTime
+  canceledAt       DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  plan         Plan              @relation(fields: [planId], references: [id])
+  invoiceLines InvoiceLineItem[]
+
+  @@index([organizationId])
+  @@map("subscriptions")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  VOID
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  number         String        @unique
+  issueDate      DateTime      @default(now())
+  dueDate        DateTime
+  status         InvoiceStatus @default(DRAFT)
+  currency       String        @default("USD")
+  totalAmount    Decimal       @db.Decimal(10, 2)
+  paidAt         DateTime?
+  notes          String?       @db.Text
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  lineItems    InvoiceLineItem[]
+
+  @@index([organizationId])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id             String  @id @default(cuid())
+  invoiceId      String
+  subscriptionId String?
+  description    String
+  quantity       Int     @default(1)
+  unitPrice      Decimal @db.Decimal(10, 2)
+  amount         Decimal @db.Decimal(10, 2)
+
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@map("invoice_line_items")
+}
+
+// ---------------------------------------------------------------------------
+// Pentest-as-a-service — request/scheduling workflow. A human (platform
+// staff or a contractor) performs the actual test; findings are delivered
+// as an ordinary Case (sourceType PENETRATION_TEST) the customer can see.
+// This is deliberately NOT an automated exploitation pipeline.
+// ---------------------------------------------------------------------------
+
+enum PentestRequestStatus {
+  REQUESTED
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
+model PentestRequest {
+  id             String               @id @default(cuid())
+  organizationId String
+  requestedById  String
+  scope          Json // { targets: string[], testTypes: string[], notes?: string }
+  status         PentestRequestStatus @default(REQUESTED)
+  scheduledAt    DateTime?
+  assignedToId   String?
+  reportCaseId   String?              @unique
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  requestedBy  User         @relation("PentestRequestedBy", fields: [requestedById], references: [id])
+  assignedTo   User?        @relation("PentestAssignee", fields: [assignedToId], references: [id])
+  reportCase   Case?        @relation(fields: [reportCaseId], references: [id])
+
+  @@index([organizationId])
+  @@map("pentest_requests")
+}
+
+// ---------------------------------------------------------------------------
+// Integrations — a vendor-agnostic webhook ingestion framework. Any tool
+// that can POST a webhook (most SIEMs/EDRs/cloud security tools can) points
+// at the generated URL; the payload is normalized into IngestedEvent and
+// run through the existing detection engine. Real pull-based per-vendor API
+// clients (CrowdStrike/Splunk/Wazuh/etc. specific actions like "isolate
+// host via vendor API") are intentionally out of scope here — this is the
+// extensible interface they would plug into once there's a real vendor
+// credential to build/test against, not a simulation of having one.
+// ---------------------------------------------------------------------------
+
+enum IntegrationCategory {
+  SIEM
+  EDR
+  CLOUD
+  IDENTITY
+  EMAIL
+  OTHER
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+model Integration {
+  id             String              @id @default(cuid())
+  organizationId String
+  vendorLabel    String // free-text display name, e.g. "CrowdStrike Falcon"
+  category       IntegrationCategory
+  status         IntegrationStatus   @default(DISCONNECTED)
+  webhookSecret  String
+  lastIngestAt   DateTime?
+  createdAt      DateTime            @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("integrations")
 }

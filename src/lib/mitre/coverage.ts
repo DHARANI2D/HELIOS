@@ -43,11 +43,15 @@ export interface TacticCoverage {
   techniques: TechniqueCoverage[];
 }
 
-export async function getMitreCoverage(): Promise<TacticCoverage[]> {
+// `scope` is spread verbatim from src/lib/tenant.ts's tenantWhere() —
+// `{}` for platform roles (every tenant's coverage), `{ organizationId }`
+// for an org role (their tenant only).
+export async function getMitreCoverage(scope: { organizationId?: string } = {}): Promise<TacticCoverage[]> {
   const [tactics, techniques, cases] = await Promise.all([
     db.mitreTactic.findMany(),
     db.mitreTechnique.findMany(),
     db.case.findMany({
+      where: scope,
       select: { id: true, metadata: true, detections: { select: { evidence: true } } },
     }),
   ]);

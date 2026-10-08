@@ -1,6 +1,7 @@
 import { Search, CheckCircle2, Loader2, Percent } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { requireSession, tenantWhere, type TenantContext } from "@/lib/tenant";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { NewInvestigationForm } from "@/components/investigations/new-investigation-form";
 import { InvestigationTable } from "@/components/investigations/investigation-table";
@@ -12,13 +13,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-async function getInvestigationStats() {
+async function getInvestigationStats(ctx: TenantContext) {
+  const scope = tenantWhere(ctx);
   const [total, resolved, investigating, confidenceAgg] = await Promise.all([
-    db.case.count({ where: { sourceType: "SOC_INVESTIGATION" } }),
-    db.case.count({ where: { sourceType: "SOC_INVESTIGATION", status: "RESOLVED" } }),
-    db.case.count({ where: { sourceType: "SOC_INVESTIGATION", status: "INVESTIGATING" } }),
+    db.case.count({ where: { sourceType: "SOC_INVESTIGATION", ...scope } }),
+    db.case.count({ where: { sourceType: "SOC_INVESTIGATION", status: "RESOLVED", ...scope } }),
+    db.case.count({ where: { sourceType: "SOC_INVESTIGATION", status: "INVESTIGATING", ...scope } }),
     db.case.aggregate({
-      where: { sourceType: "SOC_INVESTIGATION" },
+      where: { sourceType: "SOC_INVESTIGATION", ...scope },
       _avg: { confidence: true },
     }),
   ]);
@@ -31,7 +33,8 @@ async function getInvestigationStats() {
 }
 
 export default async function InvestigationsPage() {
-  const stats = await getInvestigationStats();
+  const ctx = await requireSession();
+  const stats = await getInvestigationStats(ctx);
 
   return (
     <div className="flex flex-col gap-6">

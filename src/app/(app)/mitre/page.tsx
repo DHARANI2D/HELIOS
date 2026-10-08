@@ -1,4 +1,5 @@
 import { getMitreCoverage } from "@/lib/mitre/coverage";
+import { requireSession, tenantWhere } from "@/lib/tenant";
 import { CoverageChart } from "@/components/mitre/coverage-chart";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Crosshair, Target, Layers } from "lucide-react";
@@ -12,7 +13,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 export default async function MitrePage() {
-  const tactics = await getMitreCoverage();
+  const ctx = await requireSession();
+  const tactics = await getMitreCoverage(tenantWhere(ctx));
   const tacticsWithCoverage = tactics.filter((t) => t.caseCount > 0);
   const totalTechniques = tactics.reduce((sum, t) => sum + t.techniqueCount, 0);
   const totalCaseLinks = tactics.reduce((sum, t) => sum + t.caseCount, 0);

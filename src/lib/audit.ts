@@ -22,6 +22,7 @@ function canonicalJson(value: unknown): string {
 export interface LogActionInput {
   actorId?: string;
   caseId?: string;
+  organizationId?: string | null;
   action: string;
   detail?: Record<string, unknown>;
 }
@@ -31,7 +32,7 @@ export interface LogActionInput {
 // other (and only each other).
 const CHAIN_LOCK_KEY = 847_213_659;
 
-export async function logAction({ actorId, caseId, action, detail }: LogActionInput) {
+export async function logAction({ actorId, caseId, organizationId, action, detail }: LogActionInput) {
   return db.$transaction(async (tx) => {
     // A read-then-write hash chain is a classic race: two concurrent
     // calls can both read the same "latest" row before either writes,
@@ -44,6 +45,10 @@ export async function logAction({ actorId, caseId, action, detail }: LogActionIn
     const prevLog = await tx.auditLog.findFirst({ orderBy: { seq: "desc" } });
     const prevHash = prevLog?.currentHash ?? "GENESIS";
 
+    // organizationId is deliberately NOT part of the hashed entry — it's
+    // a column added after this chain already had real entries, and
+    // folding it into the hash would invalidate every pre-existing row's
+    // currentHash. It's a plain filterable column only.
     const entry = { actorId: actorId ?? null, caseId: caseId ?? null, action, detail: detail ?? null, prevHash };
     const currentHash = createHash("sha256").update(canonicalJson(entry)).digest("hex");
 
@@ -51,6 +56,7 @@ export async function logAction({ actorId, caseId, action, detail }: LogActionIn
       data: {
         actorId,
         caseId,
+        organizationId,
         action,
         detail: detail as never,
         prevHash,

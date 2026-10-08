@@ -15,7 +15,9 @@ function severityFromScore(score: number): CaseSeverity {
   return "INFO";
 }
 
-export async function analyzeEmail(content: Buffer) {
+type Scope = { organizationId?: string };
+
+export async function analyzeEmail(content: Buffer, organizationId: string | null = null) {
   const email = await parseEml(content);
   const headerAnalysis = await analyzeHeaders(email.headers);
   const bodyAnalysis = await analyzeBody(email.primaryBody);
@@ -39,6 +41,7 @@ export async function analyzeEmail(content: Buffer) {
 
   const kase = await db.case.create({
     data: {
+      organizationId,
       sourceType: "EMAIL_ANALYSIS",
       title: email.subject || "(no subject)",
       summary: `From: ${email.from} — ${threatClass?.threatType ?? "Email analysis"}`,
@@ -119,6 +122,7 @@ export async function analyzeEmail(content: Buffer) {
 
   await logAction({
     caseId: kase.id,
+    organizationId,
     action: "forensics.email_analyzed",
     detail: { verdict, totalScore, mitreTechniques },
   });
@@ -126,9 +130,9 @@ export async function analyzeEmail(content: Buffer) {
   return kase.id;
 }
 
-export async function getEmailCase(caseId: string) {
-  return db.case.findUnique({
-    where: { id: caseId },
+export async function getEmailCase(caseId: string, scope: Scope = {}) {
+  return db.case.findFirst({
+    where: { id: caseId, ...scope },
     include: {
       detections: { orderBy: { createdAt: "desc" } },
       timeline: { orderBy: { occurredAt: "asc" } },
@@ -136,9 +140,9 @@ export async function getEmailCase(caseId: string) {
   });
 }
 
-export async function listEmailCases() {
+export async function listEmailCases(scope: Scope = {}) {
   return db.case.findMany({
-    where: { sourceType: "EMAIL_ANALYSIS" },
+    where: { sourceType: "EMAIL_ANALYSIS", ...scope },
     orderBy: { createdAt: "desc" },
     take: 100,
   });

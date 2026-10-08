@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
 import { decideApproval } from "@/lib/playbooks/engine";
 import { logAction } from "@/lib/audit";
+import { requireSession, tenantWhere } from "@/lib/tenant";
 import type { CaseSeverity, CaseSource, PlaybookActionType } from "@prisma/client";
 
 export interface CreatePlaybookInput {
@@ -20,10 +20,11 @@ export interface CreatePlaybookInput {
 }
 
 export async function createPlaybookAction(input: CreatePlaybookInput) {
-  const session = await auth();
+  const ctx = await requireSession();
 
   const playbook = await db.playbook.create({
     data: {
+      organizationId: ctx.organizationId,
       name: input.name,
       description: input.description,
       triggerCondition: {
@@ -45,7 +46,8 @@ export async function createPlaybookAction(input: CreatePlaybookInput) {
   });
 
   await logAction({
-    actorId: session?.user?.id,
+    actorId: ctx.userId,
+    organizationId: ctx.organizationId,
     action: "playbook.created",
     detail: { playbookId: playbook.id, name: playbook.name },
   });
@@ -55,19 +57,28 @@ export async function createPlaybookAction(input: CreatePlaybookInput) {
 }
 
 export async function togglePlaybookAction(id: string, enabled: boolean) {
-  await db.playbook.update({ where: { id }, data: { enabled } });
+  const ctx = await requireSession();
+  const { count } = await db.playbook.updateMany({
+    where: { id, ...tenantWhere(ctx) },
+    data: { enabled },
+  });
+  if (count === 0) throw new Error("Playbook not found");
   revalidatePath("/playbooks");
 }
 
 export async function listPlaybooksAction() {
+  const ctx = await requireSession();
   return db.playbook.findMany({
+    where: tenantWhere(ctx),
     include: { actions: true, _count: { select: { executions: true } } },
     orderBy: { createdAt: "desc" },
   });
 }
 
 export async function listExecutionsAction() {
+  const ctx = await requireSession();
   return db.playbookExecution.findMany({
+    where: { case: tenantWhere(ctx) },
     include: { playbook: true, case: { select: { title: true } } },
     orderBy: { startedAt: "desc" },
     take: 100,
@@ -75,8 +86,9 @@ export async function listExecutionsAction() {
 }
 
 export async function listPendingApprovalsAction() {
+  const ctx = await requireSession();
   return db.playbookExecution.findMany({
-    where: { status: "PENDING_APPROVAL" },
+    where: { status: "PENDING_APPROVAL", case: tenantWhere(ctx) },
     include: { playbook: true, case: { select: { title: true, severity: true } } },
     orderBy: { startedAt: "desc" },
   });
@@ -87,9 +99,7 @@ export async function decideApprovalAction(
   decision: "approved" | "rejected",
   notes?: string,
 ) {
-  const session = await auth();
-  if (!session?.user?.id) throw new Error("Not authenticated");
-
-  await decideApproval(executionId, session.user.id, decision, notes);
+  const ctx = await requireSession();
+  await decideApproval(executionId, ctx.userId, decision, notes, tenantWhere(ctx));
   revalidatePath("/playbooks");
 }

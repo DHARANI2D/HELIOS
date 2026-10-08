@@ -27,7 +27,10 @@ export interface RunScenarioResult {
   revoked: boolean;
 }
 
-export async function runScenario(scenarioId: string): Promise<RunScenarioResult> {
+export async function runScenario(
+  scenarioId: string,
+  organizationId: string | null = null,
+): Promise<RunScenarioResult> {
   const scenario = getScenario(scenarioId);
   if (!scenario) throw new Error(`Unknown scenario: ${scenarioId}`);
 
@@ -35,6 +38,7 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
 
   const agent = await db.agent.create({
     data: {
+      organizationId,
       name: scenario.agentIdPrefix,
       publicKey: publicKeyB64,
       trust: 100,
@@ -46,6 +50,7 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
 
   const kase = await db.case.create({
     data: {
+      organizationId,
       sourceType: "AGENT_GOVERNANCE",
       title: scenario.name,
       summary: scenario.description,
@@ -134,6 +139,7 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
 
   await logAction({
     caseId: kase.id,
+    organizationId,
     action: "governance.scenario_run",
     detail: { scenarioId: scenario.id, agentId: agent.id, revoked, steps },
   });
@@ -141,11 +147,16 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
   return { agentId: agent.id, caseId: kase.id, steps, revoked };
 }
 
-export async function globalPurge() {
+// scope is tenantWhere()'s shape — `{}` for a platform role purges every
+// tenant's agents (true "global"), `{ organizationId }` for an org role
+// purges only their own.
+export async function globalPurge(scope: { organizationId?: string } = {}) {
   const agents = await db.agent.updateManyAndReturn({
+    where: scope,
     data: { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" },
   });
   await logAction({
+    organizationId: scope.organizationId ?? null,
     action: "governance.global_purge",
     detail: { affectedAgents: agents.length },
   });

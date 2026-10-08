@@ -4,6 +4,7 @@ import type { CaseSeverity } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { SEVERITY_ORDER, SEVERITY_LABEL } from "@/lib/severity";
+import { requireSession, tenantWhere, type TenantContext } from "@/lib/tenant";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { SeverityBarChart } from "@/components/dashboard/severity-bar-chart";
 import {
@@ -14,30 +15,33 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { NAV_ITEMS } from "@/lib/nav";
+import { getNavItems } from "@/lib/nav";
 
-async function getOverviewData() {
+async function getOverviewData(ctx: TenantContext) {
+  const scope = tenantWhere(ctx);
   const [openCases, criticalCases, activeAgents, pendingApprovals, severityGroups, recentCases] =
     await Promise.all([
       db.case.count({
-        where: { status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] } },
+        where: { status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] }, ...scope },
       }),
       db.case.count({
         where: {
           severity: "CRITICAL",
           status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] },
+          ...scope,
         },
       }),
-      db.agent.count({ where: { status: "ACTIVE" } }),
+      db.agent.count({ where: { status: "ACTIVE", ...scope } }),
       db.playbookExecution.count({
-        where: { status: "PENDING_APPROVAL" },
+        where: { status: "PENDING_APPROVAL", case: scope },
       }),
       db.case.groupBy({
         by: ["severity"],
         _count: { _all: true },
-        where: { status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] } },
+        where: { status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] }, ...scope },
       }),
       db.case.findMany({
+        where: scope,
         take: 8,
         orderBy: { createdAt: "desc" },
         select: {
@@ -69,6 +73,7 @@ async function getOverviewData() {
 }
 
 export default async function OverviewPage() {
+  const ctx = await requireSession();
   const {
     openCases,
     criticalCases,
@@ -76,7 +81,8 @@ export default async function OverviewPage() {
     pendingApprovals,
     severityCounts,
     recentCases,
-  } = await getOverviewData();
+  } = await getOverviewData(ctx);
+  const navItems = getNavItems(ctx.role);
 
   return (
     <div className="flex flex-col gap-6">
@@ -151,7 +157,7 @@ export default async function OverviewPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {NAV_ITEMS.filter((i) => i.href !== "/").map((item) => (
+          {navItems.filter((i) => i.href !== "/").map((item) => (
             <Link
               key={item.href}
               href={item.href}

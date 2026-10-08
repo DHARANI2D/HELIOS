@@ -1,6 +1,7 @@
 import { ScrollText } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { requireSession, tenantWhere } from "@/lib/tenant";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { VerifyIntegrityButton } from "@/components/audit/verify-integrity-button";
 import { AuditLogTable } from "@/components/audit/audit-log-table";
@@ -13,7 +14,8 @@ import {
 } from "@/components/ui/card";
 
 export default async function AuditPage() {
-  const total = await db.auditLog.count();
+  const ctx = await requireSession();
+  const total = await db.auditLog.count({ where: tenantWhere(ctx) });
 
   return (
     <div className="flex flex-col gap-6">

@@ -1,6 +1,7 @@
 import { Workflow, PlayCircle, Hourglass } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { requireSession, tenantWhere, type TenantContext } from "@/lib/tenant";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { CreatePlaybookForm } from "@/components/playbooks/create-playbook-form";
 import { PlaybookList } from "@/components/playbooks/playbook-list";
@@ -14,17 +15,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-async function getPlaybookStats() {
+async function getPlaybookStats(ctx: TenantContext) {
+  const scope = tenantWhere(ctx);
   const [total, executions, pending] = await Promise.all([
-    db.playbook.count(),
-    db.playbookExecution.count({ where: { status: "SUCCEEDED" } }),
-    db.playbookExecution.count({ where: { status: "PENDING_APPROVAL" } }),
+    db.playbook.count({ where: scope }),
+    db.playbookExecution.count({ where: { status: "SUCCEEDED", case: scope } }),
+    db.playbookExecution.count({ where: { status: "PENDING_APPROVAL", case: scope } }),
   ]);
   return { total, executions, pending };
 }
 
 export default async function PlaybooksPage() {
-  const stats = await getPlaybookStats();
+  const ctx = await requireSession();
+  const stats = await getPlaybookStats(ctx);
 
   return (
     <div className="flex flex-col gap-6">

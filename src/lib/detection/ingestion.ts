@@ -95,10 +95,11 @@ function normalize(source: EventSource, raw: RawLog): NormalizedInput {
   }
 }
 
-export async function ingestRawLog(source: EventSource, raw: RawLog) {
+export async function ingestRawLog(source: EventSource, raw: RawLog, organizationId: string | null = null) {
   const n = normalize(source, raw);
   return db.ingestedEvent.create({
     data: {
+      organizationId,
       source,
       eventType: n.eventType,
       timestamp: n.timestamp,
@@ -115,8 +116,8 @@ export async function ingestRawLog(source: EventSource, raw: RawLog) {
   });
 }
 
-export async function ingestBatch(source: EventSource, rawLogs: RawLog[]) {
+export async function ingestBatch(source: EventSource, rawLogs: RawLog[], organizationId: string | null = null) {
   const results = [];
-  for (const log of rawLogs) results.push(await ingestRawLog(source, log));
+  for (const log of rawLogs) results.push(await ingestRawLog(source, log, organizationId));
   return results;
 }
