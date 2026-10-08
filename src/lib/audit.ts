@@ -5,8 +5,19 @@ import { db } from "@/lib/db";
 // Deterministic JSON serialization (recursive key sort) — JSON.stringify's
 // array-replacer form only filters/orders top-level keys, which would
 // silently mangle nested `detail` objects that happen to share key names.
+//
+// Date needs its own case: a raw Date embedded in `detail` has no own
+// enumerable properties, so walking it with Object.keys (the plain-object
+// branch below) silently canonicalizes it to "{}" — but Postgres's Json
+// column (via Prisma) serializes it through Date.prototype.toJSON() into
+// an ISO string instead. Those two didn't match, so any logAction() call
+// whose `detail` embedded a Date (e.g. a scheduledAt field) computed a
+// currentHash at write time that could never be reproduced by
+// verifyAuditChainIntegrity's read-time recomputation — a real bug this
+// found once src/lib/pentest.ts started passing a Date through.
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   const keys = Object.keys(value as Record<string, unknown>).sort();
   const body = keys

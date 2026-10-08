@@ -42,4 +42,20 @@ describe("audit chain", () => {
 
     expect(b.prevHash).toBe(a.currentHash);
   });
+
+  it("stays verifiable when `detail` embeds a raw Date (not just an ISO string)", async () => {
+    // Real bug: a Date has no own enumerable properties, so canonicalJson's
+    // plain-object branch silently serialized it to "{}" at write time —
+    // but Postgres's Json column (via Prisma) serializes a Date through
+    // .toJSON() into an ISO string, so verifyAuditChainIntegrity's
+    // read-time recomputation produced a different hash and broke the
+    // chain the moment any caller (e.g. src/lib/pentest.ts's
+    // schedulePentestRequest) passed a Date through `detail`.
+    const runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const action = `audit.test.date-detail.${runId}`;
+
+    await logAction({ action, detail: { scheduledAt: new Date("2026-11-01T10:00:00.000Z") } });
+
+    expect(await verifyAuditChainIntegrity()).toBe(true);
+  });
 });
