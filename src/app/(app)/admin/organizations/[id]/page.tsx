@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { requireSession, requirePlatformRole } from "@/lib/tenant";
-import { getOrganizationDetail, listPlans } from "@/lib/billing/service";
+import { getOrganizationDetail, listPlans, getBillingChangeRequests } from "@/lib/billing/service";
 import {
   Card,
   CardContent,
@@ -31,7 +31,11 @@ export default async function OrganizationDetailPage({
   requirePlatformRole(ctx);
 
   const { id } = await params;
-  const [org, plans] = await Promise.all([getOrganizationDetail(id), listPlans()]);
+  const [org, plans, billingRequests] = await Promise.all([
+    getOrganizationDetail(id),
+    listPlans(),
+    getBillingChangeRequests(id),
+  ]);
   if (!org) notFound();
 
   return (
@@ -88,6 +92,25 @@ export default async function OrganizationDetailPage({
           </CardContent>
         </Card>
       </div>
+
+      {billingRequests.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Billing change requests</CardTitle>
+            <CardDescription>Sent by this tenant&apos;s org admins from their Billing page</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {billingRequests.map((r) => (
+              <div key={r.id} className="rounded-md border p-2 text-sm">
+                <p>{(r.detail as { message?: string } | null)?.message}</p>
+                <p className="text-xs text-muted-foreground">
+                  {r.actor?.name ?? r.actor?.email} · {new Date(r.createdAt).toLocaleString()}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>

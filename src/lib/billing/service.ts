@@ -238,6 +238,29 @@ export async function listInvoices(scope: { organizationId?: string } = {}) {
   }));
 }
 
+// Org-facing "ask the platform owner for a plan/billing change" — there's
+// no self-service checkout (per the admin-provisioned onboarding
+// decision), so this is the entire customer-initiated billing workflow:
+// log it as an audit entry on their org, which the platform owner sees on
+// that org's admin detail page (getBillingChangeRequests below).
+export async function requestBillingChange(organizationId: string, message: string, actorId?: string) {
+  await logAction({
+    actorId,
+    organizationId,
+    action: "billing.change_requested",
+    detail: { message },
+  });
+}
+
+export async function getBillingChangeRequests(organizationId: string) {
+  return db.auditLog.findMany({
+    where: { organizationId, action: "billing.change_requested" },
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    include: { actor: { select: { name: true, email: true } } },
+  });
+}
+
 // No live payment processor is wired up (per the deliberate v1 scope) —
 // this is the manual "record that payment arrived" step a real Stripe/etc.
 // webhook would call automatically in a later pass.
