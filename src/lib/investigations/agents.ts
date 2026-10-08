@@ -1,10 +1,21 @@
-import { invokeAgent, parseJsonResponse } from "./llm";
+import { invokeAgent, parseJsonResponse, type AiTier } from "./llm";
 import type { TriageResult, RcaResult, QaResult, EntityGraph } from "./types";
 
 // Ported from asip's agents/{triage,rca,qa,report}_agent.py — same system
-// prompts, same JSON-object contract per agent.
+// prompts, same JSON-object contract per agent. Each agent takes the
+// calling org's AiTier (and self-hosted URL, when that tier is chosen) so
+// the whole swarm runs on whichever model the customer is paying for.
 
-export async function runTriageAgent(alertTitle: string, alertDetails: string): Promise<TriageResult> {
+export interface AiModelOptions {
+  tier?: AiTier;
+  selfHostedOllamaUrl?: string | null;
+}
+
+export async function runTriageAgent(
+  alertTitle: string,
+  alertDetails: string,
+  model: AiModelOptions = {},
+): Promise<TriageResult> {
   const systemPrompt = `You are a Tier 3 SOC Analyst. Your task is to triage and categorize the incoming cybersecurity alert.
 Return a JSON object with the following fields:
 {
@@ -17,7 +28,7 @@ Return a JSON object with the following fields:
 Ensure the output is valid JSON and nothing else.`;
 
   const userPrompt = `Alert Title: ${alertTitle}\nAlert Details: ${alertDetails}`;
-  const raw = await invokeAgent(systemPrompt, userPrompt, { json: true });
+  const raw = await invokeAgent(systemPrompt, userPrompt, { json: true, ...model });
 
   return parseJsonResponse<TriageResult>(raw, {
     alert_type: "Suspicious Threat Alert",
@@ -33,6 +44,7 @@ export async function runRcaAgent(
   graphData: EntityGraph,
   sampleLogs: unknown[],
   qaFeedback?: string[],
+  model: AiModelOptions = {},
 ): Promise<RcaResult> {
   const systemPrompt = `You are a Lead Incident Responder. Your task is to perform a detailed Root Cause Analysis (RCA) on the forensic graph and raw logs.
 Connect the nodes chronologically to explain the attack vector.
@@ -57,7 +69,7 @@ Ensure the output is valid JSON and nothing else.`;
 Forensic Graph: ${JSON.stringify(graphData, null, 2)}
 Ingested Logs: ${JSON.stringify(sampleLogs.slice(0, 50), null, 2)}`;
 
-  const raw = await invokeAgent(systemPrompt, userPrompt, { json: true });
+  const raw = await invokeAgent(systemPrompt, userPrompt, { json: true, ...model });
 
   return parseJsonResponse<RcaResult>(raw, {
     root_cause: "Failed to perform RCA reasoning.",
@@ -66,7 +78,11 @@ Ingested Logs: ${JSON.stringify(sampleLogs.slice(0, 50), null, 2)}`;
   });
 }
 
-export async function runQaAgent(rcaData: RcaResult, sampleLogs: unknown[]): Promise<QaResult> {
+export async function runQaAgent(
+  rcaData: RcaResult,
+  sampleLogs: unknown[],
+  model: AiModelOptions = {},
+): Promise<QaResult> {
   const systemPrompt = `You are an Adversarial QA Security Validator. Your job is to verify that the Root Cause Analysis is factually correct.
 Verify:
 1. Every claim in root_cause or timeline corresponds to an actual event in the logs.
@@ -82,7 +98,7 @@ Ensure the output is valid JSON and nothing else.`;
   const userPrompt = `RCA Report: ${JSON.stringify(rcaData, null, 2)}
 Ingested Logs: ${JSON.stringify(sampleLogs.slice(0, 50), null, 2)}`;
 
-  const raw = await invokeAgent(systemPrompt, userPrompt, { json: true });
+  const raw = await invokeAgent(systemPrompt, userPrompt, { json: true, ...model });
 
   return parseJsonResponse<QaResult>(raw, {
     is_valid: false,
@@ -95,6 +111,7 @@ export async function runReportAgent(
   triageData: TriageResult,
   rcaData: RcaResult,
   qaData: QaResult,
+  model: AiModelOptions = {},
 ): Promise<string> {
   const systemPrompt = `You are a Principal Security Consultant. Compile a formal, highly-detailed SOC Incident Report in Markdown format.
 Focus on clear structure, exact evidence references, and actionable recommendations.
@@ -109,5 +126,5 @@ Your output should have:
 RCA: ${JSON.stringify(rcaData)}
 QA Validation: ${JSON.stringify(qaData)}`;
 
-  return invokeAgent(systemPrompt, userPrompt);
+  return invokeAgent(systemPrompt, userPrompt, model);
 }

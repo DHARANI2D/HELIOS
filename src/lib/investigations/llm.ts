@@ -3,12 +3,31 @@
 // a deterministic mock response keyed by prompt content — the same
 // offline-first design asip used, which matters here since this sandbox
 // has no route to any of the three providers.
+//
+// AI model marketplace: every org has an AiTier (set by the platform
+// owner when provisioning/upgrading them — see Organization.aiTier) that
+// picks which Claude model powers their investigations, or routes to
+// their own self-hosted Ollama endpoint instead of any cloud provider.
+// Three Claude tiers rather than adding a second cloud vendor: it maps
+// directly onto a real cost/quality axis (Haiku/Sonnet/Opus) with zero
+// new integration risk, since this fallback chain already calls Anthropic
+// first.
+
+export type AiTier = "ESSENTIAL" | "PROFESSIONAL" | "ENTERPRISE" | "SELF_HOSTED";
+
+const TIER_MODEL: Record<Exclude<AiTier, "SELF_HOSTED">, string> = {
+  ESSENTIAL: "claude-haiku-4-5",
+  PROFESSIONAL: "claude-sonnet-4-5",
+  ENTERPRISE: "claude-opus-4-5",
+};
 
 interface InvokeOptions {
   json?: boolean;
+  tier?: AiTier;
+  selfHostedOllamaUrl?: string | null;
 }
 
-async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<string> {
+async function callAnthropic(systemPrompt: string, userPrompt: string, model: string): Promise<string> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -17,7 +36,7 @@ async function callAnthropic(systemPrompt: string, userPrompt: string): Promise<
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
+      model,
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
@@ -51,8 +70,13 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, json?: boole
   return data.choices[0].message.content;
 }
 
-async function callOllama(systemPrompt: string, userPrompt: string, json?: boolean): Promise<string> {
-  const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+async function callOllama(
+  systemPrompt: string,
+  userPrompt: string,
+  json?: boolean,
+  overrideBaseUrl?: string | null,
+): Promise<string> {
+  const baseUrl = overrideBaseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
   const res = await fetch(`${baseUrl}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -140,6 +164,18 @@ export async function invokeAgent(
   userPrompt: string,
   options: InvokeOptions = {},
 ): Promise<string> {
+  // SELF_HOSTED is a deliberate dead end to cloud providers — an org on
+  // this tier is paying (or configuring) specifically to keep inference
+  // on their own infrastructure, so this never falls through to
+  // Anthropic/OpenAI even if cloud keys are configured on the platform.
+  if (options.tier === "SELF_HOSTED") {
+    try {
+      return await callOllama(systemPrompt, userPrompt, options.json, options.selfHostedOllamaUrl);
+    } catch {
+      return mockResponse(systemPrompt, options.json);
+    }
+  }
+
   const hasCloudKey = process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY;
 
   if (!hasCloudKey) {
@@ -150,9 +186,11 @@ export async function invokeAgent(
     }
   }
 
+  const model = TIER_MODEL[options.tier ?? "PROFESSIONAL"];
+
   if (process.env.ANTHROPIC_API_KEY) {
     try {
-      return await callAnthropic(systemPrompt, userPrompt);
+      return await callAnthropic(systemPrompt, userPrompt, model);
     } catch {
       // fall through
     }

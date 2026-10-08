@@ -76,7 +76,21 @@ export async function createInvestigation(
     },
   });
 
-  const swarm = await runInvestigationSwarm(alertTitle, alertDetails, graphData, sampleLogs);
+  // Which AI tier powers this swarm run: look up the org's chosen tier
+  // (set by the platform owner when provisioning/upgrading them) rather
+  // than defaulting everyone to the same model — this is the literal
+  // "AI model marketplace" the platform sells.
+  const org = organizationId
+    ? await db.organization.findUnique({
+        where: { id: organizationId },
+        select: { aiTier: true, selfHostedOllamaUrl: true },
+      })
+    : null;
+
+  const swarm = await runInvestigationSwarm(alertTitle, alertDetails, graphData, sampleLogs, {
+    tier: org?.aiTier,
+    selfHostedOllamaUrl: org?.selfHostedOllamaUrl,
+  });
 
   await db.case.update({
     where: { id: kase.id },
