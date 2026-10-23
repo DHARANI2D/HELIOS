@@ -1,0 +1,70 @@
+"use client";
+
+import * as React from "react";
+import { useRouter } from "next/navigation";
+import { useMutation } from "@tanstack/react-query";
+import { FlaskConical, Loader2, ScanSearch } from "lucide-react";
+import { toast } from "sonner";
+
+import { analyzeSampleAction, analyzeSubmissionAction } from "@/app/(app)/forensics/actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+
+export function AnalyzeForm() {
+  const router = useRouter();
+  const [detonate, setDetonate] = React.useState(false);
+
+  const done = (r: { caseId: string; verdict: string; score: number }) => {
+    toast.success(`Verdict: ${r.verdict} (score ${r.score})`);
+    router.push(`/cases/${r.caseId}`);
+  };
+  const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Analysis failed");
+
+  const analyze = useMutation({ mutationFn: (fd: FormData) => analyzeSubmissionAction(fd), onSuccess: done, onError });
+  const sample = useMutation({ mutationFn: () => analyzeSampleAction(detonate), onSuccess: done, onError });
+  const busy = analyze.isPending || sample.isPending;
+
+  return (
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        analyze.mutate(new FormData(e.currentTarget));
+      }}
+    >
+      <div className="grid gap-1.5">
+        <Label htmlFor="fx-file">Email (.eml) or suspicious file</Label>
+        <Input id="fx-file" name="file" type="file" />
+        <p className="text-xs text-muted-foreground">
+          .eml messages get header, body, attachment, and link analysis. Any other file (Office, PDF, archive, executable, script, image) gets file forensics.
+        </p>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="fx-raw">…or paste raw message source</Label>
+        <Textarea id="fx-raw" name="raw" className="min-h-28 font-mono text-xs" placeholder={"Received: from …\nFrom: …\nSubject: …\n\nBody…"} />
+      </div>
+      <label className="flex items-start gap-2 text-sm">
+        <Switch name="detonate" checked={detonate} onCheckedChange={setDetonate} className="mt-0.5" />
+        <span>
+          Detonate links (up to 5)
+          <span className="block text-xs text-muted-foreground">
+            Fetches each URL from this server over a guarded connection that refuses internal addresses, and inspects the landing page. JavaScript is not executed.
+          </span>
+        </span>
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" disabled={busy}>
+          {analyze.isPending ? <Loader2 className="animate-spin" /> : <ScanSearch />}
+          Analyze
+        </Button>
+        <Button type="button" variant="outline" disabled={busy} onClick={() => sample.mutate()}>
+          {sample.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+          Analyze sample phishing email
+        </Button>
+      </div>
+    </form>
+  );
+}

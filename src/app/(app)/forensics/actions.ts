@@ -1,0 +1,51 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import { requireUser } from "@/lib/session";
+import { logAction } from "@/lib/audit";
+import { analyzeSubmission } from "@/lib/forensics/service";
+import { buildSampleEmail } from "@/lib/forensics/samples";
+import { detonateUrl } from "@/lib/forensics/sandbox";
+
+const MAX_BYTES = 20 * 1024 * 1024;
+
+export async function analyzeSubmissionAction(formData: FormData) {
+  const user = await requireUser();
+  const detonate = formData.get("detonate") === "on";
+  const file = formData.get("file");
+  const raw = String(formData.get("raw") ?? "");
+
+  let filename: string;
+  let bytes: Uint8Array;
+  if (file instanceof File && file.size > 0) {
+    if (file.size > MAX_BYTES) throw new Error("File is larger than 20 MB");
+    filename = file.name;
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } else if (raw.trim()) {
+    filename = "pasted-message.eml";
+    bytes = new Uint8Array(Buffer.from(raw));
+  } else {
+    throw new Error("Upload an .eml / file or paste raw message source");
+  }
+
+  const result = await analyzeSubmission({ filename, bytes, detonate, actorId: user.id });
+  revalidatePath("/forensics");
+  revalidatePath("/");
+  return result;
+}
+
+export async function analyzeSampleAction(detonate: boolean) {
+  const user = await requireUser();
+  const result = await analyzeSubmission({ ...buildSampleEmail(), detonate, actorId: user.id });
+  revalidatePath("/forensics");
+  return result;
+}
+
+// Standalone toolkit check (desas's "URL sandbox" tool) — no case filed.
+export async function detonateUrlAction(url: string) {
+  const user = await requireUser();
+  const result = await detonateUrl(url.trim());
+  await logAction({ actorId: user.id, action: "forensics.url_detonated", detail: { url: result.url, finalUrl: result.finalUrl, score: result.score, error: result.error } });
+  return result;
+}
