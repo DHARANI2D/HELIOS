@@ -1,8 +1,9 @@
 import { db } from "@/lib/db";
 import { generateAgentIdentity } from "@/lib/governance/identity";
 import { processAction } from "@/lib/governance/sidecar";
-import { buildScenarios, getScenario, type Scenario } from "@/lib/governance/scenarios";
+import { buildScenarios, getScenario, SCENARIO_TECHNIQUES, type Scenario } from "@/lib/governance/scenarios";
 import { logAction } from "@/lib/audit";
+import { createCase, type NewDetection, type NewTimelineEntry } from "@/lib/cases/writer";
 import type { CaseSeverity, DetectionSource } from "@prisma/client";
 
 const LAYER_TO_DETECTION_SOURCE: Record<string, DetectionSource> = {
@@ -27,7 +28,7 @@ export interface RunScenarioResult {
   revoked: boolean;
 }
 
-export async function runScenario(scenarioId: string): Promise<RunScenarioResult> {
+export async function runScenario(scenarioId: string, actorId?: string): Promise<RunScenarioResult> {
   const scenario = getScenario(scenarioId);
   if (!scenario) throw new Error(`Unknown scenario: ${scenarioId}`);
 
@@ -44,54 +45,35 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
     },
   });
 
-  const kase = await db.case.create({
-    data: {
-      sourceType: "AGENT_GOVERNANCE",
-      title: scenario.name,
-      summary: scenario.description,
-      severity: scenario.severity as CaseSeverity,
-      status: "INVESTIGATING",
-      sourceRef: agent.id,
-      metadata: { scenarioId: scenario.id, outcome: scenario.outcome },
-    },
-  });
-
+  const severity = scenario.severity as CaseSeverity;
+  const startedAt = Date.now();
   const steps: ScenarioStepResult[] = [];
-  let anyDeny = false;
+  const timeline: NewTimelineEntry[] = [];
+  const detections: NewDetection[] = [];
+  let denies = 0;
   let constitutionBreach = false;
 
-  for (const event of scenario.events) {
+  scenario.events.forEach((event, i) => {
     const result = processAction(event, "production");
 
-    await db.timelineEntry.create({
-      data: {
-        caseId: kase.id,
-        occurredAt: new Date(),
-        actor: agent.name,
-        action: event.name,
-        detail: `${result.decision} (${result.layer}): ${result.reason}`,
-        evidence: event as never,
-      },
+    timeline.push({
+      // Millisecond offsets keep the pipeline order stable on the timeline.
+      occurredAt: new Date(startedAt + i),
+      actor: agent.name,
+      action: event.name,
+      detail: `${result.decision} (${result.layer}): ${result.reason}`,
+      evidence: event,
     });
 
     if (result.decision === "DENY") {
-      anyDeny = true;
+      denies++;
       if (result.layer === "CONSTITUTION") constitutionBreach = true;
-
-      await db.detection.create({
-        data: {
-          caseId: kase.id,
-          source: LAYER_TO_DETECTION_SOURCE[result.layer],
-          ruleId: event.name,
-          title: `${event.name} blocked by ${result.layer}`,
-          severity: scenario.severity as CaseSeverity,
-          evidence: { event, result } as never,
-        },
-      });
-
-      await db.agent.update({
-        where: { id: agent.id },
-        data: { trust: { decrement: 30 } },
+      detections.push({
+        source: LAYER_TO_DETECTION_SOURCE[result.layer],
+        ruleId: event.name,
+        title: `${event.name} blocked by ${result.layer}`,
+        severity,
+        evidence: { event, result },
       });
     }
 
@@ -102,37 +84,39 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
       reason: result.reason,
       matchedExpectation: result.decision === event.expectedDecision,
     });
-  }
+  });
 
   const revoked = constitutionBreach || scenario.severity === "CRITICAL";
 
-  if (revoked) {
-    await db.agent.update({
-      where: { id: agent.id },
-      data: { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" },
-    });
-    await db.case.update({
-      where: { id: kase.id },
-      data: {
-        status: "CONTAINED",
-        verdict: "malicious",
-        rootCauseNarrative: scenario.forensicNotes,
-        resolvedAt: null,
-      },
-    });
-  } else if (anyDeny) {
-    await db.case.update({
-      where: { id: kase.id },
-      data: { status: "TRIAGING", verdict: "suspicious" },
-    });
-  } else {
-    await db.case.update({
-      where: { id: kase.id },
-      data: { status: "RESOLVED", verdict: "benign", resolvedAt: new Date() },
-    });
-  }
+  await db.agent.update({
+    where: { id: agent.id },
+    data: revoked
+      ? { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" }
+      : { trust: Math.max(0, 100 - 30 * denies) },
+  });
+
+  const outcome = revoked
+    ? { status: "CONTAINED" as const, verdict: "malicious", rootCauseNarrative: scenario.forensicNotes, resolvedAt: null }
+    : denies > 0
+      ? { status: "TRIAGING" as const, verdict: "suspicious" }
+      : { status: "RESOLVED" as const, verdict: "benign", resolvedAt: new Date() };
+
+  const kase = await createCase({
+    sourceType: "AGENT_GOVERNANCE",
+    title: scenario.name,
+    summary: scenario.description,
+    severity,
+    sourceRef: agent.id,
+    metadata: { scenarioId: scenario.id, outcome: scenario.outcome, agentName: agent.name },
+    timeline,
+    detections,
+    techniques: SCENARIO_TECHNIQUES[scenario.id] ?? [],
+    actorId,
+    ...outcome,
+  });
 
   await logAction({
+    actorId,
     caseId: kase.id,
     action: "governance.scenario_run",
     detail: { scenarioId: scenario.id, agentId: agent.id, revoked, steps },
@@ -141,11 +125,12 @@ export async function runScenario(scenarioId: string): Promise<RunScenarioResult
   return { agentId: agent.id, caseId: kase.id, steps, revoked };
 }
 
-export async function globalPurge() {
+export async function globalPurge(actorId?: string) {
   const agents = await db.agent.updateManyAndReturn({
     data: { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" },
   });
   await logAction({
+    actorId,
     action: "governance.global_purge",
     detail: { affectedAgents: agents.length },
   });

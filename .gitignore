@@ -16,3 +16,7 @@ coverage/
 *.log
 *.pem
 .vercel
+# Local databases (the legacy apps' SQLite dev DBs are generated, not source)
+*.db
+*.sqlite
+*.sqlite3

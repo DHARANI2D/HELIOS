@@ -18,6 +18,16 @@ export interface Scenario {
   forensicNotes: string;
 }
 
+// Each aegis scenario expressed as the ATT&CK technique its agent behaviour
+// maps to, so governance cases show up in the shared coverage matrix.
+export const SCENARIO_TECHNIQUES: Record<string, string[]> = {
+  data_exfiltration: ["T1567"],
+  privilege_escalation: ["T1078"],
+  goal_drift: ["T1485"],
+  memory_poisoning: ["T1059"],
+  constitution_violation: ["T1485"],
+};
+
 function randomSuffix() {
   return Math.floor(100 + Math.random() * 900);
 }

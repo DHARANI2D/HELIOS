@@ -11,6 +11,25 @@ export const SEVERITY_ORDER: CaseSeverity[] = [
   "INFO",
 ];
 
+const SEVERITY_RANK: Record<CaseSeverity, number> = {
+  INFO: 0,
+  LOW: 1,
+  MEDIUM: 2,
+  HIGH: 3,
+  CRITICAL: 4,
+};
+
+export function severityRank(severity: CaseSeverity): number {
+  return SEVERITY_RANK[severity];
+}
+
+export function maxSeverity(...severities: CaseSeverity[]): CaseSeverity {
+  return severities.reduce(
+    (max, s) => (SEVERITY_RANK[s] > SEVERITY_RANK[max] ? s : max),
+    "INFO" as CaseSeverity,
+  );
+}
+
 export const SEVERITY_LABEL: Record<CaseSeverity, string> = {
   CRITICAL: "Critical",
   HIGH: "High",
