@@ -3,7 +3,8 @@ import { ShieldAlert, Siren, UserCog, Workflow, Inbox } from "lucide-react";
 import type { CaseSeverity } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { SEVERITY_ORDER, SEVERITY_LABEL } from "@/lib/severity";
+import { SEVERITY_ORDER } from "@/lib/severity";
+import { CASE_SOURCE_LABEL, CASE_STATUS_LABEL } from "@/lib/cases/labels";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { SeverityBarChart } from "@/components/dashboard/severity-bar-chart";
 import {
@@ -13,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { SeverityBadge } from "@/components/shared/case-badges";
 import { NAV_ITEMS } from "@/lib/nav";
 
 async function getOverviewData() {
@@ -125,16 +126,16 @@ export default async function OverviewPage() {
             ) : (
               <ul className="divide-y">
                 {recentCases.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between py-2.5">
+                  <li key={c.id} className="flex items-center justify-between gap-3 py-2.5">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{c.title}</p>
+                      <Link href={`/cases/${c.id}`} className="block truncate text-sm font-medium hover:underline">
+                        {c.title}
+                      </Link>
                       <p className="text-xs text-muted-foreground">
-                        {c.sourceType.replaceAll("_", " ")} · {c.status}
+                        {CASE_SOURCE_LABEL[c.sourceType]} · {CASE_STATUS_LABEL[c.status]}
                       </p>
                     </div>
-                    <Badge variant="outline">
-                      {SEVERITY_LABEL[c.severity]}
-                    </Badge>
+                    <SeverityBadge severity={c.severity} />
                   </li>
                 ))}
               </ul>
