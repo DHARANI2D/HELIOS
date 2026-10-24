@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 import {
+  BarChart3,
   Bot,
   Building2,
   Calculator,
@@ -40,6 +41,7 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Overview", href: "/", icon: LayoutDashboard, group: "Operate", permission: "dashboard.view", description: "Live posture, queues, SLAs and AI activity" },
   { title: "Cases & Alerts", clientTitle: "Incidents", href: "/cases", icon: ShieldAlert, group: "Operate", permission: "cases.view", description: "Unified detection and case stream" },
   { title: "Endpoints", href: "/endpoints", icon: Laptop, group: "Operate", permission: "endpoints.view", description: "Endpoint inventory, protection coverage and isolation" },
+  { title: "Reports", clientTitle: "Service reports", href: "/reports", icon: BarChart3, group: "Operate", permission: "reports.view", description: "Volume, response times, SLA and AI performance by period" },
   { title: "AI Agents", href: "/ai", icon: Bot, group: "Operate", permission: "ai.view", description: "AI first responders, providers, autonomy and run log" },
   { title: "Investigations", href: "/investigations", icon: Search, group: "Analyze", permission: "investigations.run", description: "Multi-agent root-cause analysis" },
   { title: "Email & File Forensics", href: "/forensics", icon: Mail, group: "Analyze", permission: "forensics.run", description: "Sandbox detonation and document forensics" },

@@ -47,7 +47,7 @@ export function CompanyForm({ initial, canEdit }: { initial: CompanyProfile; can
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2">
         {COMPANY_FIELDS.map((f) => (
-          <div key={f.key} className={cn("grid gap-1.5", f.wide && "sm:col-span-2")}>
+          <div key={f.key} className={cn("grid content-start gap-1.5", f.wide && "sm:col-span-2")}>
             <Label htmlFor={`company-${f.key}`}>{f.label}</Label>
             {f.long ? (
               <Textarea id={`company-${f.key}`} value={d[f.key]} onChange={(e) => setD({ ...d, [f.key]: e.target.value })} disabled={!canEdit} className="min-h-16" />

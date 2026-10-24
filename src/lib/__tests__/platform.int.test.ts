@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
+import { createElement } from "react";
+import { renderToBuffer } from "@react-pdf/renderer";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -28,6 +30,7 @@ import { gatherEvidence } from "@/lib/ai/evidence";
 import { getSetting } from "@/lib/settings";
 import { platformSecret, platformSecretStatus, storePlatformSecret } from "@/lib/platform-secrets";
 import { adoptAsTestEnvironment } from "../../../prisma/seed-test";
+import { CaseReportPdf, loadCaseReport } from "@/lib/pdf/case-report";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -170,6 +173,20 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(events.filter((t) => t.includes("auth_failure"))).toHaveLength(12);
     expect(events.some((t) => t.includes("log_cleared"))).toBe(true);
     expect(events.some((t) => t.includes("user=svc-backup"))).toBe(true); // the rest is filled with context
+  });
+
+  it("exports incident reports, without AI working notes for clients", async () => {
+    const kase = await db.case.findFirstOrThrow({ where: { sourceType: "SOC_INVESTIGATION" }, orderBy: { createdAt: "asc" } });
+    await db.aiRun.create({ data: { caseId: kase.id, agentKey: "triage", trigger: "auto", engine: "built-in", status: "succeeded", output: { verdict: "true_positive", severity: "high", confidence: 0.9, summary: "Internal triage note", key_findings: [], recommended_actions: [], analyst_next_steps: [], escalation_tier: 2 } } });
+    const staff = await loadCaseReport(kase.id, "staff");
+    const client = await loadCaseReport(kase.id, "client");
+    expect(staff.kase.aiRuns).toHaveLength(1);
+    expect(client.kase.aiRuns).toBeUndefined();
+    const company = await getSetting("company.profile");
+    for (const report of [staff, client]) {
+      const pdf = await renderToBuffer(createElement(CaseReportPdf, { report, company }) as Parameters<typeof renderToBuffer>[0]);
+      expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    }
   });
 
   it("links a repeat intrusion to the earlier case and cites it in the RCA", async () => {

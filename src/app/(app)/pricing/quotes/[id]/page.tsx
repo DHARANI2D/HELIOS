@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Check, CircleCheck, Pencil, X } from "lucide-react";
+import { ArrowLeft, Check, CircleCheck, Download, Pencil, X } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -33,6 +33,9 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
         </Button>
         <div className="flex items-center gap-2">
           <QuoteStatusControl quoteId={quote.id} status={quote.status} />
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/pricing/quotes/${quote.id}/pdf`}><Download /> PDF</a>
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link href={`/pricing?quote=${quote.id}`}><Pencil /> Edit</Link>
           </Button>

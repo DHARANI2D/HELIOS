@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Ban, Bot, Building2, Crosshair, Eye, Fingerprint, Link2, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
+import { ArrowLeft, Ban, Bot, Building2, Crosshair, Download, Eye, Fingerprint, Link2, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard, type SessionUser } from "@/lib/session";
@@ -140,7 +140,12 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
             <ArrowLeft /> {user.isClient ? "Incidents" : CASE_SOURCE_LABEL[kase.sourceType]}
           </Link>
         </Button>
-        <span className="font-mono text-[11px] text-muted-foreground">{kase.id}</span>
+        <div className="flex items-center gap-3">
+          <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">{kase.id}</span>
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/cases/${kase.id}/pdf`}><Download /> Report PDF</a>
+          </Button>
+        </div>
       </div>
 
       <Card className="surface-glow">
