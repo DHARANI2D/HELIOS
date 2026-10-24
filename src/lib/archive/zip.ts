@@ -75,8 +75,14 @@ export function readZipDirectory(data: Uint8Array): ZipMember[] {
       if (id === 0x0001) {
         // Zip64: only the fields that overflowed are present, in this order.
         let q = body;
-        if (size === 0xffffffff) (size = Number(view.getBigUint64(q, true))), (q += 8);
-        if (compressedSize === 0xffffffff) (compressedSize = Number(view.getBigUint64(q, true))), (q += 8);
+        if (size === 0xffffffff) {
+          size = Number(view.getBigUint64(q, true));
+          q += 8;
+        }
+        if (compressedSize === 0xffffffff) {
+          compressedSize = Number(view.getBigUint64(q, true));
+          q += 8;
+        }
         if (localOffset === 0xffffffff) localOffset = Number(view.getBigUint64(q, true));
       } else if (id === 0x9901 && len >= 7) {
         aesVersion = view.getUint16(body, true) === 2 ? 2 : 1;
