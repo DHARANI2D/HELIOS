@@ -46,13 +46,14 @@ What changed relative to each legacy app in `legacy/components/`. It records bug
 - **Grounded agents.** The rule findings now ground the agents.
 - **Mechanical QA.** QA always includes mechanical checks: every timestamp exists, and there is no connection before process creation.
 - **Per-stage fallback.** A failed model call degrades only that stage to the deterministic engine instead of failing the investigation.
-- **ZIP intake.** ZIP bundles are expanded one level, and encrypted or binary members are reported back rather than skipped.
+- **ZIP intake.** ZIP bundles are expanded one level, with a per-member size cap against zip bombs. Encrypted or unknown binary members are reported back rather than skipped.
+- **EVTX without python-evtx.** `.evtx` files are read by a TypeScript BinXML parser (`evtx.ts`). It was checked record-for-record against python-evtx on Security, System, Application and Sysmon logs, and agreed on every record python-evtx read. It also recovers records in chunks a stale ("dirty") file header doesn't count, which python-evtx misses. Damaged records are skipped and reported.
+- **Beyond Sysmon.** Windows Security, Eventlog, Service Control Manager, PowerShell and Task Scheduler events map to UES types. New rules cover password guessing and spraying (plus a success afterwards), account creation, privileged group changes, RDP from the internet, suspicious service installs, scheduled tasks and log clearing from the native events.
+- **XLSX intake.** Excel workbooks are read directly (`xlsx.ts`): shared and inline strings, date-formatted cells as ISO times, booleans. Each sheet with a time column is investigated like CSV.
 
 **Not ported:**
-- **Binary EVTX parsing** (needed python-evtx); export Sysmon as XML or JSON instead.
-- **XLSX intake.**
 - **Encrypted-archive password prompts.**
-- **The OpenAI and Ollama providers.** Claude is the supported model provider.
+- **asip's OpenAI and Ollama clients.** Local models are supported platform-wide instead, through the OpenAI-compatible provider.
 - **Playbook RAG.**
 
 **Replaced:**

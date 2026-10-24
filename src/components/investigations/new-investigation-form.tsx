@@ -55,9 +55,9 @@ export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Ar
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="inv-files">Telemetry files</Label>
-        <Input id="inv-files" name="files" type="file" multiple accept=".json,.jsonl,.ndjson,.csv,.tsv,.xml,.log,.txt,.zip" />
+        <Input id="inv-files" name="files" type="file" multiple accept=".evtx,.xlsx,.json,.jsonl,.ndjson,.csv,.tsv,.xml,.log,.txt,.zip" />
         <p className="text-xs text-muted-foreground">
-          Sysmon (XML/JSON), CrowdStrike, Wazuh, Google SecOps UDM, Splunk CSV, generic JSON/JSONL, or plain logs. ZIPs are expanded. Up to 25 MB.
+          Windows event logs (.evtx straight from Event Viewer, or exported XML/JSON — Security, System, PowerShell, Sysmon), CrowdStrike, Wazuh, Google SecOps UDM, search exports as CSV or Excel (.xlsx), generic JSON/JSONL, or plain logs. ZIPs are expanded. Up to 25 MB per upload.
         </p>
       </div>
       <div className="grid gap-1.5">

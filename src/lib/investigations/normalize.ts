@@ -1,8 +1,10 @@
+import type { EvtxEvent } from "@/lib/investigations/evtx";
+
 // Port of asip's intake/normalizer.py and parsers/{sysmon,crowdstrike,splunk,
 // wazuh,google_secops,generic}.py — every vendor format lands in one
-// Universal Event Schema (UES). Binary EVTX isn't parsed (asip needed
-// python-evtx for that); export Sysmon as XML or JSON (Winlogbeat, Get-WinEvent
-// | ConvertTo-Json) instead.
+// Universal Event Schema (UES). Windows logs arrive as binary .evtx
+// (investigations/evtx.ts), exported XML, or JSON (Winlogbeat, Get-WinEvent
+// | ConvertTo-Json); spreadsheets as .xlsx (investigations/xlsx.ts) or CSV.
 
 export interface UesEvent {
   timestamp: Date;
@@ -80,6 +82,25 @@ function parseTime(value: unknown): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
 
+// Windows renders absent values as "-", and PIDs / logon IDs as hex.
+function win(...values: unknown[]): string | undefined {
+  for (const v of values) {
+    const s = str(v);
+    if (s && s !== "-") return s;
+  }
+  return undefined;
+}
+
+function winInt(...values: unknown[]): number | undefined {
+  for (const v of values) {
+    const s = str(v);
+    if (!s) continue;
+    const n = /^0x[0-9a-f]+$/i.test(s) ? parseInt(s, 16) : Number(s);
+    if (Number.isInteger(n)) return n;
+  }
+  return undefined;
+}
+
 function sha256From(hashes: string | undefined): string | undefined {
   if (!hashes) return undefined;
   const m = hashes.match(/SHA256=([a-fA-F0-9]{64})/);
@@ -118,7 +139,7 @@ function fromSysmonData(eventId: number, data: Rec, system: { time?: unknown; co
     eventType: SYSMON_EVENT_IDS[eventId] ?? `windows_event_${eventId}`,
     hostName: str(system.computer, data.Computer),
     hostIp: str(data.SourceIp),
-    userName: str(data.User, data.TargetUserName, data.SubjectUserName),
+    userName: str(data.User, data.user, data.TargetUserName, data.SubjectUserName),
     processName: basename(str(data.Image)) ?? str(data.ProcessName),
     processPid: int(data.ProcessId),
     parentProcessName: basename(str(data.ParentImage)),
@@ -133,6 +154,115 @@ function fromSysmonData(eventId: number, data: Rec, system: { time?: unknown; co
   });
 }
 
+// --- Windows event logs beyond Sysmon ----------------------------------------
+
+type WindowsFamily = "sysmon" | "security" | "eventlog" | "scm" | "powershell" | "taskscheduler";
+
+function windowsFamily(provider: string | undefined): WindowsFamily | null {
+  const p = (provider ?? "").toLowerCase();
+  if (p.includes("sysmon")) return "sysmon";
+  if (p.includes("security-auditing")) return "security";
+  if (p === "microsoft-windows-eventlog" || p === "eventlog") return "eventlog";
+  if (p === "service control manager") return "scm";
+  if (p.includes("powershell")) return "powershell";
+  if (p.includes("taskscheduler")) return "taskscheduler";
+  return null;
+}
+
+const WINDOWS_EVENT_TYPES: Record<Exclude<WindowsFamily, "sysmon">, Record<number, string>> = {
+  security: {
+    4624: "auth",
+    4625: "auth_failure",
+    4648: "auth_explicit",
+    4771: "auth_failure",
+    4776: "credential_validation",
+    4634: "logoff",
+    4672: "privileged_logon",
+    4688: "process_create",
+    4689: "process_terminate",
+    4697: "service_install",
+    4698: "scheduled_task_create",
+    4702: "scheduled_task_update",
+    4720: "account_created",
+    4722: "account_enabled",
+    4724: "password_reset",
+    4726: "account_deleted",
+    4728: "group_member_added",
+    4732: "group_member_added",
+    4756: "group_member_added",
+    4740: "account_locked",
+    4768: "kerberos_tgt",
+    4769: "kerberos_service_ticket",
+    5140: "share_access",
+    5145: "share_access",
+    1102: "log_cleared",
+  },
+  eventlog: { 1102: "log_cleared", 104: "log_cleared" },
+  scm: { 7045: "service_install", 7036: "service_state", 7040: "service_config" },
+  powershell: { 4104: "script_block", 4103: "pipeline_execution" },
+  taskscheduler: { 106: "scheduled_task_create", 140: "scheduled_task_update", 141: "scheduled_task_delete", 200: "scheduled_task_run" },
+};
+
+function taskCommand(xml: string | undefined) {
+  if (!xml) return undefined;
+  const cmd = xml.match(/<Command>([^<]*)<\/Command>/i)?.[1];
+  const args = xml.match(/<Arguments>([^<]*)<\/Arguments>/i)?.[1];
+  return cmd ? decodeXml([cmd, args].filter(Boolean).join(" ")) : undefined;
+}
+
+export interface WindowsEventInput {
+  provider?: string;
+  channel?: string;
+  eventId: number;
+  data: Rec;
+  time?: unknown;
+  computer?: string;
+}
+
+// Any Windows event: Sysmon keeps its own mapping; Security auditing,
+// Eventlog, Service Control Manager, PowerShell and Task Scheduler events get
+// UES types the forensic rules understand; anything else is kept as
+// windows_event_<id> with its data.
+export function fromWindowsEvent(input: WindowsEventInput): UesEvent {
+  const { eventId, data } = input;
+  const family = windowsFamily(input.provider);
+  if (family === "sysmon" || (!family && SYSMON_EVENT_IDS[eventId] && (data.UtcTime || data.Image))) {
+    return fromSysmonData(eventId, data, { time: input.time, computer: input.computer });
+  }
+  const type = family ? WINDOWS_EVENT_TYPES[family][eventId] : undefined;
+  const processCreate = type === "process_create";
+  const scriptBlock = type === "script_block";
+  return clean({
+    timestamp: parseTime(input.time) ?? new Date(),
+    platform: family === "security" ? "windows_security" : family ? `windows_${family}` : "windows",
+    eventType: type ?? `windows_event_${eventId}`,
+    hostName: str(input.computer),
+    hostIp: win(data.IpAddress, data.ClientAddress)?.replace(/^::ffff:/, ""),
+    // For a group change the user is the member added; the group stays in raw.
+    userName: type === "group_member_added" ? win(data.MemberName, data.MemberSid) : win(data.TargetUserName, data.UserId, data.SubjectUserName, data.AccountName),
+    processName: scriptBlock ? "powershell.exe" : basename(win(processCreate ? data.NewProcessName : data.ProcessName)),
+    processPid: processCreate ? winInt(data.NewProcessId) : winInt(data.ProcessId),
+    parentProcessName: processCreate ? basename(win(data.ParentProcessName)) : undefined,
+    parentProcessPid: processCreate ? winInt(data.ProcessId) : undefined,
+    commandLine: win(processCreate ? data.CommandLine : undefined, scriptBlock ? str(data.ScriptBlockText)?.slice(0, 8000) : undefined, data.ImagePath, data.ServiceFileName, taskCommand(str(data.TaskContent))),
+    filePath: win(data.ImagePath, data.ServiceFileName, data.Path, data.TaskName),
+    raw: { EventID: eventId, Provider: input.provider, Channel: input.channel, ...data },
+  });
+}
+
+export function parseEvtxEvents(events: EvtxEvent[]): ParseResult {
+  const out = events.filter((e) => e.eventId !== undefined).map((e) =>
+    fromWindowsEvent({ provider: e.provider, channel: e.channel, eventId: e.eventId!, data: { ...e.data }, time: e.timeCreated, computer: e.computer }),
+  );
+  return { platform: dominantPlatform(out, "windows"), events: out };
+}
+
+function dominantPlatform(events: UesEvent[], fallback: string) {
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.platform, (counts.get(e.platform) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? fallback;
+}
+
 function decodeXml(s: string) {
   return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 }
@@ -144,23 +274,29 @@ export function parseSysmonXml(text: string): UesEvent[] {
     if (eventId === undefined) continue;
     const time = block.match(/<TimeCreated[^>]*SystemTime=["']([^"']+)["']/)?.[1];
     const computer = block.match(/<Computer>([^<]*)<\/Computer>/)?.[1];
+    const provider = block.match(/<Provider[^>]*\sName=["']([^"']+)["']/)?.[1];
+    const channel = block.match(/<Channel>([^<]*)<\/Channel>/)?.[1];
     const data: Rec = {};
     for (const m of block.matchAll(/<Data Name=["']([^"']+)["']\s*(?:\/>|>([\s\S]*?)<\/Data>)/g)) {
       data[m[1]] = decodeXml(m[2] ?? "");
     }
-    events.push(fromSysmonData(eventId, data, { time, computer }));
+    events.push(fromWindowsEvent({ provider, channel, eventId, data, time, computer }));
   }
   return events;
 }
 
 function sysmonFromJson(rec: Rec): UesEvent | null {
-  const eventId = int(rec.EventID, rec.EventId, rec.event_id, rec.Id, get(rec, "winlog.event_id"), get(rec, "event.code"));
+  const eventId = int(rec.EventID, rec.EventId, rec.EventCode, rec.event_id, rec.Id, get(rec, "winlog.event_id"), get(rec, "event.code"));
   if (eventId === undefined) return null;
   const nested = (get(rec, "winlog.event_data") ?? rec.EventData ?? rec.event_data) as Rec | undefined;
   const data: Rec = { ...rec, ...(nested && typeof nested === "object" ? nested : {}) };
-  return fromSysmonData(eventId, data, {
-    time: rec.TimeCreated ?? rec["@timestamp"] ?? rec.timestamp,
-    computer: str(rec.Computer, rec.computer_name, get(rec, "winlog.computer_name"), get(rec, "host.name")),
+  return fromWindowsEvent({
+    provider: str(get(rec, "winlog.provider_name"), rec.ProviderName, rec.SourceName, get(rec, "Provider.Name"), typeof rec.Provider === "string" ? rec.Provider : undefined),
+    channel: str(get(rec, "winlog.channel"), rec.LogName, rec.Channel),
+    eventId,
+    data,
+    time: rec.TimeCreated ?? rec["@timestamp"] ?? rec.timestamp ?? rec._time,
+    computer: str(rec.Computer, rec.ComputerName, rec.computer_name, rec.MachineName, rec.host, get(rec, "winlog.computer_name"), get(rec, "host.name")),
   });
 }
 
@@ -399,9 +535,14 @@ function recordFormat(rec: Rec): "crowdstrike" | "sysmon" | "wazuh" | "google_se
   if ("event_simpleName" in rec || ("EventType" in rec && "aid" in rec)) return "crowdstrike";
   if (get(rec, "rule.level") !== undefined && (rec.agent || rec.decoder)) return "wazuh";
   if (get(rec, "metadata.event_type") !== undefined && (rec.principal || rec.target)) return "google_secops";
-  const id = rec.EventID ?? rec.EventId ?? rec.event_id ?? get(rec, "winlog.event_id");
-  if (id !== undefined && (rec.Image || rec.CommandLine || rec.EventData || rec.event_data || get(rec, "winlog.event_data") || rec.DestinationIp || rec.TargetFilename)) return "sysmon";
+  const id = rec.EventID ?? rec.EventId ?? rec.EventCode ?? rec.event_id ?? get(rec, "winlog.event_id");
+  if (id !== undefined && (rec.Image || rec.CommandLine || rec.EventData || rec.event_data || get(rec, "winlog.event_data") || rec.DestinationIp || rec.TargetFilename || rec.TargetUserName || rec.ProviderName || get(rec, "winlog.provider_name"))) return "sysmon";
   return "generic";
+}
+
+// Rows from a spreadsheet or any other source of flat records.
+export function parseRecords(records: Rec[]): ParseResult {
+  return fromJsonRecords(records);
 }
 
 function fromJsonRecords(records: Rec[]): ParseResult {
@@ -460,7 +601,8 @@ export function parseTelemetry(text: string, filename = ""): ParseResult {
   if (!trimmed) return { platform: "empty", events: [] };
 
   if (/<Event[\s>]/.test(trimmed) && /<EventID/.test(trimmed)) {
-    return { platform: "sysmon", events: parseSysmonXml(trimmed) };
+    const events = parseSysmonXml(trimmed);
+    return { platform: dominantPlatform(events, "sysmon"), events };
   }
 
   if (trimmed.startsWith("[") || trimmed.startsWith("{")) {

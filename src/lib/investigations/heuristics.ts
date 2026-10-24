@@ -36,6 +36,11 @@ const DISCOVERY = ["whoami", "net user", "net group", "net localgroup", "ipconfi
 const STAGING_DIRS = ["\\appdata\\", "\\temp\\", "\\tmp\\", "\\programdata\\", "\\users\\public\\", "/tmp/", "/dev/shm/"];
 const EXECUTABLE_EXT = /\.(exe|dll|scr|ps1|vbs|vbe|js|jse|hta|bat|cmd|lnk|jar)$/i;
 const STANDARD_PORTS = new Set([80, 443, 53, 8080, 8443]);
+const PRIVILEGED_GROUPS = ["administrators", "domain admins", "enterprise admins", "schema admins", "backup operators", "account operators", "server operators", "dnsadmins", "group policy creator owners", "remote desktop users"];
+// Microsoft's own drivers and accounts that Windows creates on its own.
+const TRUSTED_SERVICE_PATHS = /\\programdata\\microsoft\\windows defender\\/i;
+const BUILTIN_ACCOUNTS = ["wdagutilityaccount", "defaultaccount", "guest", "defaultuser0", "defaultuser100000"];
+const SUSPICIOUS_SERVICE = /cmd(\.exe)?\s+\/c|powershell|pwsh|%comspec%|\\temp\\|\\appdata\\|\\users\\public\\|\\programdata\\|rundll32|mshta|regsvr32|\\admin\$|\\\\127\.0\.0\.1\\/i;
 
 function finding(partial: Omit<Finding, "confidence"> & { confidence?: number }): Finding {
   return { confidence: 0.75, ...partial };
@@ -64,7 +69,9 @@ export function runForensicRules(events: UesEvent[], intel: IntelSnapshot = EMPT
     const p = proc(e);
     const parent = lower(e.parentProcessName);
 
-    if (e.eventType === "process_create") {
+    // PowerShell script blocks (4104) carry the decoded script, so the
+    // command-line rules apply to them too.
+    if (e.eventType === "process_create" || e.eventType === "script_block") {
       if (OFFICE.includes(parent) && SHELLS.includes(p)) {
         add(finding({
           ruleId: "office_child_shell",
@@ -313,6 +320,78 @@ export function runForensicRules(events: UesEvent[], intel: IntelSnapshot = EMPT
       }
     }
 
+    // --- Windows Security / System / Task Scheduler events
+    if (e.eventType === "log_cleared") {
+      add(finding({
+        ruleId: "log_clearing",
+        title: "Event logs cleared",
+        description: `The ${String(e.raw.Channel ?? "event")} log was cleared${e.userName ? ` by ${e.userName}` : ""} — evidence destruction.`,
+        severity: "HIGH",
+        detectionSource: "DEFENSE_EVASION",
+        techniques: ["T1070.001"],
+        confidence: 0.9,
+        events: [],
+      }), e);
+    }
+    const serviceCommand = `${e.commandLine ?? ""} ${e.filePath ?? ""}`;
+    if (e.eventType === "service_install" && SUSPICIOUS_SERVICE.test(serviceCommand) && !TRUSTED_SERVICE_PATHS.test(serviceCommand)) {
+      add(finding({
+        ruleId: "service_persistence",
+        title: "Suspicious service installed",
+        description: `Service ${String(e.raw.ServiceName ?? "")} runs ${e.commandLine ?? e.filePath} — a shell or a user-writable path, typical of remote execution tools and persistence.`,
+        severity: "HIGH",
+        detectionSource: "PERSISTENCE",
+        techniques: ["T1543.003", "T1569.002"],
+        confidence: 0.85,
+        events: [],
+      }), e);
+    }
+    if (e.eventType === "scheduled_task_create") {
+      add(finding({
+        ruleId: "scheduled_task_persistence",
+        title: "Scheduled task created",
+        description: `Task ${String(e.raw.TaskName ?? "")} was registered${e.commandLine ? ` to run ${e.commandLine}` : ""} — commonly used for persistence or delayed execution.`,
+        severity: SUSPICIOUS_SERVICE.test(e.commandLine ?? "") ? "HIGH" : "MEDIUM",
+        detectionSource: "PERSISTENCE",
+        techniques: ["T1053.005"],
+        events: [],
+      }), e);
+    }
+    if (e.eventType === "account_created" && !BUILTIN_ACCOUNTS.includes(lower(e.userName))) {
+      add(finding({
+        ruleId: "account_created",
+        title: "Local or domain account created",
+        description: `Account ${e.userName ?? ""} was created by ${String(e.raw.SubjectUserName ?? "an unknown user")} — attackers add accounts to keep access.`,
+        severity: "MEDIUM",
+        detectionSource: "PERSISTENCE",
+        techniques: ["T1136.001"],
+        events: [],
+      }), e);
+    }
+    if (e.eventType === "group_member_added" && PRIVILEGED_GROUPS.includes(lower(String(e.raw.TargetUserName ?? "")))) {
+      add(finding({
+        ruleId: "privileged_group_add",
+        title: "Member added to a privileged group",
+        description: `${[e.raw.MemberName, e.raw.MemberSid].map((v) => String(v ?? "")).find((v) => v && v !== "-") ?? "An account"} was added to ${String(e.raw.TargetUserName)} by ${String(e.raw.SubjectUserName ?? "an unknown user")}.`,
+        severity: "HIGH",
+        detectionSource: "ANOMALOUS_ACTION",
+        techniques: ["T1098"],
+        confidence: 0.8,
+        events: [],
+      }), e);
+    }
+    if (e.eventType === "auth" && String(e.raw.LogonType ?? "") === "10" && e.hostIp && /^\d{1,3}(\.\d{1,3}){3}$/.test(e.hostIp) && !isPrivateIp(e.hostIp)) {
+      add(finding({
+        ruleId: "external_rdp_logon",
+        title: "Remote Desktop logon from the internet",
+        description: `${e.userName ?? "An account"} logged on over RDP from public address ${e.hostIp}.`,
+        severity: "MEDIUM",
+        detectionSource: "ANOMALOUS_ACTION",
+        techniques: ["T1021.001", "T1133"],
+        events: [],
+      }), e);
+    }
+
     if (e.eventType === "dns_query" && e.query && e.query.split(".")[0].length > 40) {
       add(finding({
         ruleId: "dns_tunneling",
@@ -325,6 +404,8 @@ export function runForensicRules(events: UesEvent[], intel: IntelSnapshot = EMPT
       }), e);
     }
   }
+
+  out.push(...credentialAttacks(events));
 
   // Discovery burst: several distinct recon commands from one host within 10 min.
   const discovery = events.filter((e) => e.eventType === "process_create" && DISCOVERY.some((d) => cmd(e).includes(d)));
@@ -353,6 +434,70 @@ export function runForensicRules(events: UesEvent[], intel: IntelSnapshot = EMPT
 }
 
 // Techniques the deterministic rules can emit — feeds the coverage matrix.
+// Failed-logon patterns from Windows Security logs: many failures against one
+// account (guessing), or one source failing across many accounts (spraying).
+// A success for the same account or source afterwards makes it critical.
+const BRUTE_WINDOW_MS = 15 * 60_000;
+const BRUTE_MIN_FAILURES = 10;
+const SPRAY_MIN_ACCOUNTS = 5;
+
+function credentialAttacks(events: UesEvent[]): Finding[] {
+  const failures = events.filter((e) => e.eventType === "auth_failure").sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  const successes = events.filter((e) => e.eventType === "auth");
+  const out: Finding[] = [];
+  const burst = (list: UesEvent[]) => {
+    for (let i = 0; i < list.length; i++) {
+      let j = i;
+      while (j + 1 < list.length && list[j + 1].timestamp.getTime() - list[i].timestamp.getTime() <= BRUTE_WINDOW_MS) j++;
+      if (j - i + 1 >= BRUTE_MIN_FAILURES || new Set(list.slice(i, j + 1).map((e) => lower(e.userName))).size >= SPRAY_MIN_ACCOUNTS) return list.slice(i, j + 1);
+    }
+    return null;
+  };
+  const after = (window: UesEvent[], match: (s: UesEvent) => boolean) => {
+    const start = window[0].timestamp.getTime();
+    return successes.find((s) => match(s) && s.timestamp.getTime() >= start && s.timestamp.getTime() - window[window.length - 1].timestamp.getTime() <= 30 * 60_000);
+  };
+
+  const byUser = new Map<string, UesEvent[]>();
+  for (const e of failures) if (e.userName) byUser.set(lower(e.userName), [...(byUser.get(lower(e.userName)) ?? []), e]);
+  for (const [user, list] of byUser) {
+    const window = list.length >= BRUTE_MIN_FAILURES ? burst(list) : null;
+    if (!window || window.length < BRUTE_MIN_FAILURES) continue;
+    const success = after(window, (s) => lower(s.userName) === user);
+    out.push({
+      ruleId: "brute_force",
+      title: success ? "Password guessing followed by a successful logon" : "Password guessing against one account",
+      description: `${window.length} failed logons for ${window[0].userName} within ${Math.max(1, Math.round((window[window.length - 1].timestamp.getTime() - window[0].timestamp.getTime()) / 60_000))} min${success ? `, then a successful logon at ${success.timestamp.toISOString().slice(11, 19)} UTC` : ""}.`,
+      severity: success ? "CRITICAL" : "HIGH",
+      detectionSource: "CREDENTIAL_HARVESTING",
+      techniques: ["T1110.001"],
+      confidence: success ? 0.9 : 0.75,
+      events: success ? [...window, success] : window,
+    });
+  }
+
+  const bySource = new Map<string, UesEvent[]>();
+  for (const e of failures) if (e.hostIp) bySource.set(e.hostIp, [...(bySource.get(e.hostIp) ?? []), e]);
+  for (const [source, list] of bySource) {
+    const window = burst(list);
+    if (!window) continue;
+    const accounts = new Set(window.map((e) => lower(e.userName)));
+    if (accounts.size < SPRAY_MIN_ACCOUNTS) continue;
+    const success = after(window, (s) => s.hostIp === source);
+    out.push({
+      ruleId: "password_spraying",
+      title: success ? "Password spraying followed by a successful logon" : "Password spraying from one source",
+      description: `${source} failed to log on to ${accounts.size} different accounts within ${BRUTE_WINDOW_MS / 60_000} min${success ? `, then logged on as ${success.userName}` : ""}.`,
+      severity: success ? "CRITICAL" : "HIGH",
+      detectionSource: "CREDENTIAL_HARVESTING",
+      techniques: ["T1110.003"],
+      confidence: success ? 0.9 : 0.8,
+      events: success ? [...window, success] : window,
+    });
+  }
+  return out;
+}
+
 export const INVESTIGATION_RULE_TECHNIQUES: Array<{ rule: string; techniques: string[] }> = [
   { rule: "office_child_shell", techniques: ["T1566.001", "T1204.002"] },
   { rule: "webserver_child_shell", techniques: ["T1190", "T1505.003"] },
@@ -374,6 +519,11 @@ export const INVESTIGATION_RULE_TECHNIQUES: Array<{ rule: string; techniques: st
   { rule: "non_standard_port", techniques: ["T1571"] },
   { rule: "dns_tunneling", techniques: ["T1071.004", "T1048.003"] },
   { rule: "discovery_burst", techniques: ["T1087", "T1082", "T1016"] },
+  { rule: "brute_force", techniques: ["T1110.001"] },
+  { rule: "password_spraying", techniques: ["T1110.003"] },
+  { rule: "account_created", techniques: ["T1136.001"] },
+  { rule: "privileged_group_add", techniques: ["T1098"] },
+  { rule: "external_rdp_logon", techniques: ["T1021.001", "T1133"] },
 ];
 
 // ---------------------------------------------------------------------------

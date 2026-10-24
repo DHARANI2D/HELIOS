@@ -34,7 +34,7 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
 ### AI first responder (`lib/ai`)
 
 1. **Schedule.** `scheduleFirstResponse` queues new cases at or above the configured severity. A small concurrency limiter caps how many run at once.
-2. **Evidence.** `gatherEvidence` renders the case into numbered evidence (`D1`, `E3`, `I2`, `T1`, `C1`). The agent must cite those refs.
+2. **Evidence.** `gatherEvidence` renders the case into numbered evidence (`D1`, `E3`, `I2`, `T1`, `C1`). The agent must cite those refs. Events are capped at 80, chosen by severity hint before time: the vendor's hint for ingested telemetry, or the worst finding that flagged them for an uploaded log, so a large case leads with what the rules found.
 3. **Grounding.** `groundTriage` rejects claims and action targets that aren't in that evidence.
 4. **Providers.** `resolveProvider` picks the engine:
    1. `HELIOS_AI_ENGINE=builtin` forces the built-in engine;
@@ -101,9 +101,13 @@ Detectors are pure; the threat-intel detector matches against an intel snapshot 
 
 ### Investigations (`lib/investigations`)
 
-1. **Intake.** Uploads (ZIPs expanded) and pasted logs are auto-detected and normalized to the Universal Event Schema (`normalize.ts`). They are stored as `SecurityEvent` rows tied to the case.
+1. **Intake.** Uploads and pasted logs are auto-detected and normalized to the Universal Event Schema (`normalize.ts`), then stored as `SecurityEvent` rows tied to the case.
+   - ZIPs are expanded.
+   - Binary `.evtx` goes through `evtx.ts`, a dependency-free BinXML reader with template and name caches; damaged records are skipped and reported.
+   - `.xlsx` goes through `xlsx.ts`. Each sheet with a time column is read like CSV, and other sheets are reported.
+   - Windows events map by provider: Sysmon, Security auditing, Eventlog, Service Control Manager, PowerShell, Task Scheduler.
 2. **Respond, then run.** The Server Action returns immediately. `after()` runs `runInvestigationPipeline`, which writes progress into `Case.metadata.pipeline`, and the case page polls it.
-3. **Pipeline.** It builds the entity graph (process lineage, network, DNS, files) and runs 20 deterministic forensic rules. It then runs: triage → RCA → QA (RCA is rebuilt with QA's objections, up to 3 rounds) → report.
+3. **Pipeline.** It builds the entity graph (process lineage, network, DNS, files) and runs the deterministic forensic rules. These cover process, network and DNS behaviour and Windows-native events (logon attacks, account and group changes, services, tasks, log clearing). It then runs: triage → RCA → QA (RCA is rebuilt with QA's objections, up to 3 rounds) → report.
    - With `ANTHROPIC_API_KEY`, each stage is a Claude call with structured output (Zod schemas), grounded in the rule findings, graph and events. Refusal fallbacks route to Anthropic's recommended fallback model.
    - A stage whose model call fails falls back to the deterministic engine and records a note.
    - Mechanical QA checks are always merged into the QA result: every timeline timestamp must exist in the events, and no process may connect out before it was created.

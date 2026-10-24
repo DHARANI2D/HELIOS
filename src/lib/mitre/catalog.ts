@@ -86,6 +86,7 @@ export const TECHNIQUES: TechniqueRef[] = [
   { id: "T1543", name: "Create or Modify System Process", tactic: "TA0003" },
   { id: "T1543.003", name: "Windows Service", tactic: "TA0003" },
   { id: "T1136", name: "Create Account", tactic: "TA0003" },
+  { id: "T1136.001", name: "Local Account", tactic: "TA0003" },
   { id: "T1098", name: "Account Manipulation", tactic: "TA0003" },
   { id: "T1505", name: "Server Software Component", tactic: "TA0003" },
   { id: "T1505.003", name: "Web Shell", tactic: "TA0003" },

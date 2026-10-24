@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { unzipSync } from "fflate";
+import { unzipSync, type Unzipped } from "fflate";
 import type { CaseSeverity, Prisma, SecurityEvent } from "@prisma/client";
 
 import { db } from "@/lib/db";
@@ -7,7 +7,9 @@ import { logAction } from "@/lib/audit";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
 import { findRelatedCases } from "@/lib/cases/related";
 import { extractIndicators, isPrivateIp } from "@/lib/threat-intel/indicators";
-import { parseTelemetry, type UesEvent } from "@/lib/investigations/normalize";
+import { parseEvtxEvents, parseRecords, parseTelemetry, type ParseResult, type UesEvent } from "@/lib/investigations/normalize";
+import { isEvtx, parseEvtx } from "@/lib/investigations/evtx";
+import { isXlsx, readXlsx } from "@/lib/investigations/xlsx";
 import { buildEntityGraph, type EntityGraph } from "@/lib/investigations/graph";
 import {
   describeEvent,
@@ -85,43 +87,105 @@ function looksBinary(bytes: Uint8Array) {
   return nul > sample.length * 0.01;
 }
 
+export interface ParsedSource extends ParseResult {
+  name: string;
+}
+
+const TIME_COLUMN = /time|date|timestamp|^_time$|^ts$|utctime|created|when/i;
+
+// Uncompressed size cap per archive member, so a small ZIP can't expand
+// into gigabytes in memory.
+const MAX_MEMBER_BYTES = 200 * 1024 * 1024;
+
+function unzipBounded(bytes: Uint8Array, name: string, skipped: string[]) {
+  return unzipSync(bytes, {
+    filter: (f) => {
+      if (f.originalSize <= MAX_MEMBER_BYTES) return true;
+      skipped.push(`${name}/${f.name} (over ${MAX_MEMBER_BYTES / 1024 / 1024} MB uncompressed)`);
+      return false;
+    },
+  });
+}
+
+// Binary formats parsed directly: Windows event logs and Excel workbooks.
+function parseBinary(name: string, bytes: Uint8Array, entries: Unzipped | null, skipped: string[]): ParsedSource[] | null {
+  if (isEvtx(bytes)) {
+    const res = parseEvtx(bytes, { maxEvents: MAX_EVENTS + 1 });
+    if (res.errors.length) skipped.push(`${name} (${res.errors.length} damaged record${res.errors.length === 1 ? "" : "s"} skipped: ${res.errors[0]})`);
+    return [{ name, ...parseEvtxEvents(res.events) }];
+  }
+  if (entries && isXlsx(entries)) {
+    // Only sheets that read as event logs: rows with a time column. A notes
+    // or summary sheet would otherwise become events stamped "now".
+    const sources: ParsedSource[] = [];
+    for (const sheet of readXlsx(entries)) {
+      if (sheet.rows.length === 0) continue;
+      const columns = new Set(sheet.rows.flatMap((r) => Object.keys(r)));
+      if (![...columns].some((c) => TIME_COLUMN.test(c))) {
+        skipped.push(`${name} › ${sheet.name} (no time column)`);
+        continue;
+      }
+      sources.push({ name: `${name} › ${sheet.name}`, ...parseRecords(sheet.rows) });
+    }
+    return sources;
+  }
+  return null;
+}
+
 // asip's IntakeGateway recursively extracted ZIP/7z (prompting for archive
-// passwords). Here: ZIPs are expanded one level; encrypted or binary members
-// are reported back rather than silently skipped.
-export function expandIntake(files: IntakeFile[]): { texts: Array<{ name: string; text: string }>; skipped: string[] } {
+// passwords). Here: ZIPs are expanded one level; EVTX and XLSX are parsed
+// from their binary form, anywhere; encrypted or unknown binary members are
+// reported back rather than silently skipped.
+export function expandIntake(files: IntakeFile[]): { texts: Array<{ name: string; text: string }>; parsed: ParsedSource[]; skipped: string[] } {
   const texts: Array<{ name: string; text: string }> = [];
+  const parsed: ParsedSource[] = [];
   const skipped: string[] = [];
+
+  const take = (name: string, bytes: Uint8Array) => {
+    const zipped = bytes[0] === 0x50 && bytes[1] === 0x4b;
+    let entries: Unzipped | null = null;
+    if (zipped) {
+      try {
+        entries = unzipBounded(bytes, name, skipped);
+      } catch (err) {
+        skipped.push(`${name} (cannot extract: ${err instanceof Error ? err.message : "invalid archive"} — encrypted archives aren't supported)`);
+        return;
+      }
+    }
+    const binary = parseBinary(name, bytes, entries, skipped);
+    if (binary) {
+      parsed.push(...binary);
+      return;
+    }
+    if (entries) {
+      for (const [member, data] of Object.entries(entries)) {
+        if (member.endsWith("/")) continue;
+        const memberName = `${name}/${member}`;
+        const nested = data[0] === 0x50 && data[1] === 0x4b ? (() => { try { return unzipBounded(data, memberName, skipped); } catch { return null; } })() : null;
+        const inner = parseBinary(memberName, data, nested, skipped);
+        if (inner) parsed.push(...inner);
+        else if (looksBinary(data)) skipped.push(`${memberName} (unsupported binary format)`);
+        else texts.push({ name: memberName, text: TEXT_DECODER.decode(data) });
+      }
+      return;
+    }
+    if (looksBinary(bytes)) skipped.push(`${name} (unsupported binary format)`);
+    else texts.push({ name, text: TEXT_DECODER.decode(bytes) });
+  };
+
   for (const file of files) {
     if (file.bytes.byteLength > MAX_FILE_BYTES) {
       skipped.push(`${file.name} (over ${MAX_FILE_BYTES / 1024 / 1024} MB)`);
       continue;
     }
-    if (file.name.toLowerCase().endsWith(".zip") || (file.bytes[0] === 0x50 && file.bytes[1] === 0x4b)) {
-      let entries: Record<string, Uint8Array>;
-      try {
-        entries = unzipSync(file.bytes);
-      } catch (err) {
-        skipped.push(`${file.name} (cannot extract: ${err instanceof Error ? err.message : "invalid archive"} — encrypted archives aren't supported)`);
-        continue;
-      }
-      for (const [name, bytes] of Object.entries(entries)) {
-        if (name.endsWith("/")) continue;
-        if (looksBinary(bytes)) skipped.push(`${file.name}/${name} (binary — export EVTX as XML/JSON)`);
-        else texts.push({ name: `${file.name}/${name}`, text: TEXT_DECODER.decode(bytes) });
-      }
-      continue;
-    }
-    if (looksBinary(file.bytes)) {
-      skipped.push(`${file.name} (binary — export EVTX as XML/JSON)`);
-      continue;
-    }
-    texts.push({ name: file.name, text: TEXT_DECODER.decode(file.bytes) });
+    take(file.name, file.bytes);
   }
-  return { texts, skipped };
+  return { texts, parsed, skipped };
 }
 
+const AUTH_TYPES = new Set(["auth", "auth_failure", "auth_explicit", "credential_validation", "logoff", "privileged_logon", "kerberos_tgt", "kerberos_service_ticket", "account_locked"]);
 const SOURCE_FOR_TYPE = (eventType: string) =>
-  eventType === "auth" ? "auth" : eventType.startsWith("network") || eventType === "dns_query" ? "network" : "endpoint";
+  AUTH_TYPES.has(eventType) ? "auth" : eventType.startsWith("network") || eventType === "dns_query" ? "network" : "endpoint";
 
 function toRow(e: UesEvent, caseId: string, batchId: string): Prisma.SecurityEventCreateManyInput {
   return {
@@ -186,10 +250,10 @@ async function pipelineEngine() {
 }
 
 export async function startInvestigation(input: StartInvestigationInput) {
-  const { texts, skipped } = expandIntake(input.files);
+  const { texts, parsed: binary, skipped } = expandIntake(input.files);
   if (input.pastedLogs?.trim()) texts.push({ name: "pasted-logs", text: input.pastedLogs });
 
-  const parsed = texts.map((t) => ({ name: t.name, ...parseTelemetry(t.text, t.name) }));
+  const parsed = [...binary, ...texts.map((t) => ({ name: t.name, ...parseTelemetry(t.text, t.name) }))];
   const events = parsed.flatMap((p) => p.events);
   if (events.length === 0) {
     throw new Error(skipped.length ? `No parsable events. Skipped: ${skipped.join("; ")}` : "No parsable events in the supplied logs");
@@ -325,10 +389,37 @@ const SEVERITY_FROM_TRIAGE: Record<TriageResult["severity"], CaseSeverity> = {
   info: "INFO",
 };
 
+const SEVERITY_ORDER: CaseSeverity[] = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
+// Stamps each flagged event with the worst severity among the findings that
+// cite it. The AI first responder's evidence window is capped, and reads
+// these hints so a large upload shows it what the rules found rather than
+// the log's first minutes.
+async function markFlaggedEvents(rows: SecurityEvent[], events: UesEvent[], findings: Finding[]) {
+  const rowId = new Map(events.map((e, i) => [e, rows[i].id]));
+  const worst = new Map<string, CaseSeverity>();
+  for (const f of findings) {
+    for (const e of f.events) {
+      const id = rowId.get(e);
+      const prev = id && worst.get(id);
+      if (id && (!prev || SEVERITY_ORDER.indexOf(f.severity) > SEVERITY_ORDER.indexOf(prev))) worst.set(id, f.severity);
+    }
+  }
+  const bySeverity = new Map<CaseSeverity, string[]>();
+  for (const [id, severity] of worst) bySeverity.set(severity, [...(bySeverity.get(severity) ?? []), id]);
+  for (const [severity, ids] of bySeverity) {
+    for (let i = 0; i < ids.length; i += 5000) {
+      await db.securityEvent.updateMany({ where: { id: { in: ids.slice(i, i + 5000) } }, data: { severityHint: severity.toLowerCase() } });
+    }
+  }
+}
+
 function indicatorsFrom(events: UesEvent[]): NewIndicator[] {
   const out: NewIndicator[] = [];
   for (const e of events) {
     if (e.dstIp && !isPrivateIp(e.dstIp)) out.push({ type: "IP", value: e.dstIp, role: "destination_ip" });
+    // Where a logon came from, when that's on the internet.
+    if (AUTH_TYPES.has(e.eventType) && e.hostIp && /^\d{1,3}(\.\d{1,3}){3}$/.test(e.hostIp) && !isPrivateIp(e.hostIp)) out.push({ type: "IP", value: e.hostIp, role: "logon_source_ip" });
     if (e.fileHash && /^[a-f0-9]{64}$/.test(e.fileHash)) out.push({ type: "FILE_HASH", value: e.fileHash, role: "file_sha256" });
     if (e.query) out.push({ type: "DOMAIN", value: e.query.toLowerCase(), role: "dns_query" });
     if (e.commandLine) for (const ioc of extractIndicators(e.commandLine)) out.push({ ...ioc, role: "command_line" });
@@ -349,6 +440,7 @@ export async function runInvestigationPipeline(caseId: string) {
     const intel = await loadIntelSnapshot(events.map((e) => ({ type: "IP" as const, value: e.dstIp })));
     const findings = runForensicRules(events, intel);
     const flaggedEvents = [...new Set(findings.flatMap((f) => f.events))];
+    await markFlaggedEvents(rows, events, findings);
     const prior: PriorCase[] = (
       await findRelatedCases(caseId, { limit: 5, extraIndicators: indicatorsFrom(flaggedEvents.length ? flaggedEvents : events) })
     ).map((c) => ({

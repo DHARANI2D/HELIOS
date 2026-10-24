@@ -1,4 +1,4 @@
-import type { CaseSeverity, CaseSource, DetectionSource, SecurityDomain } from "@prisma/client";
+import type { CaseSeverity, CaseSource, DetectionSource, Prisma, SecurityDomain, SecurityEvent } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { findRelatedCases } from "@/lib/cases/related";
@@ -52,6 +52,25 @@ const MAX_DETECTIONS = 40;
 const MAX_INDICATORS = 40;
 const MAX_TIMELINE = 40;
 
+// Events beyond the cap are chosen by severity hint (the vendor's, or the
+// investigation rules' for uploaded logs) before time, so a large case shows
+// the model what was flagged rather than whatever happened first. Returned
+// most severe first; entities are ranked in that order.
+const NOTABLE = ["critical", "high", "medium"];
+const EVENT_TIERS: Prisma.SecurityEventWhereInput[] = [
+  ...NOTABLE.map((severityHint) => ({ severityHint })),
+  { OR: [{ severityHint: null }, { severityHint: { notIn: NOTABLE } }] },
+];
+
+async function selectEvents(caseId: string) {
+  const picked: SecurityEvent[] = [];
+  for (const tier of EVENT_TIERS) {
+    if (picked.length >= MAX_EVENTS) break;
+    picked.push(...(await db.securityEvent.findMany({ where: { caseId, ...tier }, orderBy: { timestamp: "asc" }, take: MAX_EVENTS - picked.length })));
+  }
+  return picked;
+}
+
 function uniq(values: Array<string | null | undefined>) {
   return [...new Set(values.filter((v): v is string => !!v && v.trim() !== "" && v !== "unknown"))];
 }
@@ -68,10 +87,11 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
       detections: { orderBy: { createdAt: "asc" }, take: MAX_DETECTIONS },
       indicators: { include: { indicator: true }, take: MAX_INDICATORS },
       mitreTechniques: { select: { techniqueId: true } },
-      events: { orderBy: { timestamp: "asc" }, take: MAX_EVENTS },
       timeline: { orderBy: { occurredAt: "asc" }, take: MAX_TIMELINE },
     },
   });
+  const ranked = await selectEvents(caseId);
+  const events = [...ranked].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   const meta = (kase.metadata ?? {}) as Record<string, unknown>;
 
   const refs: EvidenceRef[] = [];
@@ -85,8 +105,8 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
     const score = ind.maliciousScore != null ? ` reputation=${ind.maliciousScore.toFixed(2)}` : "";
     refs.push({ ref: `I${i + 1}`, kind: "indicator", text: `${ind.type} ${ind.value}${ci.role ? ` role=${ci.role}` : ""}${score}${ind.blockedAt ? " (already blocked)" : ""}` });
   });
-  if (kase.events.length) {
-    kase.events.forEach((e, i) => {
+  if (events.length) {
+    events.forEach((e, i) => {
       const parts = [
         e.timestamp.toISOString().slice(0, 19).replace("T", " "),
         e.eventType,
@@ -126,13 +146,13 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
   const riskType = typeof meta.riskObjectType === "string" ? meta.riskObjectType : null;
 
   const entities: CaseEntities = {
-    hosts: uniq([...kase.events.map((e) => e.hostName), meta.hostName as string | undefined, riskType === "host" ? riskObject : null]),
-    users: uniq([...kase.events.map((e) => e.userName), meta.userName as string | undefined, riskType === "user" ? riskObject : null]),
-    ips: uniq([...byType("IP"), ...kase.events.flatMap((e) => [e.sourceIp, e.destIp]), riskType === "ip" ? riskObject : null]),
+    hosts: uniq([...ranked.map((e) => e.hostName), meta.hostName as string | undefined, riskType === "host" ? riskObject : null]),
+    users: uniq([...ranked.map((e) => e.userName), meta.userName as string | undefined, riskType === "user" ? riskObject : null]),
+    ips: uniq([...byType("IP"), ...ranked.flatMap((e) => [e.sourceIp, e.destIp]), riskType === "ip" ? riskObject : null]),
     domains: uniq(byType("DOMAIN")),
-    hashes: uniq([...byType("FILE_HASH"), ...kase.events.map((e) => e.fileHash)]).map((h) => h.toLowerCase()),
+    hashes: uniq([...byType("FILE_HASH"), ...ranked.map((e) => e.fileHash)]).map((h) => h.toLowerCase()),
     emails: uniq([...byType("EMAIL_ADDRESS"), headers?.fromAddress as string | undefined]).map((e) => e.toLowerCase()),
-    processes: uniq(kase.events.flatMap((e) => [e.processName && basename(e.processName), e.parentProcessName && basename(e.parentProcessName)])),
+    processes: uniq(ranked.flatMap((e) => [e.processName && basename(e.processName), e.parentProcessName && basename(e.parentProcessName)])),
     agents: kase.sourceType === "AGENT_GOVERNANCE" ? uniq([kase.sourceRef, meta.agentName as string | undefined]) : [],
   };
 

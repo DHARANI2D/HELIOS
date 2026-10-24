@@ -18,11 +18,13 @@ import { invalidateCatalog } from "@/lib/integrations/tools";
 import { ingestTelemetry } from "@/lib/siem/service";
 import { importFeed } from "@/lib/threat-intel/feeds";
 import { CATALOG_TOOLS } from "../../../prisma/seed-data/tools";
+import { buildEvtx } from "@/lib/__tests__/fixtures/evtx-builder";
 import { SAMPLE_INVESTIGATION } from "@/lib/__tests__/fixtures/investigations";
 import { runInvestigationPipeline, startInvestigation } from "@/lib/investigations/service";
 import { buildSampleEmail } from "@/lib/__tests__/fixtures/forensics";
 import { analyzeSubmission } from "@/lib/forensics/service";
 import { findRelatedCases } from "@/lib/cases/related";
+import { gatherEvidence } from "@/lib/ai/evidence";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -138,6 +140,33 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(kase._count.events).toBe(21);
     expect(kase._count.detections).toBeGreaterThanOrEqual(8);
     expect(kase.mitreTechniques.map((t) => t.techniqueId)).toContain("T1003.001");
+  });
+
+  it("investigates an uploaded Windows event log", async () => {
+    const t = (s: number) => new Date(Date.UTC(2026, 9, 20, 8, 0, s));
+    const security = "Microsoft-Windows-Security-Auditing";
+    const evtx = buildEvtx([
+      // An hour of routine service logons the evidence window must look past.
+      ...Array.from({ length: 100 }, (_, i) => ({ provider: security, eventId: 4624, time: new Date(Date.UTC(2026, 9, 20, 7, 0, i * 30)), computer: "DC-01.corp.test", data: { TargetUserName: "svc-backup", IpAddress: "10.0.0.5", LogonType: "3" } })),
+      ...Array.from({ length: 12 }, (_, i) => ({ provider: security, eventId: 4625, time: t(i * 5), computer: "DC-01.corp.test", data: { TargetUserName: "alice", IpAddress: "198.51.100.40", LogonType: "3" } })),
+      { provider: security, eventId: 4624, time: t(70), computer: "DC-01.corp.test", data: { TargetUserName: "alice", IpAddress: "198.51.100.40", LogonType: "10" } },
+      { provider: security, eventId: 1102, time: t(90), computer: "DC-01.corp.test", data: { TargetUserName: "alice" } },
+    ]);
+    const { caseId, eventCount } = await startInvestigation({ title: "Logon storm on DC-01", alertDetails: "", files: [{ name: "Security.evtx", bytes: evtx }], actorId: adminId });
+    expect(eventCount).toBe(114);
+    await runInvestigationPipeline(caseId);
+    const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { detections: true, mitreTechniques: true, indicators: { include: { indicator: true } } } });
+    expect(kase.detections.map((d) => d.ruleId)).toEqual(expect.arrayContaining(["investigation:brute_force", "investigation:log_clearing", "investigation:external_rdp_logon"]));
+    expect(kase.severity).toBe("CRITICAL");
+    expect(kase.mitreTechniques.map((m) => m.techniqueId)).toEqual(expect.arrayContaining(["T1110.001", "T1070.001"]));
+    expect(kase.indicators.some((i) => i.indicator.value === "198.51.100.40")).toBe(true);
+
+    // The first responder's evidence leads with what the rules flagged.
+    const events = (await gatherEvidence(caseId)).refs.filter((r) => r.kind === "event").map((r) => r.text);
+    expect(events).toHaveLength(80);
+    expect(events.filter((t) => t.includes("auth_failure"))).toHaveLength(12);
+    expect(events.some((t) => t.includes("log_cleared"))).toBe(true);
+    expect(events.some((t) => t.includes("user=svc-backup"))).toBe(true); // the rest is filled with context
   });
 
   it("links a repeat intrusion to the earlier case and cites it in the RCA", async () => {
