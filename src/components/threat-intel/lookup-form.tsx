@@ -82,7 +82,7 @@ export function LookupForm() {
           )}
           {result.providersConfigured.length === 0 && (
             <p className="mt-3 text-xs text-muted-foreground">
-              No external providers configured — set VIRUSTOTAL_API_KEY / ABUSEIPDB_API_KEY for provider verdicts. Built-in intel was applied.
+              No external providers configured — an admin can add VirusTotal or AbuseIPDB keys under Settings. Built-in intel was applied.
             </p>
           )}
           {result.errors.map((e) => (

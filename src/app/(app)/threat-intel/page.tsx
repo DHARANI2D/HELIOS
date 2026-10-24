@@ -59,7 +59,7 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
   if (risk === "suspicious") where.maliciousScore = { gte: 0.4 };
   if (risk === "blocked") where.blockedAt = { not: null };
 
-  const configured = new Set(configuredProviders());
+  const configured = new Set(await configuredProviders());
 
   const [indicators, total, tracked, malicious, suspicious, blocked, feeds] = await Promise.all([
     db.threatIndicator.findMany({
@@ -121,7 +121,11 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
                 {configured.has(p.id) ? (
                   <Badge variant="success">Configured</Badge>
                 ) : (
-                  <Badge variant="outline" title={`Set ${p.env} to enable`}>Set {p.env}</Badge>
+                  can(user, "settings.manage") ? (
+                    <Badge variant="outline" asChild><Link href="/settings">Add key in Settings</Link></Badge>
+                  ) : (
+                    <Badge variant="outline" title={`An admin adds the key under Settings (or sets ${p.env})`}>Not configured</Badge>
+                  )
                 )}
               </div>
             ))}

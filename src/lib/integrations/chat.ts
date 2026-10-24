@@ -1,16 +1,17 @@
 import { db } from "@/lib/db";
 import { readSecrets } from "@/lib/integrations/dispatch";
+import { platformSecret } from "@/lib/platform-secrets";
 
 // Posts to the client's (or the SOC's own) Slack / Teams channel through the
-// incoming webhook stored on a chat integration; falls back to
-// SLACK_WEBHOOK_URL for the SOC's own channel.
+// incoming webhook stored on a chat integration; falls back to the SOC's own
+// webhook (Settings, or SLACK_WEBHOOK_URL).
 
 export async function dispatchChatMessage(tenantId: string | null, text: string): Promise<{ sent: boolean; message: string }> {
   const chat = await db.integration.findFirst({
     where: { category: "chatops", enabled: true, OR: [{ tenantId }, { tenantId: null }] },
     orderBy: [{ tenantId: { sort: "desc", nulls: "last" } }, { createdAt: "asc" }],
   });
-  const webhook = chat ? readSecrets(chat.secretCipher).chatWebhookUrl : process.env.SLACK_WEBHOOK_URL;
+  const webhook = chat ? readSecrets(chat.secretCipher).chatWebhookUrl : await platformSecret("slackWebhook");
   if (!webhook) return { sent: false, message: "No chat channel connected (add Slack or Teams under Tools & Integrations)" };
   try {
     const res = await fetch(webhook, {

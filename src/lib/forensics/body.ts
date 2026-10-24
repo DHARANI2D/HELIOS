@@ -24,13 +24,14 @@ const BRAND_DOMAINS = new Set(["microsoft.com", "office.com", "office365.com", "
 const CRED_KEYWORDS = ["password", "credential", "login", "log in", "sign in", "verify your account", "access suspended", "confirm your identity", "mailbox"];
 const LURE_KEYWORDS = ["invoice", "payment", "overdue", "receipt", "wire transfer", "remittance", "winning", "lottery", "gift card"];
 
-// desas's default whitelist plus anything in FORENSICS_DOMAIN_WHITELIST.
-export function domainWhitelist(): string[] {
+// desas's default whitelist plus FORENSICS_DOMAIN_WHITELIST and the domains
+// saved under Settings → Forensics.
+export function domainWhitelist(saved: string[] = []): string[] {
   const extra = (process.env.FORENSICS_DOMAIN_WHITELIST ?? "")
     .split(",")
     .map((d) => d.trim().toLowerCase())
     .filter(Boolean);
-  return [...new Set(["google.com", "microsoft.com", "office.com", "live.com", ...extra])];
+  return [...new Set(["google.com", "microsoft.com", "office.com", "live.com", ...extra, ...saved])];
 }
 
 export function analyzeBody(text: string, html: string | undefined, whitelist = domainWhitelist()): BodyAnalysis {

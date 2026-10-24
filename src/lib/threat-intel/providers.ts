@@ -1,4 +1,5 @@
 import type { IndicatorType } from "@prisma/client";
+import { platformSecret } from "@/lib/platform-secrets";
 
 // Provider clients ported from signal-fusion's threatIntelService (VirusTotal
 // v3 + AbuseIPDB v2) and desas's body.check_url_intel. Each returns a
@@ -19,10 +20,11 @@ export interface ProviderError {
 
 const TIMEOUT_MS = 10_000;
 
-export function configuredProviders(): Array<ProviderResult["provider"]> {
+export async function configuredProviders(): Promise<Array<ProviderResult["provider"]>> {
+  const [vt, abuse] = await Promise.all([platformSecret("virustotal"), platformSecret("abuseipdb")]);
   const out: Array<ProviderResult["provider"]> = [];
-  if (process.env.VIRUSTOTAL_API_KEY) out.push("virustotal");
-  if (process.env.ABUSEIPDB_API_KEY) out.push("abuseipdb");
+  if (vt) out.push("virustotal");
+  if (abuse) out.push("abuseipdb");
   return out;
 }
 
@@ -59,7 +61,7 @@ function vtPath(type: IndicatorType, value: string): string | null {
 }
 
 async function queryVirusTotal(type: IndicatorType, value: string): Promise<ProviderResult | ProviderError | null> {
-  const key = process.env.VIRUSTOTAL_API_KEY;
+  const key = await platformSecret("virustotal");
   const path = vtPath(type, value);
   if (!key || !path) return null;
 
@@ -101,7 +103,7 @@ async function queryVirusTotal(type: IndicatorType, value: string): Promise<Prov
 }
 
 async function queryAbuseIpDb(type: IndicatorType, value: string): Promise<ProviderResult | ProviderError | null> {
-  const key = process.env.ABUSEIPDB_API_KEY;
+  const key = await platformSecret("abuseipdb");
   if (!key || type !== "IP") return null;
 
   try {

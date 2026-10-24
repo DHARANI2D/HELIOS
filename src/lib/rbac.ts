@@ -42,6 +42,8 @@ export const PERMISSIONS = {
   "pricing.margin": "See internal cost and margin",
   "pricing.manage": "Edit the price book",
   "reports.view": "Read client-facing incident reports",
+  "detections.tune": "Switch SIEM detectors on and off",
+  "settings.manage": "Edit platform settings: company profile, provider keys, forensics thresholds",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -126,7 +128,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "reports.view",
   ],
   THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback"],
-  DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch"],
+  DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune"],
   AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view"],
   SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view"],
   CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view"],

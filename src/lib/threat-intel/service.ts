@@ -127,7 +127,7 @@ export function indicatorReasons(indicator: Pick<ThreatIndicator, "providerData"
 // Provider enrichment for every indicator linked to a case. Bounded so a
 // noisy case can't exhaust a free-tier API quota in one go.
 export async function enrichCaseIndicators(caseId: string, limit = 15) {
-  if (configuredProviders().length === 0) return 0;
+  if ((await configuredProviders()).length === 0) return 0;
   const links = await db.caseIndicator.findMany({
     where: { caseId, indicator: { expiresAt: { lte: new Date() } } },
     include: { indicator: true },

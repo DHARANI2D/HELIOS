@@ -18,6 +18,7 @@ import { PROPOSABLE_ACTIONS, matchTarget, type GroundingReport, type TriageOutpu
 import { ACTION_LABEL, ROLLBACK_OF } from "@/lib/response/executor";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { TestBadge } from "@/components/shared/test-badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -56,7 +57,7 @@ async function loadCasePage(id: string, user: SessionUser) {
   const kase = await db.case.findUniqueOrThrow({
     where: { id },
     include: {
-      tenant: { select: { id: true, name: true, plan: true } },
+      tenant: { select: { id: true, name: true, plan: true, isTest: true } },
       assignedTo: { select: { id: true, name: true, email: true } },
       detections: { orderBy: { createdAt: "desc" } },
       timeline: { orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }] },
@@ -157,6 +158,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                 <Building2 /> {kase.tenant.name}
               </Badge>
             )}
+            {kase.tenant?.isTest && <TestBadge />}
             {kase.verdict && <Badge variant="outline" className="capitalize">Verdict: {kase.verdict}</Badge>}
           </div>
           <CardTitle className="mt-2 text-xl leading-snug">{kase.title}</CardTitle>

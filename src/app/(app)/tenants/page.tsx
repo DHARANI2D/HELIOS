@@ -10,6 +10,7 @@ import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
 import { computeMetrics, formatDuration } from "@/lib/metrics";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Badge } from "@/components/ui/badge";
+import { TestBadge } from "@/components/shared/test-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -89,6 +90,7 @@ export default async function TenantsPage() {
                           <Link href={`/tenants/${t.id}`} className="font-medium hover:underline">{t.name}</Link>
                           <div className="mt-0.5 flex items-center gap-1.5">
                             <Badge variant={STATUS_VARIANT[t.status]}>{t.status.toLowerCase()}</Badge>
+                            {t.isTest && <TestBadge />}
                             {t.industry && <span className="text-[11px] text-muted-foreground">{t.industry}</span>}
                           </div>
                         </TableCell>

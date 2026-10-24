@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-export function AppSidebar({ role, tenantName }: { role: UserRole; tenantName: string | null }) {
+export function AppSidebar({ role, tenantName, companyName }: { role: UserRole; tenantName: string | null; companyName?: string }) {
   const pathname = usePathname();
   const { sidebarCollapsed, toggleSidebar } = useUIStore();
   const items = navFor(role);
@@ -31,7 +31,7 @@ export function AppSidebar({ role, tenantName }: { role: UserRole; tenantName: s
         {!sidebarCollapsed && (
           <div className="min-w-0 leading-tight">
             <p className="text-sm font-semibold tracking-tight">HELIOS</p>
-            <p className="truncate text-[11px] text-sidebar-foreground/55">{tenantName ?? "Managed detection & response"}</p>
+            <p className="truncate text-[11px] text-sidebar-foreground/55">{tenantName ?? (companyName || "Managed detection & response")}</p>
           </div>
         )}
       </div>

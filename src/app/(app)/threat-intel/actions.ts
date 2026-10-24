@@ -11,7 +11,7 @@ import { indicatorReasons, indicatorVerdict, lookupIndicator } from "@/lib/threa
 import { configuredProviders } from "@/lib/threat-intel/providers";
 import { importFeed } from "@/lib/threat-intel/feeds";
 
-function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>) {
+function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>, providersConfigured: Awaited<ReturnType<typeof configuredProviders>>) {
   const { indicator } = result;
   return {
     id: indicator.id,
@@ -25,7 +25,7 @@ function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>) {
     blockedAt: indicator.blockedAt?.toISOString() ?? null,
     cached: result.cached,
     providersConsulted: result.providersConsulted,
-    providersConfigured: configuredProviders(),
+    providersConfigured,
     errors: result.errors,
   };
 }
@@ -39,7 +39,7 @@ export async function lookupAction(raw: string, force = false): Promise<Indicato
   const result = await lookupIndicator(ioc.type, ioc.value, { force });
   await logAction({ actorId: user.id, action: "intel.lookup", detail: { type: ioc.type, value: ioc.value, cached: result.cached } });
   revalidatePath("/threat-intel");
-  return serialize(result);
+  return serialize(result, await configuredProviders());
 }
 
 export async function recheckIndicatorAction(indicatorId: string): Promise<IndicatorLookup> {
@@ -50,7 +50,7 @@ export async function recheckIndicatorAction(indicatorId: string): Promise<Indic
   revalidatePath("/threat-intel");
   const caseLinks = await db.caseIndicator.findMany({ where: { indicatorId }, select: { caseId: true } });
   for (const { caseId } of caseLinks) revalidatePath(`/cases/${caseId}`);
-  return serialize(result);
+  return serialize(result, await configuredProviders());
 }
 
 export async function setBlockedAction(indicatorId: string, blocked: boolean) {

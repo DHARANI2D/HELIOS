@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 export interface TenantDraft {
@@ -26,9 +27,10 @@ export interface TenantDraft {
   endpointsLicensed: number;
   usersLicensed: number;
   notes: string;
+  isTest: boolean;
 }
 
-const EMPTY: TenantDraft = { name: "", industry: "", planId: null, status: "ONBOARDING", contactName: "", contactEmail: "", endpointsLicensed: 0, usersLicensed: 0, notes: "" };
+const EMPTY: TenantDraft = { name: "", industry: "", planId: null, status: "ONBOARDING", contactName: "", contactEmail: "", endpointsLicensed: 0, usersLicensed: 0, notes: "", isTest: false };
 
 export interface PlanOption {
   id: string;
@@ -110,6 +112,13 @@ export function TenantFormButton({ tenantId, initial, plans }: { tenantId?: stri
               <Textarea value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} className="min-h-16" aria-describedby="tenant-notes-hint" />
               <p id="tenant-notes-hint" className="text-[11px] text-muted-foreground">Escalation contacts, maintenance windows, business-critical systems.</p>
             </div>
+            <label className="flex items-start gap-3 rounded-md border p-3 sm:col-span-2">
+              <Switch checked={d.isTest} onCheckedChange={(isTest) => setD({ ...d, isTest })} className="mt-0.5" />
+              <span className="grid gap-0.5">
+                <span className="text-sm font-medium">Test client</span>
+                <span className="text-[11px] text-muted-foreground">For test data only — not a real organization. It&apos;s badged everywhere and left out of commercial figures.</span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>

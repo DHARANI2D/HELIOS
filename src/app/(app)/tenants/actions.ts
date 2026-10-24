@@ -18,6 +18,7 @@ const tenantSchema = z.object({
   endpointsLicensed: z.number().int().min(0).max(1_000_000),
   usersLicensed: z.number().int().min(0).max(1_000_000),
   notes: z.string().max(4000).optional(),
+  isTest: z.boolean().default(false),
 });
 
 function slugify(name: string) {
@@ -38,7 +39,7 @@ export async function saveTenantAction(input: z.input<typeof tenantSchema>, tena
     if (await db.tenant.findUnique({ where: { slug } })) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     saved = await db.tenant.create({ data: { ...fields, slug, ...(plan ? { aiAutonomyCap: plan.defaultAutonomyCap } : {}) } });
   }
-  await logAction({ actorId: user.id, action: tenantId ? "tenant.updated" : "tenant.created", detail: { tenantId: saved.id, name: saved.name, plan: plan?.key ?? null, status: saved.status } });
+  await logAction({ actorId: user.id, action: tenantId ? "tenant.updated" : "tenant.created", detail: { tenantId: saved.id, name: saved.name, plan: plan?.key ?? null, status: saved.status, isTest: saved.isTest } });
   revalidatePath("/tenants");
   revalidatePath(`/tenants/${saved.id}`);
   return { id: saved.id };

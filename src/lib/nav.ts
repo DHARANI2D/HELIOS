@@ -12,6 +12,7 @@ import {
   Plug,
   ScrollText,
   Search,
+  Settings,
   ShieldAlert,
   UserCog,
   Users,
@@ -50,6 +51,7 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Clients", href: "/tenants", icon: Building2, group: "Platform", permission: "tenants.view", description: "Client tenants, plans and SLAs" },
   { title: "Team & Roles", href: "/team", icon: Users, group: "Platform", permission: "users.manage", description: "Users, roles, queues and what each role can see" },
   { title: "Audit Log", href: "/audit", icon: ScrollText, group: "Platform", permission: "audit.view", description: "Hash-chained record of every action" },
+  { title: "Settings", href: "/settings", icon: Settings, group: "Platform", permission: "settings.manage", description: "Environment, company profile, provider keys and forensics" },
   { title: "Build & Price", href: "/pricing", icon: Calculator, group: "Commercial", permission: "pricing.view", description: "Configure a protection stack and estimate costs" },
 ];
 

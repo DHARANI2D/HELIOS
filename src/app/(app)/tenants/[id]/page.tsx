@@ -14,6 +14,7 @@ import { serviceMetrics, formatDuration } from "@/lib/metrics";
 import { formatRelative } from "@/lib/format";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Badge } from "@/components/ui/badge";
+import { TestBadge } from "@/components/shared/test-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -69,6 +70,7 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
             <div className="flex items-center gap-2">
               <Badge variant={tenant.status === "ACTIVE" ? "success" : tenant.status === "SUSPENDED" ? "destructive" : "info"}>{tenant.status.toLowerCase()}</Badge>
               <Badge variant="outline">{plan?.name ?? "No plan"}</Badge>
+              {tenant.isTest && <TestBadge />}
               {tenant.industry && <span className="text-xs text-muted-foreground">{tenant.industry}</span>}
             </div>
             <CardTitle className="mt-2 text-xl">{tenant.name}</CardTitle>
@@ -91,6 +93,7 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
                 endpointsLicensed: tenant.endpointsLicensed,
                 usersLicensed: tenant.usersLicensed,
                 notes: tenant.notes ?? "",
+                isTest: tenant.isTest,
               }}
             />
           )}

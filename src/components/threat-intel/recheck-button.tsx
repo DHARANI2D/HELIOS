@@ -14,7 +14,7 @@ export function RecheckButton({ indicatorId }: { indicatorId: string }) {
     mutationFn: () => recheckIndicatorAction(indicatorId),
     onSuccess: (r) => {
       if (r.providersConfigured.length === 0) {
-        toast.info("No threat-intel providers configured — showing built-in intel only. Set VIRUSTOTAL_API_KEY / ABUSEIPDB_API_KEY.");
+        toast.info("No threat-intel providers configured — showing built-in intel only. Add a VirusTotal or AbuseIPDB key under Settings.");
       } else if (r.errors.length) {
         toast.warning(`Lookup finished with errors: ${r.errors.map((e) => `${e.provider} (${e.error})`).join(", ")}`);
       } else {

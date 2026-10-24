@@ -14,9 +14,11 @@ export interface DetectionCapability {
   rule: string;
 }
 
-export function detectionCapabilities(): DetectionCapability[] {
+// Detectors switched off under ATT&CK coverage → Detectors don't count.
+export function detectionCapabilities(disabledDetectors: string[] = []): DetectionCapability[] {
   const caps: DetectionCapability[] = [];
   for (const detector of DETECTORS) {
+    if (disabledDetectors.includes(detector.name)) continue;
     for (const t of detector.techniques) caps.push({ techniqueId: t, module: "Cases & Alerts", rule: detector.name });
   }
   for (const { rule, techniques } of GOVERNANCE_RULE_TECHNIQUES) {

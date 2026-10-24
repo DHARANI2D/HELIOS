@@ -13,6 +13,7 @@ import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Badge } from "@/components/ui/badge";
+import { TestBadge } from "@/components/shared/test-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -40,7 +41,7 @@ async function loadEndpoints(scope: { tenantId?: string | null }, q: string | un
 
   const [all, endpoints] = await Promise.all([
     db.endpoint.findMany({ where: scope, select: { protections: true, isolated: true, lastSeenAt: true } }),
-    db.endpoint.findMany({ where, orderBy: [{ isolated: "desc" }, { lastSeenAt: { sort: "desc", nulls: "last" } }], take: 200, include: { tenant: { select: { name: true } } } }),
+    db.endpoint.findMany({ where, orderBy: [{ isolated: "desc" }, { lastSeenAt: { sort: "desc", nulls: "last" } }], take: 200, include: { tenant: { select: { name: true, isTest: true } } } }),
   ]);
 
   // Open cases per host, from the telemetry linked to them.
@@ -178,7 +179,7 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
                           </div>
                           <p className="text-[11px] text-muted-foreground">{[e.os, e.ipAddress, e.owner].filter(Boolean).join(" · ") || "—"}</p>
                         </TableCell>
-                        {!user.isClient && <TableCell className="text-xs">{e.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}</TableCell>}
+                        {!user.isClient && <TableCell className="text-xs">{e.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}{e.tenant?.isTest && <TestBadge className="ml-1.5" />}</TableCell>}
                         <TableCell>
                           <div className="flex gap-0.5">
                             {CONTROLS.map((c) => {

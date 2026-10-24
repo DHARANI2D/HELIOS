@@ -128,8 +128,11 @@ async function main() {
   await seedReference();
   // `npm run db:seed:test` — clearly labelled test clients, plans, prices and
   // one account per role, for exercising the platform. Refuses production.
+  // `npm run db:test-env` — makes this whole database a test environment
+  // first, keeping what's in it as test data.
   if (process.argv.includes("--test")) {
-    const { seedTest } = await import("./seed-test");
+    const { adoptAsTestEnvironment, seedTest } = await import("./seed-test");
+    if (process.argv.includes("--adopt")) await adoptAsTestEnvironment(db);
     await seedTest(db);
   }
 }

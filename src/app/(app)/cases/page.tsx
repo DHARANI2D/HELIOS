@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { SeverityBadge, SourceBadge, StatusBadge } from "@/components/shared/case-badges";
 import { AiStatusBadge, DomainBadge, SlaChip, TierBadge } from "@/components/shared/case-chips";
 import { EmptyState } from "@/components/shared/empty-state";
+import { TestBadge } from "@/components/shared/test-badge";
 import { Pagination, parsePage } from "@/components/shared/pagination";
 import { IngestPanel } from "@/components/cases/ingest-panel";
 
@@ -79,7 +80,7 @@ export default async function CasesPage({ searchParams }: PageProps<"/cases">) {
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
       include: {
-        tenant: { select: { name: true } },
+        tenant: { select: { name: true, isTest: true } },
         assignedTo: { select: { name: true, email: true } },
         _count: { select: { detections: true } },
       },
@@ -210,7 +211,7 @@ export default async function CasesPage({ searchParams }: PageProps<"/cases">) {
                             <span className="text-xs text-muted-foreground">{c._count.detections} detection{c._count.detections === 1 ? "" : "s"}</span>
                           </div>
                         </TableCell>
-                        {!user.isClient && <TableCell className="text-xs">{c.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}</TableCell>}
+                        {!user.isClient && <TableCell className="text-xs">{c.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}{c.tenant?.isTest && <TestBadge className="ml-1.5" />}</TableCell>}
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
                             <DomainBadge domain={c.domain} />

@@ -33,7 +33,7 @@ export interface ShellViewer {
 
 interface TopbarProps {
   viewer: ShellViewer;
-  tenants: Array<{ id: string; name: string }>;
+  tenants: Array<{ id: string; name: string; isTest: boolean }>;
   selectedTenantId: string | null;
   notifications?: React.ReactNode;
 }
@@ -114,6 +114,7 @@ export function AppTopbar({ viewer, tenants, selectedTenantId, notifications }: 
               {tenants.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
+                  {t.isTest && !/^test\b/i.test(t.name) ? " (test)" : ""}
                 </option>
               ))}
             </select>

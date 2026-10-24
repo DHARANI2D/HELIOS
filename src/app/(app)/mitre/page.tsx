@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { Crosshair, Layers, Radar, ShieldCheck } from "lucide-react";
-import type { CaseSource } from "@prisma/client";
+import type { CaseSource, Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
 import { caseScope } from "@/lib/access";
 import { detectionCapabilities } from "@/lib/mitre/coverage";
+import { getSetting } from "@/lib/settings";
+import { DETECTORS } from "@/lib/siem/engine";
+import { can } from "@/lib/rbac";
+import { Badge } from "@/components/ui/badge";
+import { DetectorToggle } from "@/components/mitre/detector-toggle";
 import { CASE_SOURCE_LABEL } from "@/lib/cases/labels";
 import { cn } from "@/lib/utils";
 import { StatTile } from "@/components/dashboard/stat-tile";
@@ -34,10 +39,16 @@ function bucketFor(count: number) {
   return BUCKETS.find((b) => count >= b.min && count <= b.max);
 }
 
+async function detectionsLast30Days(scope: Prisma.CaseWhereInput) {
+  const since = new Date(Date.now() - 30 * 86_400_000);
+  const rows = await db.detection.groupBy({ by: ["source"], where: { createdAt: { gte: since }, case: scope }, _count: { _all: true } });
+  return new Map(rows.map((r) => [r.source, r._count._all]));
+}
+
 export default async function MitrePage() {
   const user = await pageGuard("mitre.view");
   const scope = await caseScope(user);
-  const [tactics, mappings] = await Promise.all([
+  const [tactics, mappings, disabled, recentBySource] = await Promise.all([
     db.mitreTactic.findMany({
       include: { techniques: { orderBy: { id: "asc" } } },
     }),
@@ -45,6 +56,8 @@ export default async function MitrePage() {
       where: { case: scope },
       select: { techniqueId: true, case: { select: { sourceType: true } } },
     }),
+    getSetting("detection.disabledDetectors"),
+    detectionsLast30Days(scope),
   ]);
 
   // Catalog order (Recon → Impact) rather than tactic-ID order.
@@ -59,7 +72,7 @@ export default async function MitrePage() {
     observed.set(m.techniqueId, entry);
   }
 
-  const capabilities = detectionCapabilities();
+  const capabilities = detectionCapabilities(disabled);
   const detectableBy = new Map<string, string[]>();
   for (const c of capabilities) {
     const list = detectableBy.get(c.techniqueId) ?? [];
@@ -178,6 +191,48 @@ export default async function MitrePage() {
               })}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Detectors</CardTitle>
+          <CardDescription>
+            The SIEM detectors that run on every ingest. A detector that&apos;s switched off files nothing new and drops out of the coverage above.
+            {!can(user, "detections.tune") && " Detection engineers and SOC managers can switch them."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-14">On</TableHead>
+                <TableHead>Detector</TableHead>
+                <TableHead>Techniques</TableHead>
+                <TableHead className="text-right">Detections, 30 days</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {DETECTORS.map((d) => {
+                const on = !disabled.includes(d.name);
+                return (
+                  <TableRow key={d.name} className={cn(!on && "opacity-60")}>
+                    <TableCell><DetectorToggle name={d.name} enabled={on} canTune={can(user, "detections.tune")} /></TableCell>
+                    <TableCell>
+                      <p className="text-sm font-medium">{d.name}</p>
+                      <p className="text-xs text-muted-foreground">{d.description}</p>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex max-w-sm flex-wrap gap-1">
+                        {d.techniques.map((t) => <Badge key={t} variant="outline" className="font-mono text-[10px]">{t}</Badge>)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{recentBySource.get(d.detectionSource) ?? 0}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 

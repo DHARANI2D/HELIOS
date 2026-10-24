@@ -1,6 +1,9 @@
 // Port of desas's analyzer/mxtoolbox.py: MxToolbox lookup API diagnostics
 // for the sender's domain (MX, blacklist, SPF, DMARC, DNS, SMTP, and DKIM
-// when the message carries a selector). Only runs with MXTOOLBOX_API_KEY.
+// when the message carries a selector). Only runs with an MxToolbox key
+// (Settings → Integrations, or MXTOOLBOX_API_KEY).
+
+import { platformSecret } from "@/lib/platform-secrets";
 
 export const MX_CHECKS = ["mx", "blacklist", "spf", "dmarc", "dns", "smtp", "dkim"] as const;
 export type MxCheck = (typeof MX_CHECKS)[number];
@@ -23,8 +26,8 @@ const BASE_URL = "https://api.mxtoolbox.com/api/v1/lookup";
 const TIMEOUT_MS = 10_000;
 const DOMAIN_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/i;
 
-export function mxToolboxConfigured() {
-  return !!process.env.MXTOOLBOX_API_KEY;
+export async function mxToolboxConfigured() {
+  return !!(await platformSecret("mxtoolbox"));
 }
 
 interface MxItem {
@@ -66,7 +69,7 @@ async function runCheck(command: MxCheck, argument: string, key: string): Promis
 }
 
 export async function queryMxToolbox(domain: string, dkimSelector?: string): Promise<MxDiagnostics | null> {
-  const key = process.env.MXTOOLBOX_API_KEY;
+  const key = await platformSecret("mxtoolbox");
   if (!key || !DOMAIN_RE.test(domain)) return null;
 
   const notChecked: MxResult = { checked: false, passed: true, details: [] };

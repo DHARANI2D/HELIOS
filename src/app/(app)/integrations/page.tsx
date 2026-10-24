@@ -15,6 +15,7 @@ import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Badge } from "@/components/ui/badge";
+import { TestBadge } from "@/components/shared/test-badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -44,7 +45,7 @@ export default async function IntegrationsPage() {
     db.integration.findMany({
       where: { AND: [visibleIntegrationsWhere(user), scope] },
       orderBy: [{ tenantId: "asc" }, { category: "asc" }, { createdAt: "asc" }],
-      include: { tenant: { select: { name: true } }, assignments: { include: { user: { select: { id: true, name: true, email: true } } } } },
+      include: { tenant: { select: { name: true, isTest: true } }, assignments: { include: { user: { select: { id: true, name: true, email: true } } } } },
     }),
     tenantOptions(),
     selectedTenantId(user),
@@ -150,7 +151,7 @@ export default async function IntegrationsPage() {
                           <p className="text-sm font-medium">{i.name}</p>
                           <p className="text-[11px] text-muted-foreground">{CATEGORIES.find((c) => c.key === i.category)?.label}{i.tokenPrefix ? ` · token ${i.tokenPrefix}` : ""}</p>
                         </TableCell>
-                        {!user.isClient && <TableCell className="text-xs">{i.tenant?.name ?? <span className="text-muted-foreground">SOC-wide</span>}</TableCell>}
+                        {!user.isClient && <TableCell className="text-xs">{i.tenant?.name ?? <span className="text-muted-foreground">SOC-wide</span>}{i.tenant?.isTest && <TestBadge className="ml-1.5" />}</TableCell>}
                         <TableCell>
                           <Badge variant={i.enabled ? STATUS_VARIANT[i.status] : "outline"}>{i.enabled ? i.status.toLowerCase() : "disabled"}</Badge>
                           {i.lastError && <p className="mt-0.5 max-w-48 truncate text-[11px] text-destructive" title={i.lastError}>{i.lastError}</p>}

@@ -44,6 +44,8 @@ export interface Detector {
 // knowledge about the IPs in this batch (see threat-intel/snapshot.ts).
 export interface DetectionContext {
   intel: IntelSnapshot;
+  // Detector names switched off by a detection engineer.
+  disabled?: string[];
 }
 
 export interface ScoredDetection extends Detection {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { db } from "@/lib/db";
+import { getSetting } from "@/lib/settings";
 import { logAction } from "@/lib/audit";
 import { maxSeverity } from "@/lib/severity";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
@@ -175,7 +176,7 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
 
   const events = await loadWindow(batchId, tenantId);
   const intel = await loadIntelSnapshot(events.flatMap((e) => [e.network.sourceIp, e.network.destIp]).map((value) => ({ type: "IP" as const, value })));
-  const detections = runDetections(events, { intel });
+  const detections = runDetections(events, { intel, disabled: await getSetting("detection.disabledDetectors") });
 
   // Drop findings already filed (in an earlier run) or repeated in this one.
   const fingerprints = detections.map(fingerprintFor);

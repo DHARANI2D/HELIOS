@@ -79,6 +79,7 @@ export function fingerprintFor(detection: Detection): string {
 export function runDetections(events: UnifiedEvent[], ctx: DetectionContext = { intel: EMPTY_INTEL }): ScoredDetection[] {
   const out: ScoredDetection[] = [];
   for (const detector of DETECTORS) {
+    if (ctx.disabled?.includes(detector.name)) continue;
     for (const detection of detector.run(events, ctx)) {
       out.push({ ...detection, riskScore: riskScoreFor(detection), ...riskObjectFor(detection) });
     }

@@ -130,17 +130,21 @@ export async function loadOperationsDashboard(caseScope: Prisma.CaseWhereInput, 
   };
 }
 
-export async function loadCommercialDashboard() {
+// Test clients and their quotes count only in a test environment.
+export async function loadCommercialDashboard(includeTest: boolean) {
   const now = new Date();
-  const [tenants, quotes] = await Promise.all([
-    db.tenant.findMany({ select: { id: true, name: true, status: true, plan: true, endpointsLicensed: true, usersLicensed: true } }),
-    db.quote.findMany({ orderBy: { updatedAt: "desc" }, take: 200, select: { id: true, reference: true, clientName: true, status: true, currency: true, totals: true, updatedAt: true } }),
+  const real = includeTest ? {} : { isTest: false };
+  const [tenants, quotes, testClients] = await Promise.all([
+    db.tenant.findMany({ where: real, select: { id: true, name: true, status: true, plan: true, endpointsLicensed: true, usersLicensed: true } }),
+    db.quote.findMany({ where: includeTest ? {} : { OR: [{ tenantId: null }, { tenant: real }] }, orderBy: { updatedAt: "desc" }, take: 200, select: { id: true, reference: true, clientName: true, status: true, currency: true, totals: true, updatedAt: true } }),
+    includeTest ? Promise.resolve(0) : db.tenant.count({ where: { isTest: true } }),
   ]);
   const monthly = (q: (typeof quotes)[number]) => (q.totals as unknown as QuoteResult).monthlyNet ?? 0;
   const by = (status: string) => quotes.filter((q) => q.status === status);
   return {
     now,
     tenants,
+    testClients,
     quotes: quotes.slice(0, 8),
     pipelineMonthly: by("SENT").reduce((s, q) => s + monthly(q), 0),
     wonMonthly: by("ACCEPTED").reduce((s, q) => s + monthly(q), 0),

@@ -9,6 +9,9 @@ import bcrypt from "bcryptjs";
 // Alerts come from the synthetic vendor payloads and attack scenarios in
 // src/lib/__tests__/fixtures, pushed through the real ingest pipeline.
 // Refuses to run against production. Idempotent: re-running skips what exists.
+//
+// `npm run db:test-env` goes further and makes the whole database a test
+// environment (adoptAsTestEnvironment below) before loading the test data.
 
 const TEST_PLANS = [
   {
@@ -100,13 +103,58 @@ TEST-SRV-01,Windows Server 2022,10.99.0.21,test.ops,critical,edr=active;av=activ
 // imported feed would, so the intel-match detectors have something to match.
 const TEST_INDICATORS = [{ type: "IP" as const, value: "185.220.101.34", score: 0.9 }];
 
+// One password for every test account in a run: SEED_TEST_PASSWORD, or
+// generated once and printed.
+let generatedPassword: string | undefined;
+const testPassword = () => process.env.SEED_TEST_PASSWORD ?? (generatedPassword ??= randomBytes(9).toString("base64url"));
+
 const slug = (role: string) => role.toLowerCase().replaceAll("_", ".");
 const label = (role: string) => role.charAt(0) + role.slice(1).toLowerCase().replaceAll("_", " ");
 
-export async function seedTest(db: PrismaClient) {
+function refuseProduction() {
   if (process.env.NODE_ENV === "production" && process.env.HELIOS_ALLOW_TEST_SEED !== "1") {
     throw new Error("Refusing to load test data with NODE_ENV=production (set HELIOS_ALLOW_TEST_SEED=1 to override)");
   }
+}
+
+const EARLIER_DATA = { slug: "test-earlier-data", name: "Test · Earlier sample data" };
+
+// Turns this database into a test environment: whatever it already holds is
+// kept and used as test data. Every client becomes a test client, records
+// that belong to no client (sample data from before HELIOS served several
+// clients) move to a labelled test client, and every page shows a
+// test-environment banner. Switch back under Settings.
+export async function adoptAsTestEnvironment(db: PrismaClient) {
+  refuseProduction();
+  const { setSetting } = await import("../src/lib/settings");
+  const { logAction } = await import("../src/lib/audit");
+  const admin = await db.user.findFirstOrThrow({ where: { role: "ADMIN" }, orderBy: { createdAt: "asc" } });
+
+  const orphans = { tenantId: null };
+  const [cases, events, endpoints, agents] = await Promise.all([db.case.count({ where: orphans }), db.securityEvent.count({ where: orphans }), db.endpoint.count({ where: orphans }), db.agent.count({ where: orphans })]);
+  if (cases + events + endpoints + agents > 0) {
+    const t = await db.tenant.upsert({
+      where: { slug: EARLIER_DATA.slug },
+      update: { isTest: true },
+      create: { ...EARLIER_DATA, industry: "Test data", status: "ACTIVE", isTest: true, notes: "Holds the records that belonged to no client when this database became a test environment (npm run db:test-env)." },
+    });
+    await db.case.updateMany({ where: orphans, data: { tenantId: t.id } });
+    await db.securityEvent.updateMany({ where: orphans, data: { tenantId: t.id } });
+    await db.endpoint.updateMany({ where: orphans, data: { tenantId: t.id } });
+    await db.agent.updateMany({ where: orphans, data: { tenantId: t.id } });
+  }
+  const marked = await db.tenant.updateMany({ where: { isTest: false }, data: { isTest: true } });
+  // A test platform admin, so the whole environment can be driven with test
+  // accounts — only here, never by the plain test seed next to real clients.
+  await db.user.upsert({ where: { email: "admin@helios.test" }, update: {}, create: { email: "admin@helios.test", name: "Test Platform admin", role: "ADMIN", title: "Platform admin (test account)", passwordHash: await bcrypt.hash(testPassword(), 10) } });
+  await setSetting("platform.environment", "test", admin.id);
+  await logAction({ actorId: admin.id, action: "platform.environment_changed", detail: { to: "test", via: "npm run db:test-env", adopted: { cases, events, endpoints, agents }, clientsMarkedTest: marked.count } });
+  console.log(`\n=== TEST ENVIRONMENT ===\nAdopted ${cases} cases, ${events} events, ${endpoints} endpoints and ${agents} agents that belonged to no client into "${EARLIER_DATA.name}"; ${marked.count} existing clients marked as test.`);
+  console.log(`Test platform admin: admin@helios.test (password below)`);
+}
+
+export async function seedTest(db: PrismaClient) {
+  refuseProduction();
   // First response runs explicitly at the end, awaited, rather than detached.
   process.env.HELIOS_AI_FIRST_RESPONSE = "off";
   const { onboardIntegration, ingestForIntegration } = await import("../src/lib/integrations/service");
@@ -121,7 +169,7 @@ export async function seedTest(db: PrismaClient) {
   const { PRICE_ITEM_INDEX } = await import("../src/lib/pricing/items");
   const { db: appDb } = await import("../src/lib/db");
 
-  const password = process.env.SEED_TEST_PASSWORD ?? randomBytes(9).toString("base64url");
+  const password = testPassword();
   const passwordHash = await bcrypt.hash(password, 10);
   const admin = await db.user.findFirstOrThrow({ where: { role: "ADMIN" }, orderBy: { createdAt: "asc" } });
 
@@ -146,8 +194,8 @@ export async function seedTest(db: PrismaClient) {
   for (const c of CLIENTS) {
     const t = await db.tenant.upsert({
       where: { slug: c.slug },
-      update: {},
-      create: { slug: c.slug, name: c.name, industry: c.industry, planId: plans.get(c.plan)!.id, endpointsLicensed: c.endpointsLicensed, usersLicensed: c.usersLicensed, aiAutonomyCap: c.aiAutonomyCap, status: "ACTIVE", contactName: "Test contact", contactEmail: `it@${c.domain}`, notes: "Test client created by npm run db:seed:test" },
+      update: { isTest: true },
+      create: { slug: c.slug, name: c.name, industry: c.industry, planId: plans.get(c.plan)!.id, endpointsLicensed: c.endpointsLicensed, usersLicensed: c.usersLicensed, aiAutonomyCap: c.aiAutonomyCap, status: "ACTIVE", contactName: "Test contact", contactEmail: `it@${c.domain}`, notes: "Test client created by npm run db:seed:test", isTest: true },
     });
     tenants.set(c.slug, t.id);
   }
@@ -204,7 +252,8 @@ export async function seedTest(db: PrismaClient) {
     }
   }
 
-  const pending = await db.case.findMany({ where: { tenantId: { in: [...tenants.values()] }, aiStatus: null, status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] } }, select: { id: true } });
+  // Every test client's open cases, including any adopted by db:test-env.
+  const pending = await db.case.findMany({ where: { tenant: { isTest: true }, aiStatus: null, status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] } }, select: { id: true } });
   for (const { id } of pending) await maybeRunFirstResponse(id);
 
   await appDb.$disconnect();

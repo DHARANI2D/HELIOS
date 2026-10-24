@@ -25,6 +25,9 @@ import { buildSampleEmail } from "@/lib/__tests__/fixtures/forensics";
 import { analyzeSubmission } from "@/lib/forensics/service";
 import { findRelatedCases } from "@/lib/cases/related";
 import { gatherEvidence } from "@/lib/ai/evidence";
+import { getSetting } from "@/lib/settings";
+import { platformSecret, platformSecretStatus, storePlatformSecret } from "@/lib/platform-secrets";
+import { adoptAsTestEnvironment } from "../../../prisma/seed-test";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -280,6 +283,33 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     const delisted = await db.threatIndicator.findUniqueOrThrow({ where: { type_value: { type: "IP", value: "198.51.100.77" } } });
     expect(delisted.maliciousScore).toBeNull();
     expect(delisted.sources).toEqual([]);
+  });
+
+  it("turns the database into a test environment, keeping its records as test data", async () => {
+    const orphan = await createCase({ sourceType: "SIEM_ALERT", title: "Earlier sample alert", severity: "LOW", deferPipelines: true });
+    const real = await db.tenant.create({ data: { name: "Adopted client", slug: "adopted-client" } });
+    await adoptAsTestEnvironment(db);
+    const moved = await db.case.findUniqueOrThrow({ where: { id: orphan.id }, include: { tenant: true } });
+    expect(moved.tenant).toMatchObject({ slug: "test-earlier-data", isTest: true });
+    expect(await db.case.count({ where: { tenantId: null } })).toBe(0);
+    expect(await db.securityEvent.count({ where: { tenantId: null } })).toBe(0);
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: real.id } })).isTest).toBe(true);
+    expect(await getSetting("platform.environment")).toBe("test");
+    expect(await db.user.findUnique({ where: { email: "admin@helios.test" } })).toMatchObject({ role: "ADMIN" });
+    expect(await db.auditLog.findFirst({ where: { action: "platform.environment_changed" } })).not.toBeNull();
+  });
+
+  it("stores provider keys sealed, preferring them over the environment", async () => {
+    process.env.VIRUSTOTAL_API_KEY = "env-vt-key-0000";
+    await storePlatformSecret("virustotal", "stored-vt-key-1234", adminId);
+    const row = await db.platformSetting.findUniqueOrThrow({ where: { key: "secret.virustotal" } });
+    expect(JSON.stringify(row.value)).not.toContain("stored-vt-key");
+    expect(await platformSecret("virustotal")).toBe("stored-vt-key-1234");
+    expect((await platformSecretStatus()).virustotal).toEqual({ source: "stored", last4: "1234" });
+    await storePlatformSecret("virustotal", null, adminId);
+    expect(await platformSecret("virustotal")).toBe("env-vt-key-0000");
+    expect((await platformSecretStatus()).virustotal).toEqual({ source: "environment" });
+    delete process.env.VIRUSTOTAL_API_KEY;
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

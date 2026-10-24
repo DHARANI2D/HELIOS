@@ -18,10 +18,12 @@ export const SANDBOX_RULES = {
   blockRecommendationThreshold: 20,
 };
 
-export const VERDICT_RULES = {
-  maliciousThreshold: Number(process.env.FORENSICS_MALICIOUS_THRESHOLD ?? 71),
-  suspiciousThreshold: Number(process.env.FORENSICS_SUSPICIOUS_THRESHOLD ?? 31),
-};
+// desas's defaults; Settings → Forensics overrides them.
+export interface VerdictThresholds {
+  malicious: number;
+  suspicious: number;
+}
+export const DEFAULT_THRESHOLDS: VerdictThresholds = { malicious: 71, suspicious: 31 };
 
 export type Verdict = "malicious" | "suspicious" | "benign";
 
@@ -42,11 +44,11 @@ export interface VerdictResult {
   severity: CaseSeverity;
 }
 
-export function aggregateVerdict(components: ScoreComponent[]): VerdictResult {
+export function aggregateVerdict(components: ScoreComponent[], thresholds: VerdictThresholds = DEFAULT_THRESHOLDS): VerdictResult {
   const breakdown = components.filter((c) => c.points > 0 || c.reasons.length > 0);
   const totalScore = breakdown.reduce((s, c) => s + c.points, 0);
   const verdict: Verdict =
-    totalScore >= VERDICT_RULES.maliciousThreshold ? "malicious" : totalScore >= VERDICT_RULES.suspiciousThreshold ? "suspicious" : "benign";
+    totalScore >= thresholds.malicious ? "malicious" : totalScore >= thresholds.suspicious ? "suspicious" : "benign";
 
   const all = breakdown.flatMap((c) => c.reasons).map((r) => r.toLowerCase());
   const any = (keys: string[]) => all.some((r) => keys.some((k) => r.includes(k)));
@@ -85,8 +87,8 @@ export function aggregateVerdict(components: ScoreComponent[]): VerdictResult {
     .map((c) => `${c.component.toLowerCase()} (+${c.points})`);
   const explanation =
     verdict === "benign"
-      ? `Scored ${totalScore}, below the suspicious threshold of ${VERDICT_RULES.suspiciousThreshold}.${top.length ? ` Minor signals from ${top.join(", ")}.` : " No risk signals fired."}`
-      : `Scored ${totalScore} (${verdict} ≥ ${verdict === "malicious" ? VERDICT_RULES.maliciousThreshold : VERDICT_RULES.suspiciousThreshold}), driven by ${top.join(", ")}.${threatType ? ` Classified as ${threatType}: ${threatCategory}.` : ""}`;
+      ? `Scored ${totalScore}, below the suspicious threshold of ${thresholds.suspicious}.${top.length ? ` Minor signals from ${top.join(", ")}.` : " No risk signals fired."}`
+      : `Scored ${totalScore} (${verdict} ≥ ${verdict === "malicious" ? thresholds.malicious : thresholds.suspicious}), driven by ${top.join(", ")}.${threatType ? ` Classified as ${threatType}: ${threatCategory}.` : ""}`;
 
   const severity: CaseSeverity =
     verdict === "malicious" ? (totalScore >= 150 ? "CRITICAL" : "HIGH") : verdict === "suspicious" ? "MEDIUM" : "LOW";

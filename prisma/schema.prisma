@@ -133,6 +133,9 @@ model Tenant {
   // its estate; caps every agent profile.
   aiAutonomyCap     AiAutonomy   @default(CONTAIN_WITH_APPROVAL)
   notes             String?      @db.Text
+  // Test clients hold test data only: badged everywhere, kept out of
+  // commercial figures, and never a real organization.
+  isTest            Boolean      @default(false)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 

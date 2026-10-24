@@ -15,6 +15,7 @@ import { configuredProviders } from "@/lib/threat-intel/providers";
 import { indicatorReasons, lookupIndicator } from "@/lib/threat-intel/service";
 import { MX_CHECKS, mxToolboxConfigured, queryMxToolbox, type MxDiagnostics } from "@/lib/forensics/mxtoolbox";
 import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
+import { getSetting } from "@/lib/settings";
 
 // Orchestrates desas's analysis pipeline (eel_main.analyze_email): parse →
 // headers → body → attachments → optional URL detonation → verdict, then
@@ -78,7 +79,7 @@ async function intelComponent(headers: HeaderAnalysis | undefined, body: BodyAna
     const local = localVerdict("IP", ip, await loadIntelSnapshot([{ type: "IP", value: ip }]));
     let score = local.score;
     const why = [...local.reasons];
-    if (configuredProviders().length) {
+    if ((await configuredProviders()).length) {
       const { indicator } = await lookupIndicator("IP", ip);
       score = Math.max(score, indicator.maliciousScore ?? 0);
       why.push(...indicatorReasons(indicator).filter((r) => !why.includes(r)));
@@ -125,6 +126,8 @@ export interface AnalyzeInput {
 }
 
 export async function analyzeSubmission(input: AnalyzeInput) {
+  const [savedDomains, thresholds] = await Promise.all([getSetting("forensics.allowDomains"), getSetting("forensics.thresholds")]);
+  const whitelist = domainWhitelist(savedDomains);
   const message = await parseMessage(input.filename, input.bytes);
   const isEmail = message !== null;
   let email: EmailSummary | undefined;
@@ -147,7 +150,7 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     };
     sentAt = message.date;
     headers = await analyzeHeaders(message.headerLines, message.subject);
-    body = analyzeBody(message.text, message.html);
+    body = analyzeBody(message.text, message.html, whitelist);
     attachments = await Promise.all(
       message.attachments.slice(0, MAX_ATTACHMENTS).map(async (a) => {
         const analysis = analyzeFile(a.filename, a.content, a.contentType);
@@ -157,7 +160,7 @@ export async function analyzeSubmission(input: AnalyzeInput) {
         if (inner) {
           analysis.reasons.unshift(`Embedded email message: "${inner.subject}"${inner.from ? ` from ${inner.from}` : ""}`);
           analysis.children = inner.attachments.slice(0, MAX_ATTACHMENTS).map((c) => analyzeFile(c.filename, c.content, c.contentType, 1));
-          const innerBody = analyzeBody(inner.text, inner.html);
+          const innerBody = analyzeBody(inner.text, inner.html, whitelist);
           analysis.urls = [...new Set([...analysis.urls, ...innerBody.urls])];
           analysis.reasons.push(...innerBody.reasons.map((r) => `Embedded message: ${r}`));
           analysis.score += innerBody.score + analysis.children.reduce((sum, c) => sum + c.score, 0);
@@ -171,14 +174,13 @@ export async function analyzeSubmission(input: AnalyzeInput) {
   }
 
   const allFiles = flattenAttachments(attachments);
-  const whitelist = domainWhitelist();
   const candidateUrls = [...new Set([...(body?.urls ?? []), ...allFiles.flatMap((a) => a.urls)])].filter((u) => {
     const host = hostOf(u);
     return host && !whitelist.some((w) => registrableDomain(host) === w);
   });
 
   const senderDomain = headers?.fromAddress?.split("@")[1];
-  const mxtoolbox = senderDomain && mxToolboxConfigured() ? await queryMxToolbox(senderDomain, headers?.dkimSelector) : null;
+  const mxtoolbox = senderDomain && (await mxToolboxConfigured()) ? await queryMxToolbox(senderDomain, headers?.dkimSelector) : null;
 
   const sandbox = input.detonate ? await Promise.all(candidateUrls.slice(0, MAX_DETONATIONS).map(detonateUrl)) : [];
 
@@ -193,7 +195,7 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     { component: "Sandbox behavior", points: sandbox.reduce((s, r) => s + r.score, 0), reasons: sandbox.flatMap((r) => r.reasons) },
     await intelComponent(headers, body),
     infrastructureComponent(mxtoolbox),
-  ]);
+  ], thresholds);
 
   const blockRecommendations = [
     ...new Set([

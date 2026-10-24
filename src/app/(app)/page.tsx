@@ -9,7 +9,7 @@ import { loadCommercialDashboard, loadOperationsDashboard } from "@/lib/dashboar
 import { formatDuration } from "@/lib/metrics";
 import { formatMinutes, parsePlan } from "@/lib/plans";
 import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
-import { aiSettings } from "@/lib/settings";
+import { aiSettings, platformEnvironment } from "@/lib/settings";
 import { setupChecklist } from "@/lib/setup";
 import { formatMoney, type QuoteResult } from "@/lib/pricing/calculator";
 import { CASE_SOURCE_LABEL, CASE_STATUS_LABEL } from "@/lib/cases/labels";
@@ -360,7 +360,7 @@ async function ClientOverview({ user }: { user: SessionUser }) {
 }
 
 async function CommercialOverview({ user }: { user: SessionUser }) {
-  const d = await loadCommercialDashboard();
+  const d = await loadCommercialDashboard((await platformEnvironment()) === "test");
   const endpoints = d.tenants.reduce((s, t) => s + t.endpointsLicensed, 0);
   return (
     <div className="flex flex-col gap-6">
@@ -380,7 +380,7 @@ async function CommercialOverview({ user }: { user: SessionUser }) {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatTile label="Open pipeline / month" value={formatMoney(d.pipelineMonthly, "USD", 1, { decimals: 0 })} icon={TrendingUp} hint={`${d.counts.sent} quotes sent`} />
         <StatTile label="Win rate" value={d.winRate == null ? "—" : `${Math.round(d.winRate * 100)}%`} icon={CircleCheck} hint={`${d.counts.accepted} won · ${d.counts.lost} lost`} />
-        <StatTile label="Clients" value={d.tenants.length} icon={Building2} hint={`${d.tenants.filter((t) => t.status === "ACTIVE").length} active`} />
+        <StatTile label="Clients" value={d.tenants.length} icon={Building2} hint={`${d.tenants.filter((t) => t.status === "ACTIVE").length} active${d.testClients ? ` · ${d.testClients} test not counted` : ""}`} />
         <StatTile label="Endpoints under contract" value={endpoints.toLocaleString()} icon={Laptop} />
       </div>
       <Card>
