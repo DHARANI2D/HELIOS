@@ -17,13 +17,13 @@ const EXAMPLE = `[
   {"user": "jane.roe", "source_ip": "203.0.113.7", "result": "SUCCESS", "geo_location": "Brazil"}
 ]`;
 
-export function IngestPanel() {
+export function IngestPanel({ tenantId, tenantName }: { tenantId: string | null; tenantName: string | null }) {
   const router = useRouter();
   const [source, setSource] = React.useState("auth");
   const [text, setText] = React.useState("");
 
   const ingest = useMutation({
-    mutationFn: () => ingestLogsAction(source, text),
+    mutationFn: () => ingestLogsAction(source, text, tenantId ?? undefined),
     onSuccess: (s) => {
       toast.success(`Ingested ${s.eventsIngested} events → ${s.newDetections} new detections, ${s.casesCreated} new / ${s.casesUpdated} updated cases`);
       setText("");
@@ -37,7 +37,7 @@ export function IngestPanel() {
       <CardHeader>
         <CardTitle className="text-base">Ingest telemetry</CardTitle>
         <CardDescription>
-          Paste a JSON array, a single object, or JSON Lines. Items shaped <code className="text-[11px]">{"{source, data}"}</code> may mix sources.
+          Paste a JSON array, a single object, or JSON Lines into <span className="font-medium text-foreground">{tenantName ?? "the internal tenant"}</span>. Items shaped <code className="text-[11px]">{"{source, data}"}</code> may mix sources.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

@@ -28,7 +28,7 @@ export interface RunScenarioResult {
   revoked: boolean;
 }
 
-export async function runScenario(scenarioId: string, actorId?: string): Promise<RunScenarioResult> {
+export async function runScenario(scenarioId: string, actorId?: string, tenantId: string | null = null): Promise<RunScenarioResult> {
   const scenario = getScenario(scenarioId);
   if (!scenario) throw new Error(`Unknown scenario: ${scenarioId}`);
 
@@ -42,6 +42,7 @@ export async function runScenario(scenarioId: string, actorId?: string): Promise
       level: 10,
       status: "ACTIVE",
       mode: "FULL_ACCESS",
+      tenantId,
     },
   });
 
@@ -112,6 +113,7 @@ export async function runScenario(scenarioId: string, actorId?: string): Promise
     detections,
     techniques: SCENARIO_TECHNIQUES[scenario.id] ?? [],
     actorId,
+    tenantId,
     ...outcome,
   });
 
@@ -125,14 +127,15 @@ export async function runScenario(scenarioId: string, actorId?: string): Promise
   return { agentId: agent.id, caseId: kase.id, steps, revoked };
 }
 
-export async function globalPurge(actorId?: string) {
+export async function globalPurge(actorId?: string, tenantId?: string | null) {
   const agents = await db.agent.updateManyAndReturn({
+    where: tenantId ? { tenantId } : {},
     data: { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" },
   });
   await logAction({
     actorId,
     action: "governance.global_purge",
-    detail: { affectedAgents: agents.length },
+    detail: { affectedAgents: agents.length, tenantId: tenantId ?? "all" },
   });
   return agents.length;
 }

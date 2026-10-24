@@ -46,7 +46,7 @@ export function PipelineProgress({ caseId, pipeline }: { caseId: string; pipelin
         {pipeline.stages.map((s) => (
           <li key={s.name} className="flex items-start gap-2 rounded-md border p-2.5 text-sm">
             {s.status === "done" ? (
-              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success-ink" />
             ) : s.status === "running" ? (
               <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin" />
             ) : s.status === "failed" ? (
@@ -58,10 +58,10 @@ export function PipelineProgress({ caseId, pipeline }: { caseId: string; pipelin
               <p className="font-medium">{STAGE_LABEL[s.name]}</p>
               <p className="text-xs text-muted-foreground">
                 {s.status}
-                {s.engine && ` · ${s.engine === "claude" ? "Claude" : "deterministic"}`}
+                {s.engine && ` · ${s.engine === "claude" ? "Claude" : s.engine === "local" ? "local model" : "deterministic"}`}
                 {s.name === "qa" && pipeline.qaIterations > 1 && ` · ${pipeline.qaIterations} rounds`}
               </p>
-              {s.note && <p className="mt-1 text-xs text-warning-foreground">{s.note}</p>}
+              {s.note && <p className="mt-1 text-xs text-warning-ink">{s.note}</p>}
             </div>
           </li>
         ))}

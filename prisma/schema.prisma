@@ -17,25 +17,63 @@ datasource db {
 // Auth
 // ---------------------------------------------------------------------------
 
+// What a user may do. The permission matrix lives in src/lib/rbac.ts; staff
+// roles serve every client tenant, CLIENT_* roles see only their own.
 enum UserRole {
-  ANALYST
-  ADMIN
+  ANALYST // Tier-2 SOC analyst: primary analysis
+  ADMIN // platform owner
+  SOC_MANAGER
+  TRIAGE_ANALYST // Tier-1
+  INCIDENT_RESPONDER // Tier-3 / IR lead
+  THREAT_HUNTER
+  DETECTION_ENGINEER
+  AUDITOR
+  SALES
+  CLIENT_ADMIN
+  CLIENT_VIEWER
+}
+
+// Analyst queues. A case gets one domain; analysts with domains set see
+// those queues (plus whatever is assigned to them).
+enum SecurityDomain {
+  ENDPOINT
+  NETWORK
+  EMAIL
+  IDENTITY
+  CLOUD
+  AI_AGENTS
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String           @id @default(cuid())
+  email        String           @unique
   name         String?
   passwordHash String?
-  role         UserRole @default(ANALYST)
-  createdAt    DateTime @default(now())
+  role         UserRole         @default(ANALYST)
+  tenantId     String? // set for client users; null for MSSP staff
+  title        String?
+  domains      SecurityDomain[] @default([])
+  active       Boolean          @default(true)
+  lastLoginAt  DateTime?
+  failedLogins Int              @default(0)
+  lockedUntil  DateTime?
+  preferences  Json?
+  createdAt    DateTime         @default(now())
 
-  accounts      Account[]
-  sessions      Session[]
-  assignedCases Case[]             @relation("CaseAssignee")
-  auditLogs     AuditLog[]
-  approvals     PlaybookApproval[]
+  tenant                 Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  accounts               Account[]
+  sessions               Session[]
+  assignedCases          Case[]                  @relation("CaseAssignee")
+  auditLogs              AuditLog[]
+  approvals              PlaybookApproval[]
+  notifications          Notification[]
+  comments               CaseComment[]
+  watching               CaseWatcher[]
+  integrationAssignments IntegrationAssignment[]
+  quotes                 Quote[]
+  aiFeedback             AiRun[]                 @relation("AiRunFeedback")
 
+  @@index([tenantId])
   @@map("users")
 }
 
@@ -71,6 +109,45 @@ model Session {
 }
 
 // ---------------------------------------------------------------------------
+// Client tenants — the organizations the SOC protects.
+// ---------------------------------------------------------------------------
+
+enum TenantStatus {
+  ONBOARDING
+  ACTIVE
+  SUSPENDED
+}
+
+model Tenant {
+  id                String       @id @default(cuid())
+  name              String       @unique
+  slug              String       @unique
+  industry          String?
+  status            TenantStatus @default(ONBOARDING)
+  plan              String       @default("professional") // service plan key, src/lib/pricing/catalog.ts
+  contactName       String?
+  contactEmail      String?
+  endpointsLicensed Int          @default(0)
+  usersLicensed     Int          @default(0)
+  // The most autonomy the client has consented to for AI agents acting on
+  // its estate; caps every agent profile.
+  aiAutonomyCap     AiAutonomy   @default(CONTAIN_WITH_APPROVAL)
+  notes             String?      @db.Text
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  users        User[]
+  cases        Case[]
+  events       SecurityEvent[]
+  endpoints    Endpoint[]
+  integrations Integration[]
+  agents       Agent[]
+  quotes       Quote[]
+
+  @@map("tenants")
+}
+
+// ---------------------------------------------------------------------------
 // Unified case model — replaces aegis.BreachInvestigation, asip.Investigation,
 // desas's per-email AnalysisResult, and signal-fusion.Alert.
 // ---------------------------------------------------------------------------
@@ -101,23 +178,31 @@ enum CaseStatus {
 }
 
 model Case {
-  id                 String       @id @default(cuid())
+  id                 String          @id @default(cuid())
   sourceType         CaseSource
   title              String
-  summary            String?      @db.Text
-  severity           CaseSeverity @default(MEDIUM)
-  status             CaseStatus   @default(OPEN)
+  summary            String?         @db.Text
+  severity           CaseSeverity    @default(MEDIUM)
+  status             CaseStatus      @default(OPEN)
   confidence         Float? // 0-1, e.g. asip's QA-validated confidence score
   verdict            String? // e.g. desas "malicious"/"suspicious"/"clean"
   riskScore          Float?
   assignedToId       String?
   sourceRef          String? // originating agentId / investigationId / alertId / emailId
-  rootCauseNarrative String?      @db.Text
+  rootCauseNarrative String?         @db.Text
   metadata           Json? // source-specific payload (headers, IOC lists, etc.)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  tenantId           String?
+  domain             SecurityDomain?
+  tier               Int             @default(1) // escalation tier: 1 triage, 2 analysis, 3 incident response
+  slaDueAt           DateTime? // acknowledge-by deadline from the tenant's plan
+  acknowledgedAt     DateTime?
+  containedAt        DateTime?
+  aiStatus           String? // queued | running | completed | failed | skipped
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
   resolvedAt         DateTime?
 
+  tenant          Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   assignedTo      User?                @relation("CaseAssignee", fields: [assignedToId], references: [id])
   detections      Detection[]
   timeline        TimelineEntry[]
@@ -126,7 +211,14 @@ model Case {
   playbookRuns    PlaybookExecution[]
   auditLogs       AuditLog[]
   events          SecurityEvent[]
+  comments        CaseComment[]
+  watchers        CaseWatcher[]
+  aiRuns          AiRun[]
+  notifications   Notification[]
+  responseActions ResponseAction[]
 
+  @@index([tenantId, status])
+  @@index([domain, status])
   @@index([sourceType, status])
   @@index([sourceType, sourceRef])
   @@index([severity])
@@ -180,9 +272,13 @@ model SecurityEvent {
   fileHash          String?
   severityHint      String?
   metadata          Json?
+  tenantId          String?
+  integrationId     String? // set when pushed through an onboarded tool's webhook
 
-  case Case? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  case   Case?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  @@index([tenantId, timestamp])
   @@index([timestamp])
   @@index([caseId])
   @@index([batchId])
@@ -211,6 +307,7 @@ enum DetectionSource {
   EMAIL_BODY_URL
   EMAIL_ATTACHMENT_FORENSICS
   EMAIL_SANDBOX_DETONATION
+  VENDOR_ALERT // raised by an onboarded tool (EDR, identity, email gateway)
 }
 
 model Detection {
@@ -333,8 +430,11 @@ model Agent {
   level        Int         @default(10) // L0 (isolated) - L10 (full access)
   status       AgentStatus @default(ACTIVE)
   mode         String?
+  tenantId     String?
   createdAt    DateTime    @default(now())
   lastUpdateAt DateTime    @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@map("agents")
 }
@@ -371,6 +471,13 @@ enum PlaybookActionType {
   COLLECT_LOGS
   REVOKE_AGENT
   RESTORE_AGENT
+  DISABLE_USER
+  QUARANTINE_FILE
+  BLOCK_SENDER
+  // Rollbacks for the containment actions above.
+  RELEASE_HOST
+  UNBLOCK_IP
+  ENABLE_USER
 }
 
 model PlaybookAction {
@@ -454,4 +561,311 @@ model AuditLog {
   @@index([createdAt])
   @@index([action])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Collaboration — discussion, watchers, notifications.
+// ---------------------------------------------------------------------------
+
+model CaseComment {
+  id         String   @id @default(cuid())
+  caseId     String
+  authorId   String?
+  authorName String
+  kind       String   @default("comment") // comment | handoff | escalation | share | ai
+  body       String   @db.Text
+  // Internal comments are hidden from client users.
+  internal   Boolean  @default(true)
+  mentions   String[] @default([]) // user ids
+  createdAt  DateTime @default(now())
+
+  case   Case  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([caseId, createdAt])
+  @@map("case_comments")
+}
+
+model CaseWatcher {
+  caseId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([caseId, userId])
+  @@map("case_watchers")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  kind      String // mention | assigned | escalated | shared | watching | approval | ai | sla
+  title     String
+  body      String?   @db.Text
+  href      String?
+  caseId    String?
+  actorName String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case Case? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Onboarded security tools and the endpoint estate they protect.
+// ---------------------------------------------------------------------------
+
+enum IntegrationStatus {
+  PENDING // created, no data yet
+  CONNECTED
+  DEGRADED
+  DISCONNECTED
+}
+
+model Integration {
+  id              String            @id @default(cuid())
+  tenantId        String?
+  vendor          String // tool key, src/lib/integrations/catalog.ts
+  category        String // category key
+  name            String
+  status          IntegrationStatus @default(PENDING)
+  enabled         Boolean           @default(true)
+  config          Json? // non-secret settings
+  secretCipher    String?           @db.Text // AES-256-GCM sealed credentials
+  // SHA-256 of the ingest token; the token itself is shown once.
+  ingestTokenHash String?           @unique
+  tokenPrefix     String?
+  // Roles that can use this tool, in addition to explicitly assigned users.
+  allowedRoles    UserRole[]        @default([])
+  createdById     String?
+  lastEventAt     DateTime?
+  eventCount      Int               @default(0)
+  lastError       String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  tenant      Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  assignments IntegrationAssignment[]
+
+  @@index([tenantId, category])
+  @@map("integrations")
+}
+
+model IntegrationAssignment {
+  integrationId String
+  userId        String
+  createdAt     DateTime @default(now())
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([integrationId, userId])
+  @@map("integration_assignments")
+}
+
+model Endpoint {
+  id          String    @id @default(cuid())
+  tenantId    String?
+  hostname    String
+  os          String?
+  ipAddress   String?
+  owner       String?
+  criticality String    @default("standard") // standard | high | critical
+  // Protection control → { status, product, updatedAt }; see src/lib/endpoints/controls.ts
+  protections Json?
+  isolated    Boolean   @default(false)
+  isolatedAt  DateTime?
+  isolatedBy  String?
+  riskScore   Float     @default(0)
+  lastSeenAt  DateTime?
+  source      String    @default("telemetry") // telemetry | import | integration | manual
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, hostname])
+  @@index([hostname])
+  @@map("endpoints")
+}
+
+// ---------------------------------------------------------------------------
+// AI agents — providers (online or local), per-agent profiles, run log.
+// ---------------------------------------------------------------------------
+
+enum AiAutonomy {
+  OFF // agent disabled
+  SUGGEST // analysis and recommendations only
+  CONTAIN_WITH_APPROVAL // proposes containment; a human approves
+  AUTO_CONTAIN // executes allowed containment above the confidence bar
+}
+
+model AiProvider {
+  id               String    @id @default(cuid())
+  name             String    @unique
+  kind             String // anthropic | openai_compatible
+  baseUrl          String?
+  model            String
+  apiKeyCipher     String?   @db.Text
+  isLocal          Boolean   @default(false)
+  enabled          Boolean   @default(true)
+  isDefault        Boolean   @default(false)
+  lastCheckedAt    DateTime?
+  lastCheckOk      Boolean?
+  lastCheckMessage String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  agents AiAgentProfile[]
+
+  @@map("ai_providers")
+}
+
+model AiAgentProfile {
+  id             String               @id @default(cuid())
+  key            String               @unique // triage | containment | phishing | threat_intel | report | investigation
+  name           String
+  description    String?
+  enabled        Boolean              @default(true)
+  providerId     String? // null = platform default provider
+  model          String? // overrides the provider's model
+  autonomy       AiAutonomy           @default(SUGGEST)
+  allowedActions PlaybookActionType[] @default([])
+  minConfidence  Float                @default(0.8)
+  effort         String               @default("medium") // low | medium | high
+  instructions   String?              @db.Text
+  updatedAt      DateTime             @updatedAt
+
+  provider AiProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@map("ai_agent_profiles")
+}
+
+model AiRun {
+  id            String   @id @default(cuid())
+  caseId        String?
+  agentKey      String
+  trigger       String // auto | manual
+  engine        String // provider name, or "built-in"
+  model         String?
+  isLocal       Boolean  @default(false)
+  status        String // succeeded | fallback | failed
+  confidence    Float?
+  output        Json?
+  grounding     Json? // claims checked against case evidence
+  error         String?  @db.Text
+  durationMs    Int?
+  inputTokens   Int?
+  outputTokens  Int?
+  requestedById String?
+  feedback      String? // agree | disagree
+  feedbackNote  String?
+  feedbackById  String?
+  createdAt     DateTime @default(now())
+
+  case       Case?            @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  feedbackBy User?            @relation("AiRunFeedback", fields: [feedbackById], references: [id], onDelete: SetNull)
+  actions    ResponseAction[]
+
+  @@index([caseId, createdAt])
+  @@index([createdAt])
+  @@map("ai_runs")
+}
+
+// One containment step on one target, proposed by an AI agent or requested
+// by an analyst, and gated by the response policy (src/lib/response/policy.ts).
+enum ResponseActionStatus {
+  SUGGESTED // recommendation only — autonomy doesn't allow acting
+  PENDING_APPROVAL
+  EXECUTED
+  REJECTED
+  FAILED
+  BLOCKED // failed a guardrail (ungrounded target, kill switch, ...)
+  ROLLED_BACK
+}
+
+model ResponseAction {
+  id            String               @id @default(cuid())
+  caseId        String
+  tenantId      String?
+  actionType    PlaybookActionType
+  target        String?
+  parameters    Json?
+  source        String // ai | analyst
+  status        ResponseActionStatus
+  rationale     String?              @db.Text
+  confidence    Float?
+  policyReason  String?
+  aiRunId       String?
+  requestedById String?
+  decidedById   String?
+  decidedAt     DateTime?
+  result        Json?
+  createdAt     DateTime             @default(now())
+
+  case  Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  aiRun AiRun? @relation(fields: [aiRunId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([caseId])
+  @@map("response_actions")
+}
+
+model PlatformSetting {
+  key         String   @id
+  value       Json
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Commercial — quotes from the Build & Price configurator.
+// ---------------------------------------------------------------------------
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  LOST
+}
+
+model Quote {
+  id          String      @id @default(cuid())
+  reference   String      @unique // Q-2026-0001
+  clientName  String
+  tenantId    String?
+  status      QuoteStatus @default(DRAFT)
+  currency    String      @default("USD")
+  config      Json
+  totals      Json
+  notes       String?     @db.Text
+  validUntil  DateTime?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("quotes")
+}
+
+// Price book edits over the defaults in src/lib/pricing/catalog.ts.
+model PriceOverride {
+  itemKey     String   @id
+  unitPrice   Float
+  unitCost    Float?
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("price_overrides")
 }

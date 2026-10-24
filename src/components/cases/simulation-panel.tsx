@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { cn } from "@/lib/utils";
 
-export function SimulationPanel() {
+export function SimulationPanel({ tenantId, tenantName }: { tenantId: string | null; tenantName: string | null }) {
   const router = useRouter();
   const [tactics, setTactics] = React.useState<string[]>([]);
   const [count, setCount] = React.useState(10);
@@ -23,7 +23,7 @@ export function SimulationPanel() {
   const { data: available } = useQuery({ queryKey: ["siem-tactics"], queryFn: () => listTacticsAction() });
 
   const run = useMutation({
-    mutationFn: () => runSimulationAction(tactics.length ? { tactics } : { count, intensity }),
+    mutationFn: () => runSimulationAction({ ...(tactics.length ? { tactics } : { count, intensity }), tenantId: tenantId ?? undefined }),
     onSuccess: ({ scenarios, summary }) => {
       toast.success(
         `Replayed ${scenarios.length} scenarios: ${summary.eventsIngested} events → ${summary.newDetections} detections, ` +
@@ -41,7 +41,8 @@ export function SimulationPanel() {
       <CardHeader>
         <CardTitle className="text-base">Attack simulation</CardTitle>
         <CardDescription>
-          Replay signal-fusion&apos;s 48 ATT&amp;CK scenarios through the live ingestion and detection pipeline.
+          Replay 48 ATT&amp;CK scenarios through the live ingestion and detection pipeline — into{" "}
+          <span className="font-medium text-foreground">{tenantName ?? "the internal tenant"}</span> (pick a client in the top bar).
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

@@ -119,6 +119,7 @@ export interface AnalyzeInput {
   bytes: Uint8Array;
   detonate: boolean;
   actorId?: string;
+  tenantId?: string | null;
 }
 
 export async function analyzeSubmission(input: AnalyzeInput) {
@@ -286,6 +287,7 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     indicators,
     timeline,
     actorId: input.actorId,
+    tenantId: input.tenantId ?? null,
   });
 
   await logAction({

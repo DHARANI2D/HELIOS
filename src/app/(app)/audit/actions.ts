@@ -1,9 +1,9 @@
 "use server";
 
 import { verifyAuditChain } from "@/lib/audit";
-import { requireUser } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 
 export async function verifyAuditChainAction() {
-  await requireUser();
+  await requirePermission("audit.view");
   return verifyAuditChain();
 }

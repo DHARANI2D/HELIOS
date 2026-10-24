@@ -3,7 +3,9 @@ import { CheckCircle2, Clock, ListChecks, Workflow } from "lucide-react";
 import type { PlaybookActionType } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { auth } from "@/lib/auth";
+import { pageGuard } from "@/lib/session";
+import { can } from "@/lib/rbac";
+import { caseVisibility } from "@/lib/access";
 import { describeTrigger, parseTrigger, type TriggerCondition } from "@/lib/playbooks/trigger";
 import { formatRelative } from "@/lib/format";
 import { StatTile } from "@/components/dashboard/stat-tile";
@@ -41,20 +43,21 @@ async function getExecutionStats() {
 }
 
 export default async function PlaybooksPage() {
-  const session = await auth();
-  const isAdmin = session?.user?.role === "ADMIN";
+  const user = await pageGuard("playbooks.view");
+  const isAdmin = can(user, "playbooks.manage");
+  const canApprove = can(user, "containment.approve");
   const [playbooks, pending, recent, { runs24h, succeeded24h }] = await Promise.all([
     db.playbook.findMany({
       orderBy: [{ enabled: "desc" }, { priority: "desc" }, { name: "asc" }],
       include: { actions: { orderBy: { order: "asc" } }, _count: { select: { executions: true } } },
     }),
     db.playbookExecution.findMany({
-      where: { status: "PENDING_APPROVAL" },
+      where: { status: "PENDING_APPROVAL", case: caseVisibility(user) },
       orderBy: { startedAt: "asc" },
       include: { playbook: { select: { name: true } }, case: { select: { id: true, title: true, severity: true } } },
     }),
     db.playbookExecution.findMany({
-      where: { status: { not: "PENDING_APPROVAL" } },
+      where: { status: { not: "PENDING_APPROVAL" }, case: caseVisibility(user) },
       orderBy: { startedAt: "desc" },
       take: 25,
       include: { playbook: { select: { name: true } }, case: { select: { id: true, title: true } } },
@@ -75,7 +78,7 @@ export default async function PlaybooksPage() {
         <CardHeader>
           <CardTitle className="text-base">Approval queue</CardTitle>
           <CardDescription>
-            Containment that requires a human decision. {isAdmin ? "Approving runs the playbook immediately." : "Only admins can approve."}
+            Containment that requires a human decision. {canApprove ? "Approving runs the playbook immediately." : "Your role can see these; SOC managers, incident responders and client admins approve."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -102,7 +105,7 @@ export default async function PlaybooksPage() {
                     </TableCell>
                     <TableCell className="text-sm">{p.playbook.name}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{p.triggeredBy} · {formatRelative(p.startedAt)}</TableCell>
-                    <TableCell className="flex justify-end"><ExecutionDecision executionId={p.id} /></TableCell>
+                    <TableCell className="flex justify-end"><ExecutionDecision executionId={p.id} canApprove={canApprove} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

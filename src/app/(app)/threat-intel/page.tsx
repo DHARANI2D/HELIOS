@@ -3,6 +3,8 @@ import { Ban, Download, Fingerprint, Globe2, ShieldAlert, TriangleAlert } from "
 import type { IndicatorType, Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { pageGuard } from "@/lib/session";
+import { can } from "@/lib/rbac";
 import { configuredProviders } from "@/lib/threat-intel/providers";
 import { indicatorVerdict } from "@/lib/threat-intel/service";
 import { formatRelative } from "@/lib/format";
@@ -39,6 +41,8 @@ function one(v: string | string[] | undefined) {
 }
 
 export default async function ThreatIntelPage({ searchParams }: PageProps<"/threat-intel">) {
+  const user = await pageGuard("intel.view");
+  const canManage = can(user, "intel.manage");
   const sp = await searchParams;
   const page = parsePage(sp.page);
   const type = TYPES.find((t) => t === one(sp.type));
@@ -181,7 +185,7 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
                           <RecheckButton indicatorId={i.id} />
-                          <BlockToggle indicatorId={i.id} blocked={!!i.blockedAt} />
+                          {canManage ? <BlockToggle indicatorId={i.id} blocked={!!i.blockedAt} /> : i.blockedAt ? <Badge variant="outline">Blocked</Badge> : null}
                         </div>
                       </TableCell>
                     </TableRow>

@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { Bot, Cpu, Search } from "lucide-react";
+import { Bot, Cpu, HardDrive, Search } from "lucide-react";
 
 import { db } from "@/lib/db";
-import { claudeConfigured, INVESTIGATION_MODEL } from "@/lib/investigations/agents";
+import { pageGuard } from "@/lib/session";
+import { caseScope, selectedTenantId } from "@/lib/access";
+import { tenantOptions } from "@/lib/tenants";
+import { resolveProvider } from "@/lib/ai/resolve";
 import type { InvestigationMetadata } from "@/lib/investigations/service";
 import { formatPercent, formatRelative } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -21,13 +24,21 @@ import { NewInvestigationForm } from "@/components/investigations/new-investigat
 
 const PIPELINE_VARIANT = { queued: "outline", running: "secondary", completed: "success", failed: "destructive" } as const;
 
+const ENGINE_LABEL = { claude: "Claude", local: "local model", heuristic: "deterministic" } as const;
+
 export default async function InvestigationsPage() {
-  const investigations = await db.case.findMany({
-    where: { sourceType: "SOC_INVESTIGATION" },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-  const claude = claudeConfigured();
+  const user = await pageGuard("investigations.run");
+  const [investigations, provider, tenants, defaultTenantId] = await Promise.all([
+    db.case.findMany({
+      where: { AND: [await caseScope(user), { sourceType: "SOC_INVESTIGATION" }] },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: { tenant: { select: { name: true } } },
+    }),
+    resolveProvider("investigation"),
+    tenantOptions(),
+    selectedTenantId(user),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -40,7 +51,7 @@ export default async function InvestigationsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <NewInvestigationForm />
+            <NewInvestigationForm tenants={tenants} defaultTenantId={defaultTenantId} />
           </CardContent>
         </Card>
         <Card>
@@ -48,13 +59,14 @@ export default async function InvestigationsPage() {
             <CardTitle className="text-base">Analysis engine</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
-            {claude ? (
+            {provider ? (
               <div className="flex items-start gap-3">
-                <Bot className="mt-0.5 size-5 shrink-0" />
+                {provider.isLocal ? <HardDrive className="mt-0.5 size-5 shrink-0" /> : <Bot className="mt-0.5 size-5 shrink-0" />}
                 <div>
-                  <p className="font-medium">Claude agent swarm</p>
+                  <p className="font-medium">{provider.isLocal ? "Local model agent swarm" : "Claude agent swarm"}</p>
                   <p className="text-xs text-muted-foreground">
-                    Model <code>{INVESTIGATION_MODEL}</code> with structured outputs; the deterministic engine grounds every agent and takes over any stage whose model call fails.
+                    {provider.name}, model <code>{provider.model}</code>, with structured outputs; the deterministic engine grounds every agent and takes over any stage whose model call fails.
+                    Change it under <Link href="/ai" className="underline">AI Agents</Link>.
                   </p>
                 </div>
               </div>
@@ -65,7 +77,7 @@ export default async function InvestigationsPage() {
                   <p className="font-medium">Deterministic forensic engine</p>
                   <p className="text-xs text-muted-foreground">
                     20 rules covering macro droppers, encoded PowerShell, LOLBins, credential dumping, persistence, lateral movement, C2, and
-                    ransomware precursors. Set <code>ANTHROPIC_API_KEY</code> to add the Claude agent swarm.
+                    ransomware precursors. Connect Claude or a local model under <Link href="/ai" className="underline">AI Agents</Link> to add the agent swarm.
                   </p>
                 </div>
               </div>
@@ -87,6 +99,7 @@ export default async function InvestigationsPage() {
                 <TableRow>
                   <TableHead>Severity</TableHead>
                   <TableHead>Investigation</TableHead>
+                  <TableHead>Client</TableHead>
                   <TableHead>Pipeline</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Events</TableHead>
@@ -104,11 +117,12 @@ export default async function InvestigationsPage() {
                         <Link href={`/cases/${c.id}`} className="line-clamp-1 font-medium hover:underline">{c.title}</Link>
                         {c.verdict && <span className="text-xs capitalize text-muted-foreground">Verdict: {c.verdict}</span>}
                       </TableCell>
+                      <TableCell className="text-xs">{c.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}</TableCell>
                       <TableCell>
                         {meta?.pipeline ? (
                           <div className="flex items-center gap-1.5">
                             <Badge variant={PIPELINE_VARIANT[meta.pipeline.status]}>{meta.pipeline.status}</Badge>
-                            <span className="text-xs text-muted-foreground">{meta.pipeline.engine === "claude" ? "Claude" : "deterministic"}</span>
+                            <span className="text-xs text-muted-foreground">{ENGINE_LABEL[meta.pipeline.engine] ?? meta.pipeline.engine}</span>
                           </div>
                         ) : (
                           "—"

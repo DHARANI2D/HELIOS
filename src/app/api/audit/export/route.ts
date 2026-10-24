@@ -1,11 +1,14 @@
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { currentUser } from "@/lib/session";
+import { can } from "@/lib/rbac";
+import { logAction } from "@/lib/audit";
 
 // Full chain export, in chain order, with every field needed to re-verify
 // the hashes offline (see lib/audit.ts computeEntryHash).
 export async function GET() {
-  const session = await auth();
-  if (!session?.user) return new Response("Unauthorized", { status: 401 });
+  const user = await currentUser();
+  if (!user) return new Response("Unauthorized", { status: 401 });
+  if (!can(user, "audit.export")) return new Response("Forbidden", { status: 403 });
 
   const logs = await db.auditLog.findMany({
     orderBy: { seq: "asc" },
@@ -22,6 +25,7 @@ export async function GET() {
     },
   });
 
+  await logAction({ actorId: user.id, action: "audit.exported", detail: { entries: logs.length } });
   return new Response(JSON.stringify({ exportedAt: new Date().toISOString(), entries: logs }, null, 2), {
     headers: {
       "content-type": "application/json",

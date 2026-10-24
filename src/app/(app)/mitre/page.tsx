@@ -3,6 +3,8 @@ import { Crosshair, Layers, Radar, ShieldCheck } from "lucide-react";
 import type { CaseSource } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { pageGuard } from "@/lib/session";
+import { caseScope } from "@/lib/access";
 import { detectionCapabilities } from "@/lib/mitre/coverage";
 import { CASE_SOURCE_LABEL } from "@/lib/cases/labels";
 import { cn } from "@/lib/utils";
@@ -33,11 +35,14 @@ function bucketFor(count: number) {
 }
 
 export default async function MitrePage() {
+  const user = await pageGuard("mitre.view");
+  const scope = await caseScope(user);
   const [tactics, mappings] = await Promise.all([
     db.mitreTactic.findMany({
       include: { techniques: { orderBy: { id: "asc" } } },
     }),
     db.caseMitreTechnique.findMany({
+      where: { case: scope },
       select: { techniqueId: true, case: { select: { sourceType: true } } },
     }),
   ]);

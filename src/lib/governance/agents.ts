@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { generateAgentIdentity } from "@/lib/governance/identity";
 import { logAction } from "@/lib/audit";
 
-export async function issueAgentIdentity(name: string, actorId?: string) {
+export async function issueAgentIdentity(name: string, actorId?: string, tenantId: string | null = null) {
   const { publicKeyB64 } = generateAgentIdentity();
 
   const agent = await db.agent.upsert({
@@ -10,6 +10,7 @@ export async function issueAgentIdentity(name: string, actorId?: string) {
     update: { publicKey: publicKeyB64, status: "ACTIVE", trust: 100, level: 10 },
     create: {
       name,
+      tenantId,
       publicKey: publicKeyB64,
       trust: 100,
       level: 10,

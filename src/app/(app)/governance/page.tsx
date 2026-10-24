@@ -1,6 +1,8 @@
 import { UserCog, ShieldCheck, ShieldX, Gauge } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { pageGuard } from "@/lib/session";
+import { tenantScope } from "@/lib/access";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { IdentityForm } from "@/components/governance/identity-form";
 import { AgentGrid } from "@/components/governance/agent-grid";
@@ -13,12 +15,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-async function getGovernanceStats() {
+async function getGovernanceStats(scope: { tenantId?: string | null }) {
   const [total, active, revoked, avgTrustResult] = await Promise.all([
-    db.agent.count(),
-    db.agent.count({ where: { status: "ACTIVE" } }),
-    db.agent.count({ where: { status: "REVOKED" } }),
-    db.agent.aggregate({ _avg: { trust: true } }),
+    db.agent.count({ where: scope }),
+    db.agent.count({ where: { ...scope, status: "ACTIVE" } }),
+    db.agent.count({ where: { ...scope, status: "REVOKED" } }),
+    db.agent.aggregate({ where: scope, _avg: { trust: true } }),
   ]);
 
   return {
@@ -30,7 +32,8 @@ async function getGovernanceStats() {
 }
 
 export default async function GovernancePage() {
-  const stats = await getGovernanceStats();
+  const user = await pageGuard("governance.manage");
+  const stats = await getGovernanceStats(await tenantScope(user));
 
   return (
     <div className="flex flex-col gap-6">

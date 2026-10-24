@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 
 import { TACTICS, TECHNIQUES } from "../src/lib/mitre/catalog";
 import { DEFAULT_PLAYBOOKS } from "../src/lib/playbooks/defaults";
+import { AGENT_KEYS, AGENT_TYPES } from "../src/lib/ai/catalog";
 
 const db = new PrismaClient();
 
@@ -79,10 +80,40 @@ async function seedPlaybooks() {
   console.log(`Seeded ${created} starter playbook(s)`);
 }
 
+// Creates missing agent profiles with their catalog defaults; never touches
+// profiles an admin has already tuned.
+async function seedAgentProfiles() {
+  let created = 0;
+  for (const key of AGENT_KEYS) {
+    const type = AGENT_TYPES[key];
+    const existing = await db.aiAgentProfile.findUnique({ where: { key } });
+    if (existing) continue;
+    await db.aiAgentProfile.create({
+      data: {
+        key,
+        name: type.name,
+        description: type.description,
+        autonomy: type.defaultAutonomy,
+        allowedActions: type.defaultActions,
+        minConfidence: type.defaultMinConfidence,
+      },
+    });
+    created++;
+  }
+  console.log(`Seeded ${created} AI agent profile(s)`);
+}
+
 async function main() {
   await seedAdmin();
   await seedMitre();
   await seedPlaybooks();
+  await seedAgentProfiles();
+  // `npm run db:seed:demo` — sample clients, a user per role, onboarded tools
+  // and live cases. Never run it against production.
+  if (process.argv.includes("--demo")) {
+    const { seedDemo } = await import("./seed-demo");
+    await seedDemo(db);
+  }
 }
 
 main()

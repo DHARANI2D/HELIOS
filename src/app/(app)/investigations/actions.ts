@@ -4,12 +4,14 @@ import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
+import { assertCaseAccess } from "@/lib/access";
+import { resolveTenantInput } from "@/lib/tenants";
 import { logAction } from "@/lib/audit";
 import { resetPipeline, runInvestigationPipeline, startInvestigation } from "@/lib/investigations/service";
 
 export async function startInvestigationAction(formData: FormData) {
-  const user = await requireUser();
+  const user = await requirePermission("investigations.run");
   const title = String(formData.get("title") ?? "").trim();
   if (title.length < 3) throw new Error("Give the investigation a title (3+ characters)");
 
@@ -26,6 +28,7 @@ export async function startInvestigationAction(formData: FormData) {
     pastedLogs: String(formData.get("pastedLogs") ?? ""),
     files,
     actorId: user.id,
+    tenantId: await resolveTenantInput(user, formData.get("tenantId")),
   });
 
   // The swarm can take minutes with Claude; respond now and let the case page
@@ -37,7 +40,8 @@ export async function startInvestigationAction(formData: FormData) {
 }
 
 export async function rerunInvestigationAction(caseId: string) {
-  const user = await requireUser();
+  const user = await requirePermission("investigations.run");
+  await assertCaseAccess(user, caseId);
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { sourceType: true } });
   if (kase.sourceType !== "SOC_INVESTIGATION") throw new Error("Not an investigation case");
   await resetPipeline(caseId);

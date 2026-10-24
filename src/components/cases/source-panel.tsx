@@ -69,9 +69,9 @@ function InvestigationPanel({ kase }: { kase: Case }) {
         <CardHeader>
           <CardTitle className="text-base">Investigation pipeline</CardTitle>
           <CardDescription>
-            {pipeline.engine === "claude"
-              ? `Multi-agent analysis on ${pipeline.model} (triage → RCA ⇄ adversarial QA → report).`
-              : "Deterministic forensic engine (set ANTHROPIC_API_KEY to run the Claude agent swarm)."}{" "}
+            {pipeline.engine !== "heuristic"
+              ? `Multi-agent analysis on ${pipeline.engineName ? `${pipeline.engineName}, ` : ""}${pipeline.model} (triage → RCA ⇄ adversarial QA → report).`
+              : "Deterministic forensic engine (connect Claude or a local model under AI Agents to run the agent swarm)."}{" "}
             {input.eventCount} events from {input.files.map((f) => `${f.name} (${f.platform}, ${f.events})`).join(", ")}.
           </CardDescription>
         </CardHeader>

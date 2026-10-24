@@ -30,12 +30,18 @@ import { Textarea } from "@/components/ui/textarea";
 const ACTION_TYPES: Array<{ value: PlaybookActionType; label: string; hint: string }> = [
   { value: "ISOLATE_HOST", label: "Isolate host", hint: "method=edr_network_containment" },
   { value: "BLOCK_IP", label: "Block IP", hint: "ip=203.0.113.7 (blank = all case IPs)" },
-  { value: "NOTIFY_SLACK", label: "Notify Slack", hint: "channel=#soc\nmessage=Case {{case.title}} on {{host}}" },
+  { value: "NOTIFY_SLACK", label: "Notify channel", hint: "channel=#soc\nmessage=Case {{case.title}} on {{host}}" },
   { value: "CREATE_TICKET", label: "Create ticket", hint: "project=SEC\ntitle=Investigate {{case.title}}" },
   { value: "KILL_PROCESS", label: "Kill process", hint: "process=malware.exe" },
   { value: "COLLECT_LOGS", label: "Collect telemetry", hint: "windowMinutes=60" },
   { value: "REVOKE_AGENT", label: "Revoke AI agent", hint: "" },
   { value: "RESTORE_AGENT", label: "Restore AI agent", hint: "" },
+  { value: "DISABLE_USER", label: "Disable account", hint: "user=jdoe (blank = case account)" },
+  { value: "ENABLE_USER", label: "Re-enable account", hint: "user=jdoe" },
+  { value: "QUARANTINE_FILE", label: "Quarantine file", hint: "hash=<sha256>" },
+  { value: "BLOCK_SENDER", label: "Block sender", hint: "sender=attacker@example.com" },
+  { value: "RELEASE_HOST", label: "Release host", hint: "host=WS-042" },
+  { value: "UNBLOCK_IP", label: "Unblock IP", hint: "ip=203.0.113.7" },
 ];
 
 const DETECTION_SOURCES = [
@@ -57,6 +63,7 @@ const DETECTION_SOURCES = [
   "EMAIL_BODY_URL",
   "EMAIL_ATTACHMENT_FORENSICS",
   "EMAIL_SANDBOX_DETONATION",
+  "VENDOR_ALERT",
 ];
 
 export interface EditablePlaybook {

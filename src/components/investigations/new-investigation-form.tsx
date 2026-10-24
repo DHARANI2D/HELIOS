@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TenantSelect } from "@/components/shared/tenant-select";
 
-export function NewInvestigationForm() {
+export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Array<{ id: string; name: string }>; defaultTenantId: string | null }) {
   const router = useRouter();
   const formRef = React.useRef<HTMLFormElement>(null);
   const [title, setTitle] = React.useState("");
@@ -38,9 +39,15 @@ export function NewInvestigationForm() {
         start.mutate(new FormData(e.currentTarget));
       }}
     >
-      <div className="grid gap-1.5">
-        <Label htmlFor="inv-title">Title</Label>
-        <Input id="inv-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Encoded PowerShell on FIN-042" required />
+      <div className="grid gap-3 sm:grid-cols-[1fr_14rem]">
+        <div className="grid gap-1.5">
+          <Label htmlFor="inv-title">Title</Label>
+          <Input id="inv-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Encoded PowerShell on FIN-042" required />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="inv-tenant">Client</Label>
+          <TenantSelect id="inv-tenant" tenants={tenants} defaultValue={defaultTenantId} />
+        </div>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="inv-details">Alert details</Label>

@@ -22,15 +22,9 @@ import {
   type RcaResult,
   type TriageResult,
 } from "@/lib/investigations/heuristics";
-import {
-  buildEvidence,
-  claudeConfigured,
-  INVESTIGATION_MODEL,
-  qaAgent,
-  rcaAgent,
-  reportAgent,
-  triageAgent,
-} from "@/lib/investigations/agents";
+import { buildEvidence, qaAgent, rcaAgent, reportAgent, triageAgent } from "@/lib/investigations/agents";
+import { resolveProvider } from "@/lib/ai/resolve";
+import type { LlmProvider } from "@/lib/ai/provider";
 
 // Orchestrates an investigation as a SOC_INVESTIGATION case: intake →
 // normalize → entity graph → triage → RCA ⇄ QA (≤3 rounds, as in asip's
@@ -43,10 +37,12 @@ const MAX_EVENTS = 50_000;
 const MAX_STORED_GRAPH_NODES = 400;
 
 export type StageName = "triage" | "rca" | "qa" | "report";
+// "claude" = Anthropic API, "local" = an OpenAI-compatible model server.
+export type PipelineEngine = "claude" | "local" | "heuristic";
 export interface PipelineStage {
   name: StageName;
   status: "pending" | "running" | "done" | "failed";
-  engine?: "claude" | "heuristic";
+  engine?: PipelineEngine;
   note?: string;
   finishedAt?: string;
 }
@@ -54,7 +50,8 @@ export interface PipelineStage {
 export interface InvestigationMetadata {
   pipeline: {
     status: "queued" | "running" | "completed" | "failed";
-    engine: "claude" | "heuristic";
+    engine: PipelineEngine;
+    engineName?: string;
     model?: string;
     stages: PipelineStage[];
     qaIterations: number;
@@ -178,6 +175,13 @@ export interface StartInvestigationInput {
   files: IntakeFile[];
   pastedLogs?: string;
   actorId?: string;
+  tenantId?: string | null;
+}
+
+async function pipelineEngine() {
+  const provider = await resolveProvider("investigation");
+  const engine: PipelineEngine = !provider ? "heuristic" : provider.kind === "anthropic" ? "claude" : "local";
+  return { engine, engineName: provider?.name, model: provider?.model };
 }
 
 export async function startInvestigation(input: StartInvestigationInput) {
@@ -191,12 +195,13 @@ export async function startInvestigation(input: StartInvestigationInput) {
   }
   if (events.length > MAX_EVENTS) throw new Error(`Too many events (${events.length}); the limit is ${MAX_EVENTS}`);
 
-  const engine = claudeConfigured() ? "claude" : "heuristic";
+  const { engine, engineName, model } = await pipelineEngine();
   const metadata: InvestigationMetadata = {
     pipeline: {
       status: "queued",
       engine,
-      model: engine === "claude" ? INVESTIGATION_MODEL : undefined,
+      engineName,
+      model,
       stages: (["triage", "rca", "qa", "report"] as StageName[]).map((name) => ({ name, status: "pending" })),
       qaIterations: 0,
       startedAt: new Date().toISOString(),
@@ -216,6 +221,7 @@ export async function startInvestigation(input: StartInvestigationInput) {
     status: "INVESTIGATING",
     metadata: metadata as unknown as Record<string, unknown>,
     actorId: input.actorId,
+    tenantId: input.tenantId ?? null,
     deferPipelines: true,
   });
 
@@ -251,8 +257,8 @@ async function writeMeta(caseId: string, mutate: (m: InvestigationMetadata) => v
 async function stage<T>(
   caseId: string,
   name: StageName,
-  useClaude: boolean,
-  claude: () => Promise<T>,
+  provider: LlmProvider | null,
+  model: (p: LlmProvider) => Promise<T>,
   fallback: () => T,
 ): Promise<T> {
   await writeMeta(caseId, (m) => {
@@ -264,14 +270,14 @@ async function stage<T>(
   let result: T;
   let engine: PipelineStage["engine"] = "heuristic";
   let note: string | undefined;
-  if (useClaude) {
+  if (provider) {
     try {
-      result = await claude();
-      engine = "claude";
+      result = await model(provider);
+      engine = provider.kind === "anthropic" ? "claude" : "local";
     } catch (err) {
       // A failed model call degrades this stage to the deterministic engine
       // instead of failing the whole investigation; the note says so.
-      note = `Claude call failed (${err instanceof Error ? err.message : String(err)}); used the deterministic engine.`;
+      note = `${provider.name} call failed (${err instanceof Error ? err.message : String(err)}); used the deterministic engine.`;
       result = fallback();
     }
   } else {
@@ -332,7 +338,8 @@ function indicatorsFrom(events: UesEvent[]): NewIndicator[] {
 export async function runInvestigationPipeline(caseId: string) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId } });
   const meta = kase.metadata as unknown as InvestigationMetadata;
-  const useClaude = meta.pipeline.engine === "claude";
+  const provider = meta.pipeline.engine === "heuristic" ? null : await resolveProvider("investigation");
+  const useModel = !!provider;
 
   try {
     const rows = await db.securityEvent.findMany({ where: { caseId }, orderBy: { timestamp: "asc" } });
@@ -351,9 +358,9 @@ export async function runInvestigationPipeline(caseId: string) {
       sharedEvidence: c.reasons,
       rootCause: c.rootCauseNarrative?.slice(0, 400),
     }));
-    const evidence = useClaude ? buildEvidence(events, findings, graph) : "";
+    const evidence = useModel ? buildEvidence(events, findings, graph) : "";
 
-    const triage = await stage(caseId, "triage", useClaude, () => triageAgent(kase.title, meta.input.alertDetails, evidence), () => heuristicTriage(kase.title, findings));
+    const triage = await stage(caseId, "triage", provider, (p) => triageAgent(p, kase.title, meta.input.alertDetails, evidence), () => heuristicTriage(kase.title, findings));
 
     // RCA ⇄ QA loop: rebuild the RCA with the validator's objections until it
     // passes or three rounds have run. Mechanical checks (timestamps exist,
@@ -364,16 +371,16 @@ export async function runInvestigationPipeline(caseId: string) {
     while (iterations < MAX_QA_ITERATIONS) {
       iterations++;
       const feedback = qa?.issues;
-      rca = await stage(caseId, "rca", useClaude, () => rcaAgent(triage, evidence, feedback, prior), () => heuristicRca(findings, graph, prior));
+      rca = await stage(caseId, "rca", provider, (p) => rcaAgent(p, triage, evidence, feedback, prior), () => heuristicRca(findings, graph, prior));
       const currentRca = rca;
-      qa = await stage(caseId, "qa", useClaude, () => qaAgent(currentRca, evidence), () => heuristicQa(currentRca, events, graph));
+      qa = await stage(caseId, "qa", provider, (p) => qaAgent(p, currentRca, evidence), () => heuristicQa(currentRca, events, graph));
       const mechanical = heuristicQa(currentRca, events, graph);
       const mergedIssues = [...new Set([...qa.issues, ...mechanical.issues])];
       qa = { ...qa, issues: mergedIssues, is_valid: qa.is_valid && mechanical.is_valid };
       await writeMeta(caseId, (m) => {
         m.pipeline.qaIterations = iterations;
       });
-      if (qa.is_valid || !useClaude) break; // the deterministic RCA wouldn't change on retry
+      if (qa.is_valid || !useModel) break; // the deterministic RCA wouldn't change on retry
     }
 
     const finalRca = rca!;
@@ -381,8 +388,8 @@ export async function runInvestigationPipeline(caseId: string) {
     const report = await stage(
       caseId,
       "report",
-      useClaude,
-      () => reportAgent(kase.title, triage, finalRca, finalQa),
+      provider,
+      (p) => reportAgent(p, kase.title, triage, finalRca, finalQa),
       () => heuristicReport({ title: kase.title, triage, rca: finalRca, qa: finalQa, findings, events }),
     );
 
@@ -458,12 +465,13 @@ export async function runInvestigationPipeline(caseId: string) {
 
 // Reset pipeline state for a re-run (after a failure or a stalled run).
 export async function resetPipeline(caseId: string) {
-  const engine = claudeConfigured() ? "claude" : "heuristic";
+  const { engine, engineName, model } = await pipelineEngine();
   await writeMeta(caseId, (m) => {
     m.pipeline = {
       status: "queued",
       engine,
-      model: engine === "claude" ? INVESTIGATION_MODEL : undefined,
+      engineName,
+      model,
       stages: (["triage", "rca", "qa", "report"] as StageName[]).map((name) => ({ name, status: "pending" })),
       qaIterations: 0,
       startedAt: new Date().toISOString(),

@@ -3,6 +3,8 @@ import { Download, ScrollText } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { pageGuard } from "@/lib/session";
+import { can } from "@/lib/rbac";
 import { formatDateTime, shortHash } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +38,8 @@ const MODULE_FILTERS = [
 ];
 
 export default async function AuditPage({ searchParams }: PageProps<"/audit">) {
+  const user = await pageGuard("audit.view");
+  const canExport = can(user, "audit.export");
   const sp = await searchParams;
   const page = parsePage(sp.page);
   const moduleFilter = typeof sp.module === "string" ? sp.module : "";
@@ -68,11 +72,13 @@ export default async function AuditPage({ searchParams }: PageProps<"/audit">) {
               so editing or deleting any row breaks every hash after it.
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" asChild>
-            <a href="/api/audit/export">
-              <Download /> Export JSON
-            </a>
-          </Button>
+          {canExport && (
+            <Button variant="outline" size="sm" asChild>
+              <a href="/api/audit/export">
+                <Download /> Export JSON
+              </a>
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <VerifyChainButton />

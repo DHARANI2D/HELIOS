@@ -1,13 +1,9 @@
-import type { Case, PlaybookAction, PlaybookExecution, Prisma } from "@prisma/client";
+import type { Case, PlaybookExecution } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
-import {
-  matchesTrigger,
-  parseTrigger,
-  renderTemplate,
-  type CaseSnapshot,
-} from "@/lib/playbooks/trigger";
+import { matchesTrigger, parseTrigger, type CaseSnapshot } from "@/lib/playbooks/trigger";
+import { CONTAINMENT_ACTIONS, buildActionContext, executeAction, paramsOf, type ActionResult } from "@/lib/response/executor";
 
 // Ported from signal-fusion's services/playbookEngine.ts and generalized from
 // Alert to the unified Case. Execution state lives in PlaybookExecution;
@@ -15,7 +11,6 @@ import {
 // in the audit log.
 
 const CLOSED_STATUSES = new Set(["RESOLVED", "FALSE_POSITIVE"]);
-const CONTAINMENT_ACTIONS = new Set(["ISOLATE_HOST", "BLOCK_IP", "KILL_PROCESS", "REVOKE_AGENT"]);
 
 export async function loadCaseSnapshot(caseId: string): Promise<(CaseSnapshot & { case: Case }) | null> {
   const kase = await db.case.findUnique({
@@ -128,7 +123,7 @@ export async function executePlaybook({ playbookId, caseId, triggeredBy, actorId
 
   for (const action of playbook.actions) {
     try {
-      const result = await runAction(action, kase, context);
+      const result = await executeAction({ name: action.name, actionType: action.actionType, params: paramsOf(action.parameters) }, kase, context, `playbook:${playbook.name}`);
       results.push(result);
       await db.timelineEntry.create({
         data: {
@@ -136,7 +131,7 @@ export async function executePlaybook({ playbookId, caseId, triggeredBy, actorId
           occurredAt: new Date(),
           actor: `playbook:${playbook.name}`,
           action: `playbook.${action.actionType.toLowerCase()}`,
-          detail: `${action.name}: ${result.summary}${result.simulated ? " (simulated — no integration configured)" : ""}`,
+          detail: `${action.name}: ${result.summary}${result.simulated ? " (simulated — no response connector configured)" : ""}`,
           evidence: result as never,
         },
       });
@@ -157,9 +152,9 @@ export async function executePlaybook({ playbookId, caseId, triggeredBy, actorId
     },
   });
 
-  const contained = !failure && results.some((r) => CONTAINMENT_ACTIONS.has(r.actionType) && r.status === "succeeded" && !r.skipped);
+  const contained = !failure && results.some((r) => CONTAINMENT_ACTIONS.has(r.actionType as never) && r.status === "succeeded" && !r.skipped);
   if (contained && !CLOSED_STATUSES.has(kase.status)) {
-    await db.case.update({ where: { id: caseId }, data: { status: "CONTAINED" } });
+    await db.case.update({ where: { id: caseId }, data: { status: "CONTAINED", containedAt: kase.containedAt ?? new Date() } });
   } else if (kase.status === "AWAITING_APPROVAL") {
     const stillPending = await db.playbookExecution.count({ where: { caseId, status: "PENDING_APPROVAL" } });
     if (stillPending === 0) await db.case.update({ where: { id: caseId }, data: { status: "INVESTIGATING" } });
@@ -253,155 +248,4 @@ export async function runRetroactive(playbookId: string, actorId?: string) {
   return { analyzed: cases.length, matched, queuedForApproval: queued };
 }
 
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
-
-export interface ActionResult {
-  action: string;
-  actionType: string;
-  status: "succeeded" | "failed";
-  summary: string;
-  simulated: boolean;
-  skipped?: boolean; // no-op (nothing to act on) — never counts as containment
-  output?: Record<string, unknown>;
-}
-
-interface ActionContext {
-  host?: string;
-  user?: string;
-  ips: string[];
-  vars: Record<string, string | undefined>;
-}
-
-async function buildActionContext(kase: Case): Promise<ActionContext> {
-  const metadata = (kase.metadata ?? {}) as Record<string, unknown>;
-  const [hostEvent, userEvent, ipLinks] = await Promise.all([
-    db.securityEvent.findFirst({ where: { caseId: kase.id, hostName: { not: null } }, select: { hostName: true } }),
-    db.securityEvent.findFirst({ where: { caseId: kase.id, userName: { not: null } }, select: { userName: true } }),
-    db.caseIndicator.findMany({ where: { caseId: kase.id, indicator: { type: "IP" } }, include: { indicator: true } }),
-  ]);
-  const host = (metadata.hostName as string | undefined) ?? hostEvent?.hostName ?? undefined;
-  const user = (metadata.userName as string | undefined) ?? userEvent?.userName ?? undefined;
-  const ips = ipLinks.map((l) => l.indicator.value);
-  return {
-    host,
-    user,
-    ips,
-    vars: {
-      "case.id": kase.id,
-      "case.title": kase.title,
-      "case.severity": kase.severity,
-      "case.source": kase.sourceType.replaceAll("_", " "),
-      host: host ?? "unknown host",
-      user: user ?? "unknown user",
-      ips: ips.length ? ips.join(", ") : "no IPs",
-    },
-  };
-}
-
-function param(action: PlaybookAction, key: string): string | undefined {
-  const params = (action.parameters ?? {}) as Prisma.JsonObject;
-  const value = params[key];
-  return typeof value === "string" ? value : typeof value === "number" ? String(value) : undefined;
-}
-
-async function runAction(action: PlaybookAction, kase: Case, ctx: ActionContext): Promise<ActionResult> {
-  const base = { action: action.name, actionType: action.actionType };
-
-  switch (action.actionType) {
-    case "BLOCK_IP": {
-      const explicit = param(action, "ip");
-      const ips = explicit ? [explicit] : ctx.ips;
-      if (ips.length === 0) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No public IPs linked to this case — nothing to block" };
-      }
-      // A real effect inside HELIOS: the shared indicator store doubles as the
-      // blocklist exported on the Threat Intelligence page.
-      for (const ip of ips) {
-        await db.threatIndicator.upsert({
-          where: { type_value: { type: "IP", value: ip } },
-          update: { blockedAt: new Date() },
-          create: { type: "IP", value: ip, providerData: {}, sources: [], expiresAt: new Date(), blockedAt: new Date() },
-        });
-      }
-      return { ...base, status: "succeeded", simulated: false, summary: `Added ${ips.join(", ")} to the HELIOS blocklist`, output: { blocked: ips } };
-    }
-
-    case "REVOKE_AGENT":
-    case "RESTORE_AGENT": {
-      if (kase.sourceType !== "AGENT_GOVERNANCE" || !kase.sourceRef) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "Case is not tied to an AI agent — skipped" };
-      }
-      const revoke = action.actionType === "REVOKE_AGENT";
-      const agent = await db.agent.update({
-        where: { id: kase.sourceRef },
-        data: revoke
-          ? { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" }
-          : { status: "ACTIVE", trust: 100, level: 10, mode: "FULL_ACCESS" },
-      });
-      return {
-        ...base,
-        status: "succeeded",
-        simulated: false,
-        summary: `${revoke ? "Revoked" : "Restored"} agent ${agent.name}`,
-        output: { agentId: agent.id, status: agent.status },
-      };
-    }
-
-    case "COLLECT_LOGS": {
-      // Pull related telemetry (same host or user, ±window) into the case.
-      const windowMinutes = Number(param(action, "windowMinutes") ?? 60);
-      const or: Prisma.SecurityEventWhereInput[] = [];
-      if (ctx.host) or.push({ hostName: ctx.host });
-      if (ctx.user) or.push({ userName: ctx.user });
-      if (or.length === 0) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No host or user on this case to collect telemetry for" };
-      }
-      const from = new Date(kase.createdAt.getTime() - windowMinutes * 60_000);
-      const to = new Date(kase.createdAt.getTime() + windowMinutes * 60_000);
-      const { count } = await db.securityEvent.updateMany({
-        where: { caseId: null, OR: or, timestamp: { gte: from, lte: to } },
-        data: { caseId: kase.id },
-      });
-      return { ...base, status: "succeeded", simulated: false, summary: `Attached ${count} related events to the case`, output: { attached: count } };
-    }
-
-    case "NOTIFY_SLACK": {
-      const message = renderTemplate(param(action, "message") ?? "HELIOS case update: {{case.title}}", ctx.vars);
-      const channel = param(action, "channel");
-      const webhook = process.env.SLACK_WEBHOOK_URL;
-      if (!webhook) {
-        return { ...base, status: "succeeded", simulated: true, summary: `Would post to ${channel ?? "Slack"}: "${message}"`, output: { channel, message } };
-      }
-      const res = await fetch(webhook, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: message, channel }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new Error(`Slack webhook returned HTTP ${res.status}`);
-      return { ...base, status: "succeeded", simulated: false, summary: `Posted to ${channel ?? "Slack"}: "${message}"`, output: { channel, message } };
-    }
-
-    case "CREATE_TICKET": {
-      const title = renderTemplate(param(action, "title") ?? "{{case.title}}", ctx.vars);
-      const project = param(action, "project") ?? "SEC";
-      const ticketId = `${project}-${kase.id.slice(-6).toUpperCase()}`;
-      return { ...base, status: "succeeded", simulated: true, summary: `Ticket ${ticketId}: "${title}"`, output: { ticketId, title, system: param(action, "system") ?? "jira" } };
-    }
-
-    case "ISOLATE_HOST": {
-      const host = param(action, "host") ?? ctx.host;
-      if (!host) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No host identified on this case — nothing to isolate" };
-      }
-      return { ...base, status: "succeeded", simulated: true, summary: `Isolated ${host} via ${param(action, "method") ?? "EDR containment"}`, output: { host } };
-    }
-
-    case "KILL_PROCESS": {
-      const process = param(action, "process") ?? "the flagged process";
-      return { ...base, status: "succeeded", simulated: true, summary: `Terminated ${process} on ${ctx.host ?? "the affected host"}`, output: { process, host: ctx.host } };
-    }
-  }
-}
+export type { ActionResult };

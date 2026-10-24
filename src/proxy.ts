@@ -4,8 +4,11 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const isAuthRoute = req.nextUrl.pathname.startsWith("/login");
   const isApiAuthRoute = req.nextUrl.pathname.startsWith("/api/auth");
+  // Machine-to-machine routes authenticate themselves (ingest tokens,
+  // feed tokens) and must never be redirected to the login page.
+  const isMachineRoute = ["/api/ingest/", "/api/health", "/api/threat-intel/blocklist"].some((p) => req.nextUrl.pathname.startsWith(p));
 
-  if (isApiAuthRoute) return;
+  if (isApiAuthRoute || isMachineRoute) return;
 
   if (!isLoggedIn && !isAuthRoute) {
     const loginUrl = new URL("/login", req.nextUrl.origin);

@@ -1,18 +1,19 @@
-import type { CaseSeverity, CaseStatus, Prisma } from "@prisma/client";
+import type { CaseSeverity, CaseStatus, Prisma, SecurityDomain } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
 
-// Analyst-driven case lifecycle: triage status, assignment, notes. Shared by
-// every module's case view.
+// Analyst-driven case lifecycle: triage status and severity, plus the list
+// filters. Assignment, comments and escalation live in lib/cases/collab.
 
 export async function setCaseStatus(caseId: string, status: CaseStatus, actorId: string, note?: string) {
-  const before = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { status: true } });
+  const before = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { status: true, acknowledgedAt: true } });
   const closing = CLOSED_STATUSES.includes(status);
+  // The first human status change counts as acknowledgement.
   await db.case.update({
     where: { id: caseId },
-    data: { status, resolvedAt: closing ? new Date() : null },
+    data: { status, resolvedAt: closing ? new Date() : null, ...(before.acknowledgedAt ? {} : { acknowledgedAt: new Date() }) },
   });
   await db.timelineEntry.create({
     data: {
@@ -32,23 +33,7 @@ export async function setCaseSeverity(caseId: string, severity: CaseSeverity, ac
   await logAction({ actorId, caseId, action: "case.severity_changed", detail: { from: before.severity, to: severity } });
 }
 
-export async function assignCase(caseId: string, assigneeId: string | null, actorId: string) {
-  await db.case.update({ where: { id: caseId }, data: { assignedToId: assigneeId } });
-  await logAction({ actorId, caseId, action: "case.assigned", detail: { assigneeId } });
-}
-
-export async function addCaseNote(caseId: string, note: string, actor: { id: string; name?: string | null }) {
-  await db.timelineEntry.create({
-    data: {
-      caseId,
-      occurredAt: new Date(),
-      actor: actor.name ?? "analyst",
-      action: "analyst.note",
-      detail: note,
-    },
-  });
-  await logAction({ actorId: actor.id, caseId, action: "case.note_added", detail: { length: note.length } });
-}
+export type CaseQueue = "mine" | "unassigned" | "approval" | "sla" | "ai" | "tier3";
 
 export interface CaseListFilters {
   sourceType?: Prisma.CaseWhereInput["sourceType"];
@@ -56,10 +41,37 @@ export interface CaseListFilters {
   severity?: CaseSeverity;
   technique?: string;
   q?: string;
+  domain?: SecurityDomain;
+  queue?: CaseQueue;
+  viewerId?: string;
+  now?: Date;
 }
 
 export function caseWhere(filters: CaseListFilters): Prisma.CaseWhereInput {
   const where: Prisma.CaseWhereInput = {};
+  if (filters.domain) where.domain = filters.domain;
+  switch (filters.queue) {
+    case "mine":
+      where.assignedToId = filters.viewerId ?? "__none__";
+      break;
+    case "unassigned":
+      where.assignedToId = null;
+      break;
+    case "approval":
+      where.status = "AWAITING_APPROVAL";
+      break;
+    case "sla":
+      where.acknowledgedAt = null;
+      where.slaDueAt = { lte: new Date((filters.now ?? new Date()).getTime() + 30 * 60_000) };
+      break;
+    case "ai":
+      where.aiStatus = "completed";
+      where.acknowledgedAt = null;
+      break;
+    case "tier3":
+      where.tier = 3;
+      break;
+  }
   if (filters.sourceType) where.sourceType = filters.sourceType;
   if (filters.severity) where.severity = filters.severity;
   // A parent technique also matches cases mapped to its sub-techniques.
@@ -68,8 +80,10 @@ export function caseWhere(filters: CaseListFilters): Prisma.CaseWhereInput {
       some: { OR: [{ techniqueId: filters.technique }, { techniqueId: { startsWith: `${filters.technique}.` } }] },
     };
   }
-  if (filters.status === "open") where.status = { notIn: CLOSED_STATUSES };
-  if (filters.status === "closed") where.status = { in: CLOSED_STATUSES };
+  if (filters.queue !== "approval") {
+    if (filters.status === "open") where.status = { notIn: CLOSED_STATUSES };
+    if (filters.status === "closed") where.status = { in: CLOSED_STATUSES };
+  }
   if (filters.q) {
     where.OR = [
       { title: { contains: filters.q, mode: "insensitive" } },

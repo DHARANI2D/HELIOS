@@ -2,6 +2,9 @@ import Link from "next/link";
 import { MailWarning } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { pageGuard } from "@/lib/session";
+import { caseScope, selectedTenantId } from "@/lib/access";
+import { tenantOptions } from "@/lib/tenants";
 import type { ForensicsMetadata } from "@/lib/forensics/service";
 import { formatRelative } from "@/lib/format";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,11 +22,17 @@ import { AnalyzeForm } from "@/components/forensics/analyze-form";
 import { UrlDetonator } from "@/components/forensics/url-detonator";
 
 export default async function ForensicsPage() {
-  const analyses = await db.case.findMany({
-    where: { sourceType: "EMAIL_ANALYSIS" },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  const user = await pageGuard("forensics.run");
+  const [analyses, tenants, defaultTenantId] = await Promise.all([
+    db.case.findMany({
+      where: { AND: [await caseScope(user), { sourceType: "EMAIL_ANALYSIS" }] },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      include: { tenant: { select: { name: true } } },
+    }),
+    tenantOptions(),
+    selectedTenantId(user),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -37,7 +46,7 @@ export default async function ForensicsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <AnalyzeForm />
+            <AnalyzeForm tenants={tenants} defaultTenantId={defaultTenantId} />
           </CardContent>
         </Card>
         <Card className="lg:col-span-2">
@@ -64,6 +73,7 @@ export default async function ForensicsPage() {
                 <TableRow>
                   <TableHead>Severity</TableHead>
                   <TableHead>Subject / file</TableHead>
+                  <TableHead>Client</TableHead>
                   <TableHead>Verdict</TableHead>
                   <TableHead>Threat</TableHead>
                   <TableHead className="text-right">Score</TableHead>
@@ -82,6 +92,7 @@ export default async function ForensicsPage() {
                         <Link href={`/cases/${c.id}`} className="line-clamp-1 font-medium hover:underline">{c.title}</Link>
                         {meta?.email?.from && <span className="line-clamp-1 text-xs text-muted-foreground">{meta.email.from}</span>}
                       </TableCell>
+                      <TableCell className="text-xs">{c.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}</TableCell>
                       <TableCell className="text-sm capitalize">{c.verdict ?? "—"}</TableCell>
                       <TableCell className="text-xs">{meta?.verdict?.threatType ? `${meta.verdict.threatType} · ${meta.verdict.threatCategory}` : "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{c.riskScore ?? "—"}</TableCell>

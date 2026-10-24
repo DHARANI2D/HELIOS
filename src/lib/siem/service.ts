@@ -14,6 +14,8 @@ import { extractIndicators, isPrivateIp } from "@/lib/threat-intel/indicators";
 import { fromEventRow, normalize, toEventRow } from "@/lib/siem/adapters";
 import { fingerprintFor, runDetections, severityForRisk } from "@/lib/siem/engine";
 import type { ScoredDetection, TelemetrySource, UnifiedEvent } from "@/lib/siem/types";
+import type { SecurityDomain } from "@prisma/client";
+import { touchEndpoints } from "@/lib/endpoints/service";
 
 // Ingestion → detection → correlation. Replaces signal-fusion's
 // IngestionService + DetectionEngine.runDetections, which re-ran every
@@ -127,12 +129,28 @@ function titleFor(group: ScoredDetection[], riskObject: string, riskObjectType: 
   return `Correlated activity for ${riskObjectType} ${riskObject}: ${shown}${rules.length > 3 ? ` +${rules.length - 3} more` : ""}`;
 }
 
-async function loadWindow(batchId: string): Promise<UnifiedEvent[]> {
+const DOMAIN_FOR_SOURCE: Record<TelemetrySource, SecurityDomain> = {
+  auth: "IDENTITY",
+  endpoint: "ENDPOINT",
+  network: "NETWORK",
+  cloud: "CLOUD",
+};
+
+function dominantDomain(group: ScoredDetection[]): SecurityDomain {
+  const counts = new Map<TelemetrySource, number>();
+  for (const d of group) for (const e of d.matchedEvents) counts.set(e.source, (counts.get(e.source) ?? 0) + 1);
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "endpoint";
+  return DOMAIN_FOR_SOURCE[top];
+}
+
+// The correlation window is per tenant: one client's telemetry never
+// correlates into another client's case.
+async function loadWindow(batchId: string, tenantId: string | null): Promise<UnifiedEvent[]> {
   const since = new Date(Date.now() - WINDOW_MS);
   const [batch, recent] = await Promise.all([
     db.securityEvent.findMany({ where: { batchId } }),
     db.securityEvent.findMany({
-      where: { platform: "signal-fusion", ingestedAt: { gte: since }, NOT: { batchId } },
+      where: { platform: "signal-fusion", tenantId, ingestedAt: { gte: since }, NOT: { batchId } },
       orderBy: { ingestedAt: "desc" },
       take: WINDOW_EVENT_CAP,
     }),
@@ -140,12 +158,21 @@ async function loadWindow(batchId: string): Promise<UnifiedEvent[]> {
   return [...recent, ...batch].map(fromEventRow).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 }
 
-export async function ingestTelemetry(items: IngestItem[], options: { actorId?: string; label?: string } = {}): Promise<IngestSummary> {
-  const batchId = randomUUID();
-  const rows = items.map((item) => toEventRow(normalize(item.source, item.data), batchId));
-  if (rows.length) await db.securityEvent.createMany({ data: rows });
+export interface IngestOptions {
+  actorId?: string;
+  label?: string;
+  tenantId?: string | null;
+  integrationId?: string;
+}
 
-  const events = await loadWindow(batchId);
+export async function ingestTelemetry(items: IngestItem[], options: IngestOptions = {}): Promise<IngestSummary> {
+  const batchId = randomUUID();
+  const tenantId = options.tenantId ?? null;
+  const rows = items.map((item) => ({ ...toEventRow(normalize(item.source, item.data), batchId), tenantId, integrationId: options.integrationId }));
+  if (rows.length) await db.securityEvent.createMany({ data: rows });
+  await touchEndpoints(tenantId, rows, { integrationId: options.integrationId });
+
+  const events = await loadWindow(batchId, tenantId);
   const detections = runDetections(events);
 
   // Drop findings already filed (in an earlier run) or repeated in this one.
@@ -178,7 +205,7 @@ export async function ingestTelemetry(items: IngestItem[], options: { actorId?: 
     const riskScore = Math.max(...group.map((d) => d.riskScore));
     const artifacts = buildCaseArtifacts(group);
     const open = await db.case.findFirst({
-      where: { sourceType: "SIEM_ALERT", sourceRef: key, status: { notIn: CLOSED_STATUSES }, createdAt: { gte: since } },
+      where: { sourceType: "SIEM_ALERT", sourceRef: key, tenantId, status: { notIn: CLOSED_STATUSES }, createdAt: { gte: since } },
       orderBy: { createdAt: "desc" },
       select: { id: true },
     });
@@ -207,6 +234,8 @@ export async function ingestTelemetry(items: IngestItem[], options: { actorId?: 
           batchId,
         },
         actorId: options.actorId,
+        tenantId,
+        domain: dominantDomain(group),
         ...artifacts,
       });
       caseIds.push(kase.id);
@@ -226,7 +255,7 @@ export async function ingestTelemetry(items: IngestItem[], options: { actorId?: 
   await logAction({
     actorId: options.actorId,
     action: "siem.ingest",
-    detail: { ...summary, caseIds: undefined, label: options.label },
+    detail: { ...summary, caseIds: undefined, label: options.label, tenantId, integrationId: options.integrationId },
   });
   return summary;
 }

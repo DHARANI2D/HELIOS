@@ -18,7 +18,7 @@ export function VerifyChainButton() {
         Verify chain integrity
       </Button>
       {result && result.valid && (
-        <span className="flex items-center gap-1.5 text-xs text-success">
+        <span className="flex items-center gap-1.5 text-xs text-success-ink">
           <ShieldCheck className="size-3.5" />
           All {result.checked} entries verified — chain intact
         </span>

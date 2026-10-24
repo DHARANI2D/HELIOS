@@ -12,10 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { TenantSelect } from "@/components/shared/tenant-select";
 
-export function AnalyzeForm() {
+export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id: string; name: string }>; defaultTenantId: string | null }) {
   const router = useRouter();
   const [detonate, setDetonate] = React.useState(false);
+  const [tenantId, setTenantId] = React.useState(defaultTenantId ?? "none");
 
   const done = (r: { caseId: string; verdict: string; score: number }) => {
     toast.success(`Verdict: ${r.verdict} (score ${r.score})`);
@@ -24,7 +26,7 @@ export function AnalyzeForm() {
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Analysis failed");
 
   const analyze = useMutation({ mutationFn: (fd: FormData) => analyzeSubmissionAction(fd), onSuccess: done, onError });
-  const sample = useMutation({ mutationFn: () => analyzeSampleAction(detonate), onSuccess: done, onError });
+  const sample = useMutation({ mutationFn: () => analyzeSampleAction(detonate, tenantId), onSuccess: done, onError });
   const busy = analyze.isPending || sample.isPending;
 
   return (
@@ -35,6 +37,10 @@ export function AnalyzeForm() {
         analyze.mutate(new FormData(e.currentTarget));
       }}
     >
+      <div className="grid gap-1.5 sm:max-w-xs">
+        <Label htmlFor="fx-tenant">Client</Label>
+        <TenantSelect id="fx-tenant" tenants={tenants} value={tenantId} onChange={setTenantId} />
+      </div>
       <div className="grid gap-1.5">
         <Label htmlFor="fx-file">Email (.eml / Outlook .msg) or suspicious file</Label>
         <Input id="fx-file" name="file" type="file" />

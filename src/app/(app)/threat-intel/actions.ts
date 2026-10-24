@@ -5,7 +5,7 @@ import type { IndicatorType } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
-import { requireUser } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 import { classifyIndicator } from "@/lib/threat-intel/indicators";
 import { indicatorReasons, indicatorVerdict, lookupIndicator } from "@/lib/threat-intel/service";
 import { configuredProviders } from "@/lib/threat-intel/providers";
@@ -32,7 +32,7 @@ function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>) {
 export type IndicatorLookup = ReturnType<typeof serialize>;
 
 export async function lookupAction(raw: string, force = false): Promise<IndicatorLookup> {
-  const user = await requireUser();
+  const user = await requirePermission("intel.view");
   const ioc = classifyIndicator(raw);
   if (!ioc) throw new Error("Not a recognizable IP, domain, URL, file hash, or email address");
   const result = await lookupIndicator(ioc.type, ioc.value, { force });
@@ -42,7 +42,7 @@ export async function lookupAction(raw: string, force = false): Promise<Indicato
 }
 
 export async function recheckIndicatorAction(indicatorId: string): Promise<IndicatorLookup> {
-  const user = await requireUser();
+  const user = await requirePermission("intel.view");
   const indicator = await db.threatIndicator.findUniqueOrThrow({ where: { id: indicatorId } });
   const result = await lookupIndicator(indicator.type as IndicatorType, indicator.value, { force: true });
   await logAction({ actorId: user.id, action: "intel.lookup", detail: { type: indicator.type, value: indicator.value, forced: true } });
@@ -53,7 +53,7 @@ export async function recheckIndicatorAction(indicatorId: string): Promise<Indic
 }
 
 export async function setBlockedAction(indicatorId: string, blocked: boolean) {
-  const user = await requireUser();
+  const user = await requirePermission("intel.manage");
   const indicator = await db.threatIndicator.update({
     where: { id: indicatorId },
     data: { blockedAt: blocked ? new Date() : null },

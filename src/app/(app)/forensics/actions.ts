@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireUser } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
+import { resolveTenantInput } from "@/lib/tenants";
 import { logAction } from "@/lib/audit";
 import { analyzeSubmission } from "@/lib/forensics/service";
 import { buildSampleEmail } from "@/lib/forensics/samples";
@@ -11,7 +12,7 @@ import { detonateUrl } from "@/lib/forensics/sandbox";
 const MAX_BYTES = 20 * 1024 * 1024;
 
 export async function analyzeSubmissionAction(formData: FormData) {
-  const user = await requireUser();
+  const user = await requirePermission("forensics.run");
   const detonate = formData.get("detonate") === "on";
   const file = formData.get("file");
   const raw = String(formData.get("raw") ?? "");
@@ -29,22 +30,23 @@ export async function analyzeSubmissionAction(formData: FormData) {
     throw new Error("Upload an .eml / file or paste raw message source");
   }
 
-  const result = await analyzeSubmission({ filename, bytes, detonate, actorId: user.id });
+  const tenantId = await resolveTenantInput(user, formData.get("tenantId"));
+  const result = await analyzeSubmission({ filename, bytes, detonate, actorId: user.id, tenantId });
   revalidatePath("/forensics");
   revalidatePath("/");
   return result;
 }
 
-export async function analyzeSampleAction(detonate: boolean) {
-  const user = await requireUser();
-  const result = await analyzeSubmission({ ...buildSampleEmail(), detonate, actorId: user.id });
+export async function analyzeSampleAction(detonate: boolean, tenantId?: string) {
+  const user = await requirePermission("forensics.run");
+  const result = await analyzeSubmission({ ...buildSampleEmail(), detonate, actorId: user.id, tenantId: await resolveTenantInput(user, tenantId) });
   revalidatePath("/forensics");
   return result;
 }
 
 // Standalone toolkit check (desas's "URL sandbox" tool) — no case filed.
 export async function detonateUrlAction(url: string) {
-  const user = await requireUser();
+  const user = await requirePermission("forensics.run");
   const result = await detonateUrl(url.trim());
   await logAction({ actorId: user.id, action: "forensics.url_detonated", detail: { url: result.url, finalUrl: result.finalUrl, score: result.score, error: result.error } });
   return result;

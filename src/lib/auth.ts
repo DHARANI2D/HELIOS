@@ -5,6 +5,11 @@ import bcrypt from "bcryptjs";
 
 import { db } from "@/lib/db";
 
+// Five wrong passwords lock the account for 15 minutes. The lockout is per
+// account, so a password-spraying run against many accounts still trips it.
+const MAX_FAILED_LOGINS = 5;
+const LOCKOUT_MS = 15 * 60 * 1000;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
   session: { strategy: "jwt" },
@@ -23,11 +28,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = credentials?.password as string | undefined;
         if (!email || !password) return null;
 
-        const user = await db.user.findUnique({ where: { email } });
-        if (!user?.passwordHash) return null;
+        const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() }, include: { tenant: { select: { status: true } } } });
+        if (!user?.passwordHash || !user.active || user.tenant?.status === "SUSPENDED") return null;
+        if (user.lockedUntil && user.lockedUntil > new Date()) return null;
 
         const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) return null;
+        if (!valid) {
+          const failed = user.failedLogins + 1;
+          await db.user.update({
+            where: { id: user.id },
+            data: failed >= MAX_FAILED_LOGINS ? { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : { failedLogins: failed },
+          });
+          return null;
+        }
+        await db.user.update({ where: { id: user.id }, data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() } });
 
         return {
           id: user.id,

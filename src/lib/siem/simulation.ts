@@ -63,9 +63,9 @@ export function selectScenarios(config: SimulationConfig, random: () => number =
   return shuffled.slice(0, Math.min(config.count ?? 10, shuffled.length));
 }
 
-export async function runSimulation(config: SimulationConfig, actorId?: string) {
+export async function runSimulation(config: SimulationConfig, actorId?: string, tenantId: string | null = null) {
   const scenarios = selectScenarios(config);
   const items: IngestItem[] = scenarios.flatMap((s) => s.logs.map((log) => ({ source: log.source, data: log.data })));
-  const summary = await ingestTelemetry(items, { actorId, label: `simulation: ${scenarios.map((s) => s.id).join(", ")}` });
+  const summary = await ingestTelemetry(items, { actorId, tenantId, label: `simulation: ${scenarios.map((s) => s.id).join(", ")}` });
   return { scenarios: scenarios.map((s) => ({ id: s.id, name: s.name, severity: s.severity, tactics: s.mitreTactics })), summary };
 }

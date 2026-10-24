@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { useMutation } from "@tanstack/react-query";
 import { Check, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -9,10 +8,8 @@ import { toast } from "sonner";
 import { decideExecutionAction } from "@/app/(app)/playbooks/actions";
 import { Button } from "@/components/ui/button";
 
-export function ExecutionDecision({ executionId }: { executionId: string }) {
+export function ExecutionDecision({ executionId, canApprove }: { executionId: string; canApprove: boolean }) {
   const router = useRouter();
-  const { data: session } = useSession();
-  const isAdmin = session?.user?.role === "ADMIN";
 
   const decide = useMutation({
     mutationFn: (decision: "approved" | "rejected") => decideExecutionAction(executionId, decision),
@@ -23,8 +20,8 @@ export function ExecutionDecision({ executionId }: { executionId: string }) {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Decision failed"),
   });
 
-  if (!isAdmin) {
-    return <span className="text-xs text-muted-foreground">Awaiting admin approval</span>;
+  if (!canApprove) {
+    return <span className="text-xs text-muted-foreground">Awaiting approval</span>;
   }
 
   return (

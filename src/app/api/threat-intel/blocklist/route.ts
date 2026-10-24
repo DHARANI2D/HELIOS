@@ -1,11 +1,17 @@
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { currentUser } from "@/lib/session";
+import { can } from "@/lib/rbac";
+import { authenticateFeedToken } from "@/lib/integrations/service";
 
 // Plain-text blocklist (one indicator per line) for firewalls / proxies that
-// consume external threat feeds. ?type=IP|DOMAIN|URL narrows it.
+// consume external threat feeds. ?type=IP|DOMAIN|URL narrows it. Signed-in
+// staff can read it; devices authenticate with an onboarded tool's token
+// (Authorization: Bearer <token>).
 export async function GET(request: Request) {
-  const session = await auth();
-  if (!session?.user) return new Response("Unauthorized", { status: 401 });
+  const user = await currentUser();
+  const allowedUser = user && can(user, "intel.view");
+  const device = allowedUser ? null : await authenticateFeedToken(request.headers.get("authorization"));
+  if (!allowedUser && !device) return new Response("Unauthorized", { status: 401 });
 
   const type = new URL(request.url).searchParams.get("type")?.toUpperCase();
   const allowed = ["IP", "DOMAIN", "URL", "FILE_HASH", "EMAIL_ADDRESS"] as const;

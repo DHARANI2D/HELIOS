@@ -1,76 +1,67 @@
 import type { LucideIcon } from "lucide-react";
+import type { UserRole } from "@prisma/client";
 import {
-  LayoutDashboard,
-  ShieldAlert,
-  Search,
-  UserCog,
-  Mail,
-  Globe2,
-  Workflow,
+  Bot,
+  Building2,
+  Calculator,
   Crosshair,
+  Globe2,
+  LayoutDashboard,
+  Laptop,
+  Mail,
+  Plug,
   ScrollText,
+  Search,
+  ShieldAlert,
+  UserCog,
+  Users,
+  Workflow,
 } from "lucide-react";
+
+import { can, isClientRole, type Permission } from "@/lib/rbac";
+
+export type NavGroup = "Operate" | "Analyze" | "Intelligence" | "Platform" | "Commercial";
 
 export interface NavItem {
   title: string;
+  // What client users see instead (they look at their own estate, not a SOC).
+  clientTitle?: string;
   href: string;
   icon: LucideIcon;
   description: string;
+  group: NavGroup;
+  permission: Permission;
 }
 
+export const NAV_GROUPS: NavGroup[] = ["Operate", "Analyze", "Intelligence", "Platform", "Commercial"];
+
 export const NAV_ITEMS: NavItem[] = [
-  {
-    title: "Overview",
-    href: "/",
-    icon: LayoutDashboard,
-    description: "Cross-source KPIs and system health",
-  },
-  {
-    title: "Cases & Alerts",
-    href: "/cases",
-    icon: ShieldAlert,
-    description: "Unified detection and case stream",
-  },
-  {
-    title: "Investigations",
-    href: "/investigations",
-    icon: Search,
-    description: "Multi-agent root-cause analysis",
-  },
-  {
-    title: "Agent Governance",
-    href: "/governance",
-    icon: UserCog,
-    description: "AI agent identity, trust, and policy",
-  },
-  {
-    title: "Email & File Forensics",
-    href: "/forensics",
-    icon: Mail,
-    description: "Sandbox detonation and document forensics",
-  },
-  {
-    title: "Threat Intelligence",
-    href: "/threat-intel",
-    icon: Globe2,
-    description: "Shared IOC lookups and enrichment",
-  },
-  {
-    title: "Response Playbooks",
-    href: "/playbooks",
-    icon: Workflow,
-    description: "Automated containment workflows",
-  },
-  {
-    title: "MITRE ATT&CK Coverage",
-    href: "/mitre",
-    icon: Crosshair,
-    description: "Technique coverage across all sources",
-  },
-  {
-    title: "Audit Log",
-    href: "/audit",
-    icon: ScrollText,
-    description: "Hash-chained record of every action",
-  },
+  { title: "Overview", href: "/", icon: LayoutDashboard, group: "Operate", permission: "dashboard.view", description: "Live posture, queues, SLAs and AI activity" },
+  { title: "Cases & Alerts", clientTitle: "Incidents", href: "/cases", icon: ShieldAlert, group: "Operate", permission: "cases.view", description: "Unified detection and case stream" },
+  { title: "Endpoints", href: "/endpoints", icon: Laptop, group: "Operate", permission: "endpoints.view", description: "Endpoint inventory, protection coverage and isolation" },
+  { title: "AI Agents", href: "/ai", icon: Bot, group: "Operate", permission: "ai.view", description: "AI first responders, providers, autonomy and run log" },
+  { title: "Investigations", href: "/investigations", icon: Search, group: "Analyze", permission: "investigations.run", description: "Multi-agent root-cause analysis" },
+  { title: "Email & File Forensics", href: "/forensics", icon: Mail, group: "Analyze", permission: "forensics.run", description: "Sandbox detonation and document forensics" },
+  { title: "Response Playbooks", href: "/playbooks", icon: Workflow, group: "Analyze", permission: "playbooks.view", description: "Automated containment workflows" },
+  { title: "Agent Governance", href: "/governance", icon: UserCog, group: "Analyze", permission: "governance.manage", description: "AI agent identity, trust, and policy" },
+  { title: "Threat Intelligence", href: "/threat-intel", icon: Globe2, group: "Intelligence", permission: "intel.view", description: "Shared IOC lookups and enrichment" },
+  { title: "MITRE ATT&CK Coverage", href: "/mitre", icon: Crosshair, group: "Intelligence", permission: "mitre.view", description: "Technique coverage across all sources" },
+  { title: "Tools & Integrations", clientTitle: "Security tools", href: "/integrations", icon: Plug, group: "Platform", permission: "integrations.view", description: "Onboard security tools per client, role and user" },
+  { title: "Clients", href: "/tenants", icon: Building2, group: "Platform", permission: "tenants.view", description: "Client tenants, plans and SLAs" },
+  { title: "Team & Roles", href: "/team", icon: Users, group: "Platform", permission: "users.manage", description: "Users, roles, queues and what each role can see" },
+  { title: "Audit Log", href: "/audit", icon: ScrollText, group: "Platform", permission: "audit.view", description: "Hash-chained record of every action" },
+  { title: "Build & Price", href: "/pricing", icon: Calculator, group: "Commercial", permission: "pricing.view", description: "Configure a protection stack and estimate costs" },
 ];
+
+export function navFor(role: UserRole): NavItem[] {
+  const client = isClientRole(role);
+  return NAV_ITEMS.filter((item) => can({ role }, item.permission)).map((item) =>
+    client && item.clientTitle ? { ...item, title: item.clientTitle } : item,
+  );
+}
+
+export function navItemFor(pathname: string, items: NavItem[] = NAV_ITEMS): NavItem | undefined {
+  return items
+    .filter((item) => (item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`)))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+}

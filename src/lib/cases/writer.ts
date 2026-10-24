@@ -6,6 +6,7 @@ import type {
   DetectionSource,
   IndicatorType,
   Prisma,
+  SecurityDomain,
 } from "@prisma/client";
 
 import { db } from "@/lib/db";
@@ -14,6 +15,9 @@ import { maxSeverity, severityRank } from "@/lib/severity";
 import { getTactic, getTechnique, parentTechniqueId, resolveTechnique } from "@/lib/mitre/catalog";
 import { recordIndicator, enrichCaseIndicators } from "@/lib/threat-intel/service";
 import { evaluatePlaybooksForCase } from "@/lib/playbooks/engine";
+import { slaDueAt } from "@/lib/plans";
+import { notify, staffFor } from "@/lib/notifications";
+import { scheduleFirstResponse } from "@/lib/ai/first-response";
 
 // The single write path every module uses to file a Case — so detections,
 // timeline, MITRE mappings, indicators, playbook triggers, and the audit
@@ -66,10 +70,21 @@ export interface NewCase extends CaseArtifacts {
   metadata?: Record<string, unknown>;
   resolvedAt?: Date | null;
   actorId?: string;
+  // The client the case belongs to (null = the SOC's own / unassigned).
+  tenantId?: string | null;
+  // Analyst queue; defaults from the source (see DEFAULT_DOMAIN).
+  domain?: SecurityDomain | null;
   // Skip playbook evaluation / enrichment (e.g. while a pipeline is still
   // filling the case in; call finalizeCase when it's done).
   deferPipelines?: boolean;
 }
+
+export const DEFAULT_DOMAIN: Record<CaseSource, SecurityDomain> = {
+  SIEM_ALERT: "ENDPOINT",
+  SOC_INVESTIGATION: "ENDPOINT",
+  EMAIL_ANALYSIS: "EMAIL",
+  AGENT_GOVERNANCE: "AI_AGENTS",
+};
 
 function json(value: unknown) {
   return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
@@ -190,13 +205,28 @@ function scheduleEnrichment(caseId: string) {
 export async function finalizeCase(caseId: string) {
   await evaluatePlaybooksForCase(caseId);
   scheduleEnrichment(caseId);
+  scheduleFirstResponse(caseId);
+}
+
+async function tenantPlan(tenantId: string | null | undefined) {
+  if (!tenantId) return null;
+  const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { plan: true } });
+  if (!tenant) throw new Error(`Unknown tenant ${tenantId}`);
+  return tenant.plan;
 }
 
 export async function createCase(input: NewCase) {
-  const { detections, timeline, techniques, indicators, eventIds, actorId, deferPipelines, metadata, ...fields } = input;
+  const { detections, timeline, techniques, indicators, eventIds, actorId, deferPipelines, metadata, tenantId, domain, ...fields } = input;
+  const plan = await tenantPlan(tenantId);
 
   const kase = await db.case.create({
-    data: { ...fields, metadata: metadata === undefined ? undefined : json(metadata) },
+    data: {
+      ...fields,
+      tenantId: tenantId ?? null,
+      domain: domain ?? DEFAULT_DOMAIN[fields.sourceType],
+      slaDueAt: slaDueAt(new Date(), fields.severity, plan),
+      metadata: metadata === undefined ? undefined : json(metadata),
+    },
   });
   await attachArtifacts(kase.id, { detections, timeline, techniques, indicators, eventIds });
 
@@ -204,8 +234,17 @@ export async function createCase(input: NewCase) {
     actorId,
     caseId: kase.id,
     action: "case.created",
-    detail: { sourceType: kase.sourceType, severity: kase.severity, title: kase.title },
+    detail: { sourceType: kase.sourceType, severity: kase.severity, title: kase.title, tenantId: kase.tenantId, domain: kase.domain },
   });
+
+  if (kase.severity === "CRITICAL") {
+    await notify(await staffFor(["TRIAGE_ANALYST", "INCIDENT_RESPONDER", "SOC_MANAGER"], kase.domain), {
+      kind: "sla",
+      title: `New critical case: ${kase.title}`,
+      body: kase.slaDueAt ? `Acknowledge by ${kase.slaDueAt.toISOString().slice(11, 16)} UTC` : null,
+      caseId: kase.id,
+    }, { exclude: actorId });
+  }
 
   if (!deferPipelines) await finalizeCase(kase.id);
   return kase;
@@ -226,7 +265,13 @@ export async function appendToCase(caseId: string, update: CaseUpdate) {
   const nextSeverity = severity ? maxSeverity(kase.severity, severity) : kase.severity;
   const nextRisk = riskScore !== undefined ? Math.max(kase.riskScore ?? 0, riskScore) : kase.riskScore;
   if (nextSeverity !== kase.severity || nextRisk !== kase.riskScore) {
-    await db.case.update({ where: { id: caseId }, data: { severity: nextSeverity, riskScore: nextRisk } });
+    // An escalation before acknowledgement tightens the SLA deadline.
+    let due = kase.slaDueAt;
+    if (nextSeverity !== kase.severity && !kase.acknowledgedAt) {
+      const tightened = slaDueAt(kase.createdAt, nextSeverity, await tenantPlan(kase.tenantId));
+      if (tightened && (!due || tightened < due)) due = tightened;
+    }
+    await db.case.update({ where: { id: caseId }, data: { severity: nextSeverity, riskScore: nextRisk, slaDueAt: due } });
   }
 
   const { detections } = await attachArtifacts(caseId, artifacts);
