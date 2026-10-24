@@ -11,6 +11,7 @@ import { parseEvtxEvents, parseRecords, parseTelemetry, type ParseResult, type U
 import { isEvtx, parseEvtx } from "@/lib/investigations/evtx";
 import { isXlsx, readXlsx } from "@/lib/investigations/xlsx";
 import { extractZip, readZipDirectory } from "@/lib/archive/zip";
+import { enabledPlaybooks, rankPlaybooks, type CaseTargets } from "@/lib/playbooks/recommend";
 import { buildEntityGraph, type EntityGraph } from "@/lib/investigations/graph";
 import {
   describeEvent,
@@ -429,6 +430,20 @@ async function markFlaggedEvents(rows: SecurityEvent[], events: UesEvent[], find
   }
 }
 
+function targetsFrom(events: UesEvent[]): CaseTargets {
+  const uniq = (xs: Array<string | undefined>) => [...new Set(xs.filter((x): x is string => !!x))];
+  return {
+    hosts: uniq(events.map((e) => e.hostName)),
+    ips: uniq(events.flatMap((e) => [e.dstIp, e.hostIp])),
+    users: uniq(events.map((e) => e.userName)),
+    processes: uniq(events.map((e) => e.processName)),
+    hashes: uniq(events.map((e) => e.fileHash)),
+    emails: [],
+    domains: uniq(events.map((e) => e.query)),
+    agents: [],
+  };
+}
+
 function indicatorsFrom(events: UesEvent[]): NewIndicator[] {
   const out: NewIndicator[] = [];
   for (const e of events) {
@@ -494,12 +509,28 @@ export async function runInvestigationPipeline(caseId: string) {
 
     const finalRca = rca!;
     const finalQa = qa!;
+    // The playbooks in HELIOS that fit, so the report can point at them.
+    const playbooks = rankPlaybooks(
+      {
+        severity: SEVERITY_FROM_TRIAGE[triage.severity] ?? "MEDIUM",
+        sourceType: "SOC_INVESTIGATION",
+        techniqueIds: [...new Set(findings.flatMap((f) => f.techniques))],
+        detectionSources: [...new Set(findings.map((f) => f.detectionSource))],
+        riskScore: null,
+        verdict: null,
+      },
+      [kase.title, meta.input.alertDetails, ...findings.map((f) => f.title)].join(" "),
+      targetsFrom(events),
+      await enabledPlaybooks(),
+      3,
+    ).map((r) => ({ name: r.name, reasons: r.reasons }));
+
     const report = await stage(
       caseId,
       "report",
       provider,
-      (p) => reportAgent(p, kase.title, triage, finalRca, finalQa),
-      () => heuristicReport({ title: kase.title, triage, rca: finalRca, qa: finalQa, findings, events }),
+      (p) => reportAgent(p, kase.title, triage, finalRca, finalQa, playbooks),
+      () => heuristicReport({ title: kase.title, triage, rca: finalRca, qa: finalQa, findings, events, playbooks }),
     );
 
     const severity = SEVERITY_FROM_TRIAGE[triage.severity] ?? "MEDIUM";

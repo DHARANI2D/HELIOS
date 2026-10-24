@@ -148,11 +148,11 @@ export async function qaAgent(provider: LlmProvider, rca: RcaResult, evidence: s
   );
 }
 
-export async function reportAgent(provider: LlmProvider, title: string, triage: TriageResult, rca: RcaResult, qa: QaResult): Promise<string> {
+export async function reportAgent(provider: LlmProvider, title: string, triage: TriageResult, rca: RcaResult, qa: QaResult, playbooks: Array<{ name: string; reasons: string[] }> = []): Promise<string> {
   const { data } = await provider.text({
     effort: "medium",
-    system: `${ANALYST_CONTEXT}\nRole: principal security consultant. Write a formal SOC incident report in GitHub-flavored Markdown with these sections: Executive summary; Root cause analysis & timeline; MITRE ATT&CK mapping (table); Containment & mitigation (Immediate / Short-term / Long-term); Evidence verification (summarize the QA result honestly, including unresolved issues). Start with a level-1 heading. Output only the report.`,
-    user: `<incident title="${title.replaceAll('"', "'")}" />\n<triage>\n${JSON.stringify(triage, null, 2)}\n</triage>\n<rca>\n${JSON.stringify(rca, null, 2)}\n</rca>\n<qa>\n${JSON.stringify(qa, null, 2)}\n</qa>`,
+    system: `${ANALYST_CONTEXT}\nRole: principal security consultant. Write a formal SOC incident report in GitHub-flavored Markdown with these sections: Executive summary; Root cause analysis & timeline; MITRE ATT&CK mapping (table); Containment & mitigation (Immediate / Short-term / Long-term); Evidence verification (summarize the QA result honestly, including unresolved issues). Start with a level-1 heading. Under Containment & mitigation, name the response playbooks listed in <playbooks> that fit and why; never name a playbook that isn't listed. Output only the report.`,
+    user: `<incident title="${title.replaceAll('"', "'")}" />\n<triage>\n${JSON.stringify(triage, null, 2)}\n</triage>\n<rca>\n${JSON.stringify(rca, null, 2)}\n</rca>\n<qa>\n${JSON.stringify(qa, null, 2)}\n</qa>\n<playbooks>\n${JSON.stringify(playbooks, null, 2)}\n</playbooks>`,
   });
   return data;
 }

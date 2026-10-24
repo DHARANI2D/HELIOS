@@ -718,8 +718,9 @@ export function heuristicReport(args: {
   qa: QaResult;
   findings: Finding[];
   events: UesEvent[];
+  playbooks?: Array<{ name: string; reasons: string[] }>;
 }): string {
-  const { title, triage, rca, qa, findings, events } = args;
+  const { title, triage, rca, qa, findings, events, playbooks = [] } = args;
   const hosts = [...new Set(events.map((e) => e.hostName).filter(Boolean))];
   const users = [...new Set(events.map((e) => e.userName).filter(Boolean))];
   const ips = [...new Set(events.map((e) => e.dstIp).filter((ip): ip is string => !!ip && !isPrivateIp(ip)))];
@@ -770,7 +771,10 @@ ${list(shortTerm)}
 
 ### Long-term
 ${list(longTerm)}
-
+${playbooks.length ? `
+### Playbooks in HELIOS
+${playbooks.map((p) => `- **${p.name}** — ${p.reasons.join("; ")}`).join("\n")}
+` : ""}
 ## Evidence verification
 ${qa.is_valid ? `All ${qa.validated_evidence.length} timeline claims trace to ingested events.` : `QA raised ${qa.issues.length} issue(s):\n${qa.issues.map((i) => `- ${i}`).join("\n")}`}
 `;

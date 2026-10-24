@@ -8,7 +8,7 @@ import { can, roleLabel } from "@/lib/rbac";
 import { formatDateTime, formatPercent, formatRelative } from "@/lib/format";
 import { CASE_SOURCE_HREF, CASE_SOURCE_LABEL } from "@/lib/cases/labels";
 import { formatMinutes, parsePlan } from "@/lib/plans";
-import { findMatchingPlaybooks } from "@/lib/playbooks/engine";
+import { recommendPlaybooks } from "@/lib/playbooks/recommend";
 import { findRelatedCases } from "@/lib/cases/related";
 import { indicatorVerdict } from "@/lib/threat-intel/service";
 import { AGENT_TYPES, DISPATCHABLE_AGENTS } from "@/lib/ai/catalog";
@@ -82,8 +82,7 @@ async function loadCasePage(id: string, user: SessionUser) {
     ? await db.user.findMany({ where: { active: true, tenantId: kase.tenantId }, select: { id: true, name: true, email: true, role: true } })
     : [];
 
-  const [matching, events, related, evidence, agents] = await Promise.all([
-    user.isClient ? Promise.resolve([]) : findMatchingPlaybooks(kase.id),
+  const [events, related, evidence, agents] = await Promise.all([
     db.securityEvent.findMany({ where: { caseId: kase.id }, orderBy: { timestamp: "asc" }, take: 50 }),
     user.isClient ? Promise.resolve([]) : findRelatedCases(kase.id),
     gatherEvidence(kase.id),
@@ -95,17 +94,18 @@ async function loadCasePage(id: string, user: SessionUser) {
     ),
   ]);
 
-  return { now, kase, team, clientUsers, matching, events, related, evidence, agents };
+  const recommended = user.isClient ? [] : await recommendPlaybooks(kase.id, evidence.entities);
+  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents };
 }
 
 export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]">) {
   const { id } = await params;
   const user = await pageGuard("cases.view");
   await assertCaseAccess(user, id, "page");
-  const { now, kase, team, clientUsers, matching, events, related, evidence, agents } = await loadCasePage(id, user);
+  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents } = await loadCasePage(id, user);
 
   const ranPlaybookIds = new Set(kase.playbookRuns.map((r) => r.playbookId));
-  const suggestions = matching.filter((p) => !ranPlaybookIds.has(p.id));
+  const suggestions = recommended.filter((p) => !ranPlaybookIds.has(p.id));
   const plan = kase.tenant?.plan ? parsePlan(kase.tenant.plan) : null;
   const watching = kase.watchers.some((w) => w.userId === user.id);
   const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel"].includes(r.agentKey) && r.status !== "failed");
@@ -542,7 +542,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 {kase.playbookRuns.length === 0 && suggestions.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No playbooks matched this case.</p>
+                  <p className="text-sm text-muted-foreground">No playbook fits this case.</p>
                 )}
                 {kase.playbookRuns.map((run) => (
                   <div key={run.id} className="rounded-md border p-3">
@@ -576,13 +576,20 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     )}
                   </div>
                 ))}
-                {suggestions.length > 0 && can(user, "containment.request") && (
+                {suggestions.length > 0 && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs font-medium text-muted-foreground">Matching playbooks not yet run</p>
+                    <p className="text-xs font-medium text-muted-foreground">Recommended, not yet run</p>
                     {suggestions.map((p) => (
-                      <div key={p.id} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="min-w-0 truncate">{p.name}</span>
-                        <RunPlaybookButton caseId={kase.id} playbookId={p.id} />
+                      <div key={p.id} className="flex flex-col gap-1 rounded-md border p-2.5">
+                        <div className="flex items-center justify-between gap-2 text-sm">
+                          <span className="min-w-0 truncate font-medium">{p.name}</span>
+                          {can(user, "containment.request") && <RunPlaybookButton caseId={kase.id} playbookId={p.id} />}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          {p.exactMatch && <Badge variant="info" className="mr-1.5">trigger match</Badge>}
+                          {p.reasons.filter((r) => r !== "Its trigger matches this case").join(" · ")}
+                        </p>
+                        {p.noTarget.length > 0 && <p className="text-[11px] text-warning-ink">Nothing in the evidence for: {p.noTarget.join(", ")}</p>}
                       </div>
                     ))}
                   </div>

@@ -146,6 +146,8 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(kase._count.events).toBe(21);
     expect(kase._count.detections).toBeGreaterThanOrEqual(8);
     expect(kase.mitreTechniques.map((t) => t.techniqueId)).toContain("T1003.001");
+    // The report points at the playbook that fits (credential dumping on a host).
+    expect((kase.metadata as { report: string }).report).toMatch(/### Playbooks in HELIOS\n- \*\*Contain ransomware \/ credential dumping host\*\* — .*Covers T1003/);
   });
 
   it("investigates an uploaded Windows event log", async () => {
