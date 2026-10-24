@@ -3,11 +3,11 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { FlaskConical, KeyRound, Loader2, Settings2 } from "lucide-react";
+import { KeyRound, Loader2, PlugZap, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import type { UserRole } from "@prisma/client";
 
-import { rotateTokenAction, sendTestEventAction, setIntegrationEnabledAction, updateIntegrationAction } from "@/app/(app)/integrations/actions";
+import { rotateTokenAction, setIntegrationEnabledAction, testConnectorAction, updateIntegrationAction } from "@/app/(app)/integrations/actions";
 import { ROLES } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -45,9 +45,9 @@ export function IntegrationControls(props: Props) {
 
   const rotate = useMutation({ mutationFn: () => rotateTokenAction(props.id), onSuccess: (r) => { setToken(r); router.refresh(); }, onError });
   const test = useMutation({
-    mutationFn: () => sendTestEventAction(props.id),
+    mutationFn: () => testConnectorAction(props.id),
     onSuccess: (r) => {
-      toast.success(`Test event: ${r.received} record(s) → ${r.newAlerts} alert(s), ${r.telemetryEvents} telemetry, ${r.casesCreated} new / ${r.casesUpdated} updated case(s)`);
+      toast.success(`Connector answered: ${r.message}`);
       router.refresh();
     },
     onError,
@@ -65,15 +65,15 @@ export function IntegrationControls(props: Props) {
 
   return (
     <div className="flex items-center justify-end gap-1">
+      {props.hasActions && props.responseWebhookUrl && (
+        <Button size="sm" variant="ghost" className="h-7" onClick={() => test.mutate()} disabled={test.isPending || !props.enabled} title="Send a signed PING to the response connector; nothing is acted on">
+          {test.isPending ? <Loader2 className="animate-spin" /> : <PlugZap />} Test connector
+        </Button>
+      )}
       {props.pushes && (
-        <>
-          <Button size="sm" variant="ghost" className="h-7" onClick={() => test.mutate()} disabled={test.isPending || !props.enabled} title="Push a sample payload through the real ingest path">
-            {test.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />} Test
-          </Button>
-          <Button size="sm" variant="ghost" className="h-7" onClick={() => rotate.mutate()} disabled={rotate.isPending} title="Issue a new ingest token">
-            {rotate.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} Token
-          </Button>
-        </>
+        <Button size="sm" variant="ghost" className="h-7" onClick={() => rotate.mutate()} disabled={rotate.isPending} title="Issue a new ingest token">
+          {rotate.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />} Token
+        </Button>
       )}
       <Button size="icon" variant="ghost" className="size-7" aria-label="Access and connector" onClick={() => setEditing(true)}>
         <Settings2 />
@@ -136,7 +136,7 @@ export function IntegrationControls(props: Props) {
               <>
                 <div className="grid gap-1.5">
                   <Label>Response connector URL</Label>
-                  <Input value={responseUrl} onChange={(e) => setResponseUrl(e.target.value)} placeholder="https://automation.example.com/helios-actions" />
+                  <Input value={responseUrl} onChange={(e) => setResponseUrl(e.target.value)} type="url" />
                 </div>
                 <div className="grid gap-1.5">
                   <Label>Signing secret</Label>

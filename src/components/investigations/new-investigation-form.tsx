@@ -3,11 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { FlaskConical, Loader2, Search } from "lucide-react";
+import { Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { startInvestigationAction } from "@/app/(app)/investigations/actions";
-import { SAMPLE_INVESTIGATION } from "@/lib/investigations/samples";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,7 +41,7 @@ export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Ar
       <div className="grid gap-3 sm:grid-cols-[1fr_14rem]">
         <div className="grid gap-1.5">
           <Label htmlFor="inv-title">Title</Label>
-          <Input id="inv-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Encoded PowerShell on FIN-042" required />
+          <Input id="inv-title" name="title" value={title} onChange={(e) => setTitle(e.target.value)} required />
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="inv-tenant">Client</Label>
@@ -51,7 +50,8 @@ export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Ar
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="inv-details">Alert details</Label>
-        <Textarea id="inv-details" name="alertDetails" value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Paste the originating alert, ticket notes, or analyst hypothesis" className="min-h-20" />
+        <Textarea id="inv-details" name="alertDetails" value={details} onChange={(e) => setDetails(e.target.value)} className="min-h-20" aria-describedby="inv-details-hint" />
+        <p id="inv-details-hint" className="text-xs text-muted-foreground">The originating alert, ticket notes, or your hypothesis.</p>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="inv-files">Telemetry files</Label>
@@ -62,23 +62,12 @@ export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Ar
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="inv-logs">…or paste logs</Label>
-        <Textarea id="inv-logs" name="pastedLogs" value={logs} onChange={(e) => setLogs(e.target.value)} className="min-h-28 font-mono text-xs" placeholder='[{"EventID": 1, "Image": "C:\\Windows\\System32\\cmd.exe", ...}]' />
+        <Textarea id="inv-logs" name="pastedLogs" value={logs} onChange={(e) => setLogs(e.target.value)} className="min-h-28 font-mono text-xs" />
       </div>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={start.isPending}>
           {start.isPending ? <Loader2 className="animate-spin" /> : <Search />}
           Start investigation
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            setTitle(SAMPLE_INVESTIGATION.title);
-            setDetails(SAMPLE_INVESTIGATION.alertDetails);
-            setLogs(SAMPLE_INVESTIGATION.logs);
-          }}
-        >
-          <FlaskConical /> Load sample (phishing → C2 → lateral movement)
         </Button>
       </div>
     </form>

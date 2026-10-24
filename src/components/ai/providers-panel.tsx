@@ -181,7 +181,8 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
               {draft.kind === "openai_compatible" && (
                 <div className="grid gap-1.5">
                   <Label>Base URL (OpenAI-compatible /v1)</Label>
-                  <Input value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} placeholder="http://localhost:11434/v1" />
+                  <Input value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} type="url" aria-describedby="provider-url-hint" />
+                  <p id="provider-url-hint" className="text-[11px] text-muted-foreground">The server&apos;s OpenAI-compatible base URL (ending in /v1). Picking a preset fills in its default.</p>
                 </div>
               )}
               <div className="grid gap-1.5">

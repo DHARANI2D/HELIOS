@@ -21,7 +21,7 @@ export async function setIsolationAction(endpointId: string, isolate: boolean) {
   await endpointInScope(user, endpointId);
   const result = await setEndpointIsolated(endpointId, isolate, { id: user.id, name: user.name ?? "analyst" });
   revalidatePath("/endpoints");
-  return { simulated: !result.dispatched, message: result.message };
+  return { manual: !result.dispatched, message: result.message };
 }
 
 // Criticality drives the auto-isolation guardrail, so SOC containment staff

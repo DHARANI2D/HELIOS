@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
-import { getTool } from "@/lib/integrations/catalog";
+import { getCatalogTool } from "@/lib/integrations/tools";
 import { dispatchAction } from "@/lib/integrations/dispatch";
 import { CONTROL_KEYS, parseProtections, type ControlStatus, type EndpointProtections, type ProtectionControl } from "@/lib/endpoints/controls";
 import type { InventoryRecord } from "@/lib/integrations/mappers";
@@ -39,7 +39,7 @@ export async function touchEndpoints(
   if (hosts.size === 0) return 0;
 
   const integration = options.integrationId ? await db.integration.findUnique({ where: { id: options.integrationId }, select: { vendor: true, name: true } }) : null;
-  const tool = integration ? getTool(integration.vendor) : undefined;
+  const tool = integration ? await getCatalogTool(integration.vendor) : undefined;
   const now = new Date();
 
   for (const [hostname, info] of hosts) {
@@ -118,7 +118,7 @@ export async function setEndpointIsolated(endpointId: string, isolate: boolean, 
     where: { id: endpointId },
     data: isolate ? { isolated: true, isolatedAt: new Date(), isolatedBy: actor.name } : { isolated: false, isolatedAt: null, isolatedBy: null },
   });
-  await logAction({ actorId: actor.id, action: isolate ? "endpoint.isolated" : "endpoint.released", detail: { endpointId, hostname: endpoint.hostname, tenantId: endpoint.tenantId, connector: result.message, simulated: !result.dispatched } });
+  await logAction({ actorId: actor.id, action: isolate ? "endpoint.isolated" : "endpoint.released", detail: { endpointId, hostname: endpoint.hostname, tenantId: endpoint.tenantId, connector: result.message, manual: !result.dispatched } });
   return result;
 }
 

@@ -22,7 +22,7 @@ export function UrlDetonator() {
           if (url.trim()) detonate.mutate();
         }}
       >
-        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://suspicious.example/login" className="font-mono text-sm" />
+        <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="URL to fetch in the sandbox" aria-label="URL" className="font-mono text-sm" />
         <Button type="submit" disabled={detonate.isPending || !url.trim()}>
           {detonate.isPending ? <Loader2 className="animate-spin" /> : <Bomb />}
           Detonate

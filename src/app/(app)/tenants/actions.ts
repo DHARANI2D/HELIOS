@@ -7,12 +7,11 @@ import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { requirePermission, requireUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
-import { PLAN_KEYS, planFor, type PlanKey } from "@/lib/plans";
 
 const tenantSchema = z.object({
   name: z.string().trim().min(2).max(120),
   industry: z.string().trim().max(80).optional(),
-  plan: z.enum(PLAN_KEYS as [PlanKey, ...PlanKey[]]),
+  planId: z.string().nullable(),
   status: z.enum(["ONBOARDING", "ACTIVE", "SUSPENDED"]),
   contactName: z.string().trim().max(120).optional(),
   contactEmail: z.string().trim().email().max(200).optional().or(z.literal("")),
@@ -28,6 +27,8 @@ function slugify(name: string) {
 export async function saveTenantAction(input: z.input<typeof tenantSchema>, tenantId?: string) {
   const user = await requirePermission("tenants.manage");
   const data = tenantSchema.parse(input);
+  const plan = data.planId ? await db.servicePlan.findUnique({ where: { id: data.planId } }) : null;
+  if (data.planId && !plan) throw new Error("Unknown service plan");
   const fields = { ...data, contactEmail: data.contactEmail || null, industry: data.industry || null, contactName: data.contactName || null, notes: data.notes || null };
   let saved;
   if (tenantId) {
@@ -35,9 +36,9 @@ export async function saveTenantAction(input: z.input<typeof tenantSchema>, tena
   } else {
     let slug = slugify(data.name);
     if (await db.tenant.findUnique({ where: { slug } })) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
-    saved = await db.tenant.create({ data: { ...fields, slug, aiAutonomyCap: planFor(data.plan).defaultAutonomyCap } });
+    saved = await db.tenant.create({ data: { ...fields, slug, ...(plan ? { aiAutonomyCap: plan.defaultAutonomyCap } : {}) } });
   }
-  await logAction({ actorId: user.id, action: tenantId ? "tenant.updated" : "tenant.created", detail: { tenantId: saved.id, name: saved.name, plan: saved.plan, status: saved.status } });
+  await logAction({ actorId: user.id, action: tenantId ? "tenant.updated" : "tenant.created", detail: { tenantId: saved.id, name: saved.name, plan: plan?.key ?? null, status: saved.status } });
   revalidatePath("/tenants");
   revalidatePath(`/tenants/${saved.id}`);
   return { id: saved.id };

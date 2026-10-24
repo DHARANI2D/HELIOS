@@ -145,17 +145,3 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     note: "GPU server you run; any OpenAI-compatible endpoint works.",
   },
 ];
-
-// USD per million tokens (Anthropic first-party list prices). Local models
-// cost nothing per token — their cost is hardware, priced in Build & Price.
-export const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "claude-opus-5-5": { input: 4, output: 20 },
-  "claude-sonnet-5-5": { input: 2, output: 10 },
-  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
-};
-
-export function estimateCostUsd(model: string | null | undefined, inputTokens = 0, outputTokens = 0): number {
-  const price = model ? MODEL_PRICING[model] : undefined;
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}

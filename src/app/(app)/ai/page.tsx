@@ -6,7 +6,8 @@ import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { aiSettings } from "@/lib/settings";
 import { caseVisibility } from "@/lib/access";
-import { AGENT_KEYS, AGENT_TYPES, estimateCostUsd } from "@/lib/ai/catalog";
+import { AGENT_KEYS, AGENT_TYPES } from "@/lib/ai/catalog";
+import { aiCostOf } from "@/lib/pricing/service";
 import { envClaudeAvailable, loadProfile, resolveProvider } from "@/lib/ai/resolve";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
 import { ACTION_LABEL } from "@/lib/response/executor";
@@ -49,7 +50,7 @@ export default async function AiPage() {
   const canConfigure = can(user, "ai.configure");
   const { now, settings, providers, runs, recent, feedback, executed, blocked, profilesUsage, profiles } = await loadAiPage(caseVisibility(user));
 
-  const spend = runs.reduce((s, r) => s + estimateCostUsd(r.model, r.inputTokens ?? 0, r.outputTokens ?? 0), 0);
+  const spend = await aiCostOf(runs);
   const agree = feedback.find((f) => f.feedback === "agree")?._count._all ?? 0;
   const disagree = feedback.find((f) => f.feedback === "disagree")?._count._all ?? 0;
   const agreement = agree + disagree ? Math.round((agree / (agree + disagree)) * 100) : null;

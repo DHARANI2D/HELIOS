@@ -14,6 +14,7 @@ import { localVerdict } from "@/lib/threat-intel/local-intel";
 import { configuredProviders } from "@/lib/threat-intel/providers";
 import { indicatorReasons, lookupIndicator } from "@/lib/threat-intel/service";
 import { MX_CHECKS, mxToolboxConfigured, queryMxToolbox, type MxDiagnostics } from "@/lib/forensics/mxtoolbox";
+import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
 
 // Orchestrates desas's analysis pipeline (eel_main.analyze_email): parse →
 // headers → body → attachments → optional URL detonation → verdict, then
@@ -74,7 +75,7 @@ async function intelComponent(headers: HeaderAnalysis | undefined, body: BodyAna
   let points = 0;
   if (headers?.senderIp) {
     const ip = headers.senderIp;
-    const local = localVerdict("IP", ip);
+    const local = localVerdict("IP", ip, await loadIntelSnapshot([{ type: "IP", value: ip }]));
     let score = local.score;
     const why = [...local.reasons];
     if (configuredProviders().length) {
@@ -90,8 +91,9 @@ async function intelComponent(headers: HeaderAnalysis | undefined, body: BodyAna
       reasons.push(`Sending IP ${ip} has prior abuse reports (${why.join("; ")})`);
     }
   }
+  const domainIntel = await loadIntelSnapshot((body?.suspiciousDomains ?? []).map((value) => ({ type: "DOMAIN" as const, value })));
   for (const domain of body?.suspiciousDomains ?? []) {
-    const v = localVerdict("DOMAIN", domain);
+    const v = localVerdict("DOMAIN", domain, domainIntel);
     if (v.score >= 0.7) {
       points += 20;
       reasons.push(`Linked domain ${domain} matches threat intel`);

@@ -1,7 +1,8 @@
 import type { ActionEvent } from "@/lib/governance/sidecar";
 
 // Ported from aegis's simulator/scenarios.py SecurityScenarios — 5 realistic
-// AI-agent attack scenarios used to exercise the governance pipeline.
+// AI-agent attack scenarios used to exercise the governance pipeline in
+// tests. Not used by the running app.
 
 export interface ScenarioEvent extends ActionEvent {
   expectedDecision: "ALLOW" | "DENY" | "ESCALATE";

@@ -21,7 +21,6 @@ import { SeverityBadge, SourceBadge, StatusBadge } from "@/components/shared/cas
 import { AiStatusBadge, DomainBadge, SlaChip, TierBadge } from "@/components/shared/case-chips";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Pagination, parsePage } from "@/components/shared/pagination";
-import { SimulationPanel } from "@/components/cases/simulation-panel";
 import { IngestPanel } from "@/components/cases/ingest-panel";
 
 const PAGE_SIZE = 25;
@@ -178,7 +177,7 @@ export default async function CasesPage({ searchParams }: PageProps<"/cases">) {
             <EmptyState
               icon={Inbox}
               title="Nothing in this queue"
-              description={can(user, "simulation.run") ? "Run an attack simulation or ingest telemetry below to generate detections." : "New cases appear here as soon as they are opened."}
+              description={can(user, "telemetry.ingest") ? "Cases open when an onboarded tool sends an alert, or when logs you upload below trip a detection." : "New cases appear here as soon as they are opened."}
             />
           ) : (
             <>
@@ -243,12 +242,7 @@ export default async function CasesPage({ searchParams }: PageProps<"/cases">) {
         </CardContent>
       </Card>
 
-      {can(user, "simulation.run") && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <SimulationPanel tenantId={tenantId} tenantName={tenantName} />
-          <IngestPanel tenantId={tenantId} tenantName={tenantName} />
-        </div>
-      )}
+      {can(user, "telemetry.ingest") && <IngestPanel tenantId={tenantId} tenantName={tenantName} />}
     </div>
   );
 }

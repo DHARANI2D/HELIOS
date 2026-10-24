@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { after } from "next/server";
 import { Ban, Download, Fingerprint, Globe2, ShieldAlert, TriangleAlert } from "lucide-react";
 import type { IndicatorType, Prisma } from "@prisma/client";
 
@@ -7,6 +8,8 @@ import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { configuredProviders } from "@/lib/threat-intel/providers";
 import { indicatorVerdict } from "@/lib/threat-intel/service";
+import { refreshStaleFeeds } from "@/lib/threat-intel/feeds";
+import { FeedControls } from "@/components/threat-intel/feed-controls";
 import { formatRelative } from "@/lib/format";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -58,7 +61,7 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
 
   const configured = new Set(configuredProviders());
 
-  const [indicators, total, tracked, malicious, suspicious, blocked] = await Promise.all([
+  const [indicators, total, tracked, malicious, suspicious, blocked, feeds] = await Promise.all([
     db.threatIndicator.findMany({
       where,
       orderBy: [{ maliciousScore: { sort: "desc", nulls: "last" } }, { lastCheckedAt: "desc" }],
@@ -71,7 +74,11 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
     db.threatIndicator.count({ where: { maliciousScore: { gte: 0.7 } } }),
     db.threatIndicator.count({ where: { maliciousScore: { gte: 0.4, lt: 0.7 } } }),
     db.threatIndicator.count({ where: { blockedAt: { not: null } } }),
+    db.threatFeed.findMany({ orderBy: { name: "asc" } }),
   ]);
+  // Enabled feeds more than a day old re-import after this response.
+  if (feeds.some((f) => f.enabled)) after(() => refreshStaleFeeds().catch(() => undefined));
+  const now = new Date();
 
   return (
     <div className="flex flex-col gap-6">
@@ -87,8 +94,8 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
           <CardHeader>
             <CardTitle className="text-base">Indicator lookup</CardTitle>
             <CardDescription>
-              One shared IOC cache for every module. Provider answers are cached for 24h; built-in intel (known C2 / Tor
-              ranges, suspicious TLDs, brand impersonation) always applies.
+              One shared IOC store for every module. Provider answers are cached for 24h; imported feeds and your blocks
+              apply everywhere, along with domain heuristics (suspicious TLDs, brand impersonation).
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -102,7 +109,7 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
           </CardHeader>
           <CardContent className="flex flex-col gap-3 text-sm">
             <div className="flex items-center justify-between">
-              <span>Built-in intel</span>
+              <span>Domain heuristics</span>
               <Badge variant="success">Active</Badge>
             </div>
             {PROVIDERS.map((p) => (
@@ -129,12 +136,56 @@ export default async function ThreatIntelPage({ searchParams }: PageProps<"/thre
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Threat feeds</CardTitle>
+          <CardDescription>Public blocklists imported into the indicator store. Enabled feeds re-import daily; detections, investigations and email analysis all match against them.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {feeds.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No feeds configured. Run <code>npm run db:seed</code> to add the standard public feeds.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Feed</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Last import</TableHead>
+                    <TableHead className="text-right">Enabled</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {feeds.map((f) => (
+                    <TableRow key={f.id}>
+                      <TableCell>
+                        <p className="text-sm font-medium">{f.name}</p>
+                        <p className="max-w-md text-[11px] text-muted-foreground">{f.description}</p>
+                        <p className="max-w-md truncate font-mono text-[10px] text-muted-foreground">{f.url}</p>
+                      </TableCell>
+                      <TableCell className="text-xs">{f.indicatorType.toLowerCase().replace("_", " ")} · score {f.maliciousScore}</TableCell>
+                      <TableCell className="text-xs">
+                        {f.lastImportedAt ? `${formatRelative(f.lastImportedAt, now)} · ${(f.lastCount ?? 0).toLocaleString()} entries` : "Never"}
+                        {f.lastError && <p className="max-w-56 truncate text-[11px] text-destructive" title={f.lastError}>{f.lastError}</p>}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <FeedControls id={f.id} name={f.name} enabled={f.enabled} canManage={canManage} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Indicator store</CardTitle>
           <CardDescription>Everything extracted from SIEM telemetry, investigations, and analyzed emails, plus manual lookups.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <form className="flex flex-wrap items-center gap-2" action="/threat-intel">
-            <Input name="q" defaultValue={q} placeholder="Search value…" className="w-64" />
+            <Input name="q" defaultValue={q} placeholder="Search value…" aria-label="Search indicators" className="w-64" />
             <NativeSelect name="type" defaultValue={type ?? ""} aria-label="Type">
               <option value="">All types</option>
               {TYPES.map((t) => (

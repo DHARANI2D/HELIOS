@@ -15,7 +15,7 @@ import { maxSeverity, severityRank } from "@/lib/severity";
 import { getTactic, getTechnique, parentTechniqueId, resolveTechnique } from "@/lib/mitre/catalog";
 import { recordIndicator, enrichCaseIndicators } from "@/lib/threat-intel/service";
 import { evaluatePlaybooksForCase } from "@/lib/playbooks/engine";
-import { slaDueAt } from "@/lib/plans";
+import { parsePlan, slaDueAt } from "@/lib/plans";
 import { notify, staffFor } from "@/lib/notifications";
 import { scheduleFirstResponse } from "@/lib/ai/first-response";
 
@@ -208,11 +208,13 @@ export async function finalizeCase(caseId: string) {
   scheduleFirstResponse(caseId);
 }
 
+// The client's plan sets the SLA; internal cases and clients without a plan
+// have none.
 async function tenantPlan(tenantId: string | null | undefined) {
   if (!tenantId) return null;
   const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { plan: true } });
   if (!tenant) throw new Error(`Unknown tenant ${tenantId}`);
-  return tenant.plan;
+  return tenant.plan ? parsePlan(tenant.plan) : null;
 }
 
 export async function createCase(input: NewCase) {

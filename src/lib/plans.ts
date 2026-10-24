@@ -1,23 +1,11 @@
 import type { AiAutonomy, CaseSeverity } from "@prisma/client";
 
 // Managed-service plans: what a client buys, which SLA their cases run on,
-// and what the configurator prices. Client-safe.
+// and what the configurator prices. Plans are your own policy, so they live
+// in the service_plans table and start empty; an admin defines them in
+// Build & Price → Service plans. Client-safe: parsing and SLA maths only.
 
-export type PlanKey = "essentials" | "professional" | "enterprise";
-
-export interface ServicePlan {
-  key: PlanKey;
-  name: string;
-  tagline: string;
-  coverage: "8x5" | "24x7";
-  // Minutes to acknowledge, by severity (null = no SLA).
-  ackMinutes: Record<CaseSeverity, number | null>;
-  // Minutes to contain once acknowledged, for the severities that have a target.
-  containMinutes: Partial<Record<CaseSeverity, number>>;
-  defaultAutonomyCap: AiAutonomy;
-  irRetainerHours: number;
-  features: Record<PlanFeature, boolean | string>;
-}
+export const SEVERITIES: CaseSeverity[] = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"];
 
 export type PlanFeature =
   | "monitoring"
@@ -44,84 +32,90 @@ export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
   onboarding: "Onboarding",
 };
 
-export const PLANS: Record<PlanKey, ServicePlan> = {
-  essentials: {
-    key: "essentials",
-    name: "Essentials MDR",
-    tagline: "Business-hours analysts, AI on watch around the clock",
-    coverage: "8x5",
-    ackMinutes: { CRITICAL: 60, HIGH: 240, MEDIUM: 1440, LOW: 4320, INFO: null },
-    containMinutes: { CRITICAL: 240, HIGH: 1440 },
-    defaultAutonomyCap: "CONTAIN_WITH_APPROVAL",
-    irRetainerHours: 0,
-    features: {
-      monitoring: "8×5 analysts",
-      aiFirstResponse: true,
-      autoContainment: "With client approval",
-      threatHunting: false,
-      irRetainer: false,
-      reporting: "Monthly",
-      dedicatedAnalyst: false,
-      compliance: false,
-      clientPortal: true,
-      onboarding: "Remote, self-guided",
-    },
-  },
-  professional: {
-    key: "professional",
-    name: "Professional MDR",
-    tagline: "24×7 SOC with automated containment",
-    coverage: "24x7",
-    ackMinutes: { CRITICAL: 30, HIGH: 120, MEDIUM: 480, LOW: 1440, INFO: null },
-    containMinutes: { CRITICAL: 120, HIGH: 480 },
-    defaultAutonomyCap: "AUTO_CONTAIN",
-    irRetainerHours: 10,
-    features: {
-      monitoring: "24×7 analysts",
-      aiFirstResponse: true,
-      autoContainment: "Pre-approved actions",
-      threatHunting: "Monthly",
-      irRetainer: "10 h / year",
-      reporting: "Weekly",
-      dedicatedAnalyst: false,
-      compliance: false,
-      clientPortal: true,
-      onboarding: "Guided, 2 weeks",
-    },
-  },
-  enterprise: {
-    key: "enterprise",
-    name: "Enterprise XDR",
-    tagline: "Dedicated team, continuous hunting, compliance-ready",
-    coverage: "24x7",
-    ackMinutes: { CRITICAL: 15, HIGH: 60, MEDIUM: 240, LOW: 720, INFO: null },
-    containMinutes: { CRITICAL: 60, HIGH: 240 },
-    defaultAutonomyCap: "AUTO_CONTAIN",
-    irRetainerHours: 40,
-    features: {
-      monitoring: "24×7 analysts",
-      aiFirstResponse: true,
-      autoContainment: "Pre-approved actions",
-      threatHunting: "Continuous",
-      irRetainer: "40 h / year",
-      reporting: "Weekly + quarterly review",
-      dedicatedAnalyst: true,
-      compliance: "ISO 27001, SOC 2, PCI DSS",
-      clientPortal: true,
-      onboarding: "White-glove, 4 weeks",
-    },
-  },
-};
+export const PLAN_FEATURES = Object.keys(PLAN_FEATURE_LABEL) as PlanFeature[];
 
-export const PLAN_KEYS = Object.keys(PLANS) as PlanKey[];
-
-export function planFor(key: string | null | undefined): ServicePlan {
-  return PLANS[(key as PlanKey) ?? "professional"] ?? PLANS.professional;
+export interface ServicePlan {
+  id: string;
+  key: string;
+  name: string;
+  tagline: string | null;
+  coverage: string; // e.g. "24x7", "8x5"
+  // Minutes to acknowledge, by severity (null = no SLA for that severity).
+  ackMinutes: Record<CaseSeverity, number | null>;
+  // Minutes to contain once acknowledged (null = no target).
+  containMinutes: Record<CaseSeverity, number | null>;
+  irRetainerHours: number;
+  // Monthly sell price and your cost per endpoint (null until set).
+  pricePerEndpoint: number | null;
+  costPerEndpoint: number | null;
+  onboardingMinimum: number | null;
+  defaultAutonomyCap: AiAutonomy;
+  // true/false, or a short description ("Monthly", "40 h / year").
+  features: Partial<Record<PlanFeature, boolean | string>>;
+  active: boolean;
+  sortOrder: number;
 }
 
-// Internal cases (no client tenant) run on the strictest targets.
-export function slaDueAt(createdAt: Date, severity: CaseSeverity, plan: string | null | undefined): Date | null {
-  const minutes = planFor(plan ?? "enterprise").ackMinutes[severity];
+export interface ServicePlanRow {
+  id: string;
+  key: string;
+  name: string;
+  tagline: string | null;
+  coverage: string;
+  ackMinutes: unknown;
+  containMinutes: unknown;
+  irRetainerHours: number;
+  pricePerEndpoint: number | null;
+  costPerEndpoint: number | null;
+  onboardingMinimum: number | null;
+  defaultAutonomyCap: AiAutonomy;
+  features: unknown;
+  active: boolean;
+  sortOrder: number;
+}
+
+function minutesBySeverity(value: unknown): Record<CaseSeverity, number | null> {
+  const obj = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  return Object.fromEntries(
+    SEVERITIES.map((s) => {
+      const v = obj[s];
+      return [s, typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null];
+    }),
+  ) as Record<CaseSeverity, number | null>;
+}
+
+export function parsePlan(row: ServicePlanRow): ServicePlan {
+  const features = row.features && typeof row.features === "object" ? (row.features as Record<string, unknown>) : {};
+  return {
+    id: row.id,
+    key: row.key,
+    name: row.name,
+    tagline: row.tagline,
+    coverage: row.coverage,
+    ackMinutes: minutesBySeverity(row.ackMinutes),
+    containMinutes: minutesBySeverity(row.containMinutes),
+    irRetainerHours: row.irRetainerHours,
+    pricePerEndpoint: row.pricePerEndpoint,
+    costPerEndpoint: row.costPerEndpoint,
+    onboardingMinimum: row.onboardingMinimum,
+    defaultAutonomyCap: row.defaultAutonomyCap,
+    features: Object.fromEntries(
+      PLAN_FEATURES.filter((f) => typeof features[f] === "boolean" || (typeof features[f] === "string" && (features[f] as string).trim() !== "")).map((f) => [f, features[f] as boolean | string]),
+    ),
+    active: row.active,
+    sortOrder: row.sortOrder,
+  };
+}
+
+export function hasFeature(plan: Pick<ServicePlan, "features">, feature: PlanFeature) {
+  const v = plan.features[feature];
+  return v === true || (typeof v === "string" && v.trim() !== "");
+}
+
+// Cases for a client on a plan get that plan's acknowledgement target.
+// Internal cases and clients without a plan have no SLA.
+export function slaDueAt(createdAt: Date, severity: CaseSeverity, plan: Pick<ServicePlan, "ackMinutes"> | null | undefined): Date | null {
+  const minutes = plan?.ackMinutes[severity];
   return minutes == null ? null : new Date(createdAt.getTime() + minutes * 60_000);
 }
 
@@ -135,4 +129,12 @@ export function slaState(c: { createdAt: Date; slaDueAt: Date | null; acknowledg
   const total = c.slaDueAt.getTime() - c.createdAt.getTime();
   const left = c.slaDueAt.getTime() - now.getTime();
   return total > 0 && left / total < 0.25 ? "at_risk" : "due";
+}
+
+export function formatMinutes(minutes: number | null) {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes % 1440 === 0) return `${minutes / 1440} d`;
+  if (minutes % 60 === 0) return `${minutes / 60} h`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }

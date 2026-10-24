@@ -10,10 +10,10 @@ import { requirePermission, type SessionUser } from "@/lib/session";
 import { ROLE_ORDER } from "@/lib/rbac";
 import { seal } from "@/lib/secrets";
 import { resolveTenantInput } from "@/lib/tenants";
-import { getTool } from "@/lib/integrations/catalog";
+import { getCatalogTool } from "@/lib/integrations/tools";
+import { pingConnector } from "@/lib/integrations/dispatch";
 import { readSecrets, type IntegrationConfig } from "@/lib/integrations/dispatch";
-import { ingestForIntegration, onboardIntegration, rotateIngestToken } from "@/lib/integrations/service";
-import { samplePayloadFor } from "@/lib/integrations/samples";
+import { onboardIntegration, rotateIngestToken } from "@/lib/integrations/service";
 
 function revalidate() {
   revalidatePath("/integrations");
@@ -43,7 +43,7 @@ async function integrationInScope(user: SessionUser, id: string) {
 export async function onboardIntegrationAction(input: z.input<typeof onboardSchema>) {
   const user = await requirePermission("integrations.manage");
   const data = onboardSchema.parse(input);
-  const tool = getTool(data.vendor);
+  const tool = await getCatalogTool(data.vendor);
   if (!tool) throw new Error("Unknown tool");
   const tenantId = await resolveTenantInput(user, data.tenantId);
   // Client admins onboard tools for their own estate; SOC roles stay as chosen.
@@ -114,16 +114,14 @@ export async function updateIntegrationAction(id: string, input: z.input<typeof 
   revalidate();
 }
 
-// Pushes the tool's sample payload through the real ingest path — proves the
-// mapping and shows what its alerts look like as cases.
-export async function sendTestEventAction(id: string) {
+// Sends a signed PING to the response connector; nothing is created.
+export async function testConnectorAction(id: string) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
-  const sample = samplePayloadFor(integration.vendor);
-  if (!sample) throw new Error("This tool doesn't push data");
-  const result = await ingestForIntegration(integration, sample);
-  await logAction({ actorId: user.id, action: "integration.test_event", detail: { integrationId: id, ...result } });
+  const result = await pingConnector(integration);
+  await logAction({ actorId: user.id, action: "integration.connector_tested", detail: { integrationId: id, ok: !!result.ok, message: result.message } });
   revalidate();
-  revalidatePath("/cases");
+  if (!result.dispatched) throw new Error(result.message);
+  if (!result.ok) throw new Error(result.message);
   return result;
 }

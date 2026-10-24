@@ -6,7 +6,6 @@ import { requirePermission } from "@/lib/session";
 import { resolveTenantInput } from "@/lib/tenants";
 import { logAction } from "@/lib/audit";
 import { analyzeSubmission } from "@/lib/forensics/service";
-import { buildSampleEmail } from "@/lib/forensics/samples";
 import { detonateUrl } from "@/lib/forensics/sandbox";
 
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -34,13 +33,6 @@ export async function analyzeSubmissionAction(formData: FormData) {
   const result = await analyzeSubmission({ filename, bytes, detonate, actorId: user.id, tenantId });
   revalidatePath("/forensics");
   revalidatePath("/");
-  return result;
-}
-
-export async function analyzeSampleAction(detonate: boolean, tenantId?: string) {
-  const user = await requirePermission("forensics.run");
-  const result = await analyzeSubmission({ ...buildSampleEmail(), detonate, actorId: user.id, tenantId: await resolveTenantInput(user, tenantId) });
-  revalidatePath("/forensics");
   return result;
 }
 

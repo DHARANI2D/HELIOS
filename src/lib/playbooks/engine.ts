@@ -131,13 +131,13 @@ export async function executePlaybook({ playbookId, caseId, triggeredBy, actorId
           occurredAt: new Date(),
           actor: `playbook:${playbook.name}`,
           action: `playbook.${action.actionType.toLowerCase()}`,
-          detail: `${action.name}: ${result.summary}${result.simulated ? " (simulated — no response connector configured)" : ""}`,
+          detail: `${action.name}: ${result.summary}`,
           evidence: result as never,
         },
       });
     } catch (err) {
       failure = err instanceof Error ? err.message : String(err);
-      results.push({ action: action.name, actionType: action.actionType, status: "failed", summary: failure, simulated: false });
+      results.push({ action: action.name, actionType: action.actionType, status: "failed", summary: failure });
       break;
     }
   }

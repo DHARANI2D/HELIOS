@@ -3,10 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { FlaskConical, Loader2, ScanSearch } from "lucide-react";
+import { Loader2, ScanSearch } from "lucide-react";
 import { toast } from "sonner";
 
-import { analyzeSampleAction, analyzeSubmissionAction } from "@/app/(app)/forensics/actions";
+import { analyzeSubmissionAction } from "@/app/(app)/forensics/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,8 +26,7 @@ export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id:
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Analysis failed");
 
   const analyze = useMutation({ mutationFn: (fd: FormData) => analyzeSubmissionAction(fd), onSuccess: done, onError });
-  const sample = useMutation({ mutationFn: () => analyzeSampleAction(detonate, tenantId), onSuccess: done, onError });
-  const busy = analyze.isPending || sample.isPending;
+  const busy = analyze.isPending;
 
   return (
     <form
@@ -50,7 +49,8 @@ export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id:
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="fx-raw">…or paste raw message source</Label>
-        <Textarea id="fx-raw" name="raw" className="min-h-28 font-mono text-xs" placeholder={"Received: from …\nFrom: …\nSubject: …\n\nBody…"} />
+        <Textarea id="fx-raw" name="raw" className="min-h-28 font-mono text-xs" aria-describedby="fx-raw-hint" />
+        <p id="fx-raw-hint" className="text-xs text-muted-foreground">The full message source, headers included (in Outlook: File → Properties; in Gmail: Show original).</p>
       </div>
       <label className="flex items-start gap-2 text-sm">
         <Switch name="detonate" checked={detonate} onCheckedChange={setDetonate} className="mt-0.5" />
@@ -65,10 +65,6 @@ export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id:
         <Button type="submit" disabled={busy}>
           {analyze.isPending ? <Loader2 className="animate-spin" /> : <ScanSearch />}
           Analyze
-        </Button>
-        <Button type="button" variant="outline" disabled={busy} onClick={() => sample.mutate()}>
-          {sample.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}
-          Analyze sample phishing email
         </Button>
       </div>
     </form>

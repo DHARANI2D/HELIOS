@@ -103,7 +103,7 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs">Model override</Label>
-              <Input value={p.model ?? ""} onChange={(e) => setP({ ...p, model: e.target.value || null })} placeholder="Provider's model" disabled={!canConfigure} />
+              <Input value={p.model ?? ""} onChange={(e) => setP({ ...p, model: e.target.value || null })} placeholder="Provider's default model" disabled={!canConfigure} />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs">Reasoning effort</Label>
@@ -174,7 +174,8 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
       {!isController && (
         <div className="grid gap-1.5">
           <Label className="text-xs">Extra instructions (house style, client context)</Label>
-          <Textarea value={p.instructions ?? ""} onChange={(e) => setP({ ...p, instructions: e.target.value || null })} className="min-h-16 text-xs" placeholder="e.g. Our clients are mostly healthcare; flag anything touching PHI systems as high." disabled={!canConfigure} />
+          <Textarea value={p.instructions ?? ""} onChange={(e) => setP({ ...p, instructions: e.target.value || null })} className="min-h-16 text-xs" disabled={!canConfigure} />
+          <p className="text-[11px] text-muted-foreground">Added to the agent&apos;s system prompt: the industries you serve, what counts as business-critical, how to word client-facing notes.</p>
         </div>
       )}
 

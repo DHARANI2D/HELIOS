@@ -1,4 +1,4 @@
-// Demo telemetry for the "Load sample" button: a Sysmon (Winlogbeat-style
+// TEST FIXTURE (not used by the running app): a Sysmon (Winlogbeat-style
 // JSON) trace of a phishing macro → encoded PowerShell → C2 → persistence →
 // LSASS dump → PsExec lateral movement, with benign browser noise mixed in.
 // Fictional hosts/users; 185.220.101.5 sits in a public Tor exit range.

@@ -6,7 +6,8 @@ import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
 import { can, roleLabel } from "@/lib/rbac";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
-import { PLAN_FEATURE_LABEL, planFor, type PlanFeature } from "@/lib/plans";
+import { PLAN_FEATURES, PLAN_FEATURE_LABEL, parsePlan } from "@/lib/plans";
+import { listPlans } from "@/lib/service-plans";
 import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
 import { SEVERITY_LABEL, SEVERITY_ORDER } from "@/lib/severity";
 import { serviceMetrics, formatDuration } from "@/lib/metrics";
@@ -28,15 +29,17 @@ async function loadTenant(id: string) {
       users: { orderBy: { name: "asc" }, select: { id: true, name: true, email: true, role: true, active: true, lastLoginAt: true } },
       integrations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true, status: true, enabled: true, lastEventAt: true } },
       _count: { select: { endpoints: true } },
+      plan: true,
     },
   });
   if (!tenant) return null;
-  const [metrics, openCases, isolated] = await Promise.all([
+  const [metrics, openCases, isolated, plans] = await Promise.all([
     serviceMetrics({ tenantId: id }, since, now),
     db.case.findMany({ where: { tenantId: id, status: { notIn: CLOSED_STATUSES } }, orderBy: [{ severity: "desc" }, { createdAt: "desc" }], take: 10 }),
     db.endpoint.count({ where: { tenantId: id, isolated: true } }),
+    listPlans(),
   ]);
-  return { now, tenant, metrics, openCases, isolated };
+  return { now, tenant, metrics, openCases, isolated, plans };
 }
 
 export default async function TenantPage({ params }: PageProps<"/tenants/[id]">) {
@@ -46,8 +49,8 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
   if (!own && !can(user, "tenants.view")) forbidden();
   const data = await loadTenant(id);
   if (!data) notFound();
-  const { now, tenant, metrics, openCases, isolated } = data;
-  const plan = planFor(tenant.plan);
+  const { now, tenant, metrics, openCases, isolated, plans } = data;
+  const plan = tenant.plan ? parsePlan(tenant.plan) : null;
   const canEditConsent = can(user, "tenants.manage") || (own && user.role === "CLIENT_ADMIN");
 
   return (
@@ -65,22 +68,23 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
           <div>
             <div className="flex items-center gap-2">
               <Badge variant={tenant.status === "ACTIVE" ? "success" : tenant.status === "SUSPENDED" ? "destructive" : "info"}>{tenant.status.toLowerCase()}</Badge>
-              <Badge variant="outline">{plan.name}</Badge>
+              <Badge variant="outline">{plan?.name ?? "No plan"}</Badge>
               {tenant.industry && <span className="text-xs text-muted-foreground">{tenant.industry}</span>}
             </div>
             <CardTitle className="mt-2 text-xl">{tenant.name}</CardTitle>
             <CardDescription>
-              {plan.tagline}
-              {tenant.contactName && ` · Contact: ${tenant.contactName}${tenant.contactEmail ? ` <${tenant.contactEmail}>` : ""}`}
+              {plan?.tagline}
+              {tenant.contactName && `${plan?.tagline ? " · " : ""}Contact: ${tenant.contactName}${tenant.contactEmail ? ` <${tenant.contactEmail}>` : ""}`}
             </CardDescription>
           </div>
           {can(user, "tenants.manage") && (
             <TenantFormButton
               tenantId={tenant.id}
+              plans={[...plans, ...(plan && !plans.some((p) => p.id === plan.id) ? [plan] : [])].map((p) => ({ id: p.id, name: p.name, tagline: p.tagline }))}
               initial={{
                 name: tenant.name,
                 industry: tenant.industry ?? "",
-                plan: plan.key,
+                planId: tenant.planId,
                 status: tenant.status,
                 contactName: tenant.contactName ?? "",
                 contactEmail: tenant.contactEmail ?? "",
@@ -148,9 +152,11 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Service level</CardTitle>
-            <CardDescription>{plan.name} · {plan.coverage} coverage</CardDescription>
+            <CardDescription>{plan ? `${plan.name} · ${plan.coverage} coverage` : "No service plan — cases for this client have no SLA."}</CardDescription>
           </CardHeader>
           <CardContent>
+            {plan && (
+            <>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -160,23 +166,25 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {SEVERITY_ORDER.filter((s) => plan.ackMinutes[s] != null).map((s) => (
+                {SEVERITY_ORDER.filter((s) => plan.ackMinutes[s] != null || plan.containMinutes[s] != null).map((s) => (
                   <TableRow key={s}>
                     <TableCell>{SEVERITY_LABEL[s]}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatDuration(plan.ackMinutes[s])}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatDuration(plan.containMinutes[s] ?? null)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatDuration(plan.containMinutes[s])}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
             <ul className="mt-3 space-y-1 text-xs">
-              {(Object.keys(PLAN_FEATURE_LABEL) as PlanFeature[]).map((f) => (
+              {PLAN_FEATURES.map((f) => (
                 <li key={f} className="flex justify-between gap-2">
                   <span className="text-muted-foreground">{PLAN_FEATURE_LABEL[f]}</span>
-                  <span className="text-right">{plan.features[f] === true ? "Included" : plan.features[f] === false ? "—" : String(plan.features[f])}</span>
+                  <span className="text-right">{plan.features[f] === true ? "Included" : typeof plan.features[f] === "string" ? String(plan.features[f]) : "—"}</span>
                 </li>
               ))}
             </ul>
+            </>
+            )}
           </CardContent>
         </Card>
 

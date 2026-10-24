@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 
-// Demo submission for the Forensics "Analyze sample" button: a credential-
+// TEST FIXTURE (not used by the running app): a credential-
 // phishing email with failing SPF/DKIM/DMARC, sender mismatches, a look-alike
 // Microsoft login link, and a macro-enabled .docm whose (fake) VBA project
 // carries AutoOpen → WScript.Shell → PowerShell. All infrastructure is

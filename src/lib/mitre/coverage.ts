@@ -1,5 +1,5 @@
 import { DETECTORS } from "@/lib/siem/engine";
-import { SCENARIO_TECHNIQUES } from "@/lib/governance/scenarios";
+import { GOVERNANCE_RULE_TECHNIQUES } from "@/lib/governance/runtime";
 import { resolveTechnique } from "@/lib/mitre/catalog";
 import { INVESTIGATION_RULE_TECHNIQUES } from "@/lib/investigations/heuristics";
 import { FORENSICS_RULE_TECHNIQUES } from "@/lib/forensics/files";
@@ -19,8 +19,8 @@ export function detectionCapabilities(): DetectionCapability[] {
   for (const detector of DETECTORS) {
     for (const t of detector.techniques) caps.push({ techniqueId: t, module: "Cases & Alerts", rule: detector.name });
   }
-  for (const [scenario, techniques] of Object.entries(SCENARIO_TECHNIQUES)) {
-    for (const t of techniques) caps.push({ techniqueId: t, module: "Agent Governance", rule: scenario });
+  for (const { rule, techniques } of GOVERNANCE_RULE_TECHNIQUES) {
+    for (const t of techniques) caps.push({ techniqueId: t, module: "Agent Governance", rule });
   }
 
   for (const { rule, techniques } of INVESTIGATION_RULE_TECHNIQUES) {

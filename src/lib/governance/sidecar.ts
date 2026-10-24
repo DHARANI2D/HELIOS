@@ -4,7 +4,7 @@ import { scanInput, scanAndRedact } from "@/lib/governance/dlp";
 import { evaluateIntent } from "@/lib/governance/policy";
 
 // Ported from aegis's sidecar/proxy.py AISidecar.process_action — the
-// enforcement pipeline every simulated agent action passes through:
+// enforcement pipeline every governed agent action passes through:
 // constitution -> reasoning -> DLP -> policy.
 
 export interface ActionEvent extends AgentIntent {

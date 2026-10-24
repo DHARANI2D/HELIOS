@@ -3,10 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { Bot, Check, Loader2, Plus, Undo2, UserRound, X } from "lucide-react";
+import { Bot, Check, CheckCheck, Hand, Loader2, Plus, Undo2, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { decideResponseActionAction, requestResponseAction, rollbackResponseActionAction } from "@/app/(app)/cases/actions";
+import { completeManualActionAction, decideResponseActionAction, requestResponseAction, rollbackResponseActionAction } from "@/app/(app)/cases/actions";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -25,13 +25,14 @@ export interface ResponseActionView {
   policyReason: string | null;
   confidence: number | null;
   summary: string | null;
-  simulated: boolean;
+  manualBy: string | null; // who confirmed doing it by hand
   rollbackable: boolean;
   createdAt: string;
 }
 
 const STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "outline" | "soft" | "secondary"> = {
   PENDING_APPROVAL: "warning",
+  MANUAL_REQUIRED: "warning",
   EXECUTED: "success",
   FAILED: "destructive",
   BLOCKED: "destructive",
@@ -42,6 +43,7 @@ const STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "ou
 
 const STATUS_LABEL: Record<string, string> = {
   PENDING_APPROVAL: "Awaiting approval",
+  MANUAL_REQUIRED: "Do by hand",
   EXECUTED: "Executed",
   FAILED: "Failed",
   BLOCKED: "Blocked by guardrail",
@@ -79,14 +81,29 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
     onSuccess: (r) => refresh(r.status === "REJECTED" ? "Rejected" : r.status === "EXECUTED" ? "Approved and executed" : `Status: ${r.status.toLowerCase()}`),
     onError,
   });
-  const rollback = useMutation({ mutationFn: (id: string) => rollbackResponseActionAction(id), onSuccess: () => refresh("Rolled back"), onError });
+  const rollback = useMutation({
+    mutationFn: (id: string) => rollbackResponseActionAction(id),
+    onSuccess: (r) => refresh(r.status === "MANUAL_REQUIRED" ? "Rollback recorded — carry it out by hand, then mark it done" : "Rolled back"),
+    onError,
+  });
+  const [confirming, setConfirming] = React.useState<string | null>(null);
+  const [doneNote, setDoneNote] = React.useState("");
+  const markDone = useMutation({
+    mutationFn: (id: string) => completeManualActionAction(id, doneNote),
+    onSuccess: () => {
+      setConfirming(null);
+      setDoneNote("");
+      refresh("Marked as done");
+    },
+    onError,
+  });
   const request = useMutation({
     mutationFn: () => requestResponseAction(caseId, { actionType: type, target: target || options[0] || "", rationale }),
     onSuccess: (r) => {
       setTarget("");
       setRationale("");
       setOpen(false);
-      refresh(r.status === "EXECUTED" ? "Executed" : "Requested — waiting for approval");
+      refresh(r.status === "EXECUTED" ? "Executed" : r.status === "MANUAL_REQUIRED" ? "No connector — carry it out by hand, then mark it done" : "Requested — waiting for approval");
     },
     onError,
   });
@@ -96,7 +113,7 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
       {actions.length === 0 && <p className="text-sm text-muted-foreground">No containment proposed or requested yet.</p>}
       <ul className="flex flex-col gap-2">
         {actions.map((a) => (
-          <li key={a.id} className={cn("rounded-lg border p-3", a.status === "PENDING_APPROVAL" && "border-warning/50 bg-warning/5")}>
+          <li key={a.id} className={cn("rounded-lg border p-3", (a.status === "PENDING_APPROVAL" || a.status === "MANUAL_REQUIRED") && "border-warning/50 bg-warning/5")}>
             <div className="flex flex-wrap items-center gap-2">
               {a.source === "ai" ? <Bot className="size-3.5 text-chart-4" /> : <UserRound className="size-3.5 text-muted-foreground" />}
               <span className="text-sm font-medium">{a.label}</span>
@@ -112,8 +129,24 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
             {a.summary && (
               <p className={cn("mt-1 text-xs", a.status === "FAILED" ? "text-destructive" : "text-foreground/80")}>
                 {a.summary}
-                {a.simulated && <span className="text-muted-foreground"> — simulated (no response connector for this action)</span>}
+                {a.manualBy && <span className="text-muted-foreground"> — done by hand, confirmed by {a.manualBy}</span>}
               </p>
+            )}
+            {canApprove && a.status === "MANUAL_REQUIRED" && (
+              confirming === a.id ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <Input value={doneNote} onChange={(e) => setDoneNote(e.target.value)} className="h-7 min-w-56 flex-1 text-xs" aria-label="What you did" autoFocus />
+                  <Button size="sm" className="h-7" onClick={() => markDone.mutate(a.id)} disabled={markDone.isPending || doneNote.trim().length < 3}>
+                    {markDone.isPending ? <Loader2 className="animate-spin" /> : <CheckCheck />} Confirm done
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7" onClick={() => setConfirming(null)}>Cancel</Button>
+                  <p className="w-full text-[11px] text-muted-foreground">Say what you did and where (e.g. the console and ticket) — it goes on the case record.</p>
+                </div>
+              ) : (
+                <Button size="sm" variant="outline" className="mt-2 h-7" onClick={() => { setConfirming(a.id); setDoneNote(""); }}>
+                  <Hand /> Mark as done
+                </Button>
+              )
             )}
             {canApprove && (a.status === "PENDING_APPROVAL" || a.status === "SUGGESTED") && (
               <div className="mt-2 flex gap-1.5">
@@ -157,10 +190,11 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
                     ))}
                   </NativeSelect>
                 ) : (
-                  <Input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="Target (host, IP, account…)" />
+                  <Input value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Target (host, IP, account…)" />
                 )}
               </div>
-              <Input value={rationale} onChange={(e) => setRationale(e.target.value)} placeholder="Why? (shown to the approver)" />
+              <Input value={rationale} onChange={(e) => setRationale(e.target.value)} aria-label="Why? (shown to the approver)" />
+              <p className="-mt-1 text-[11px] text-muted-foreground">Target, then why — the reason is shown to the approver.</p>
               <div className="flex gap-2">
                 <Button size="sm" onClick={() => request.mutate()} disabled={request.isPending || !(target || options[0])}>
                   {request.isPending ? <Loader2 className="animate-spin" /> : <Check />}

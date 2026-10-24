@@ -6,7 +6,8 @@ import { logAction } from "@/lib/audit";
 import { aiSettings } from "@/lib/settings";
 import { notify, staffFor } from "@/lib/notifications";
 import { severityRank } from "@/lib/severity";
-import { AGENT_TYPES, estimateCostUsd, type AgentKey } from "@/lib/ai/catalog";
+import { AGENT_TYPES, type AgentKey } from "@/lib/ai/catalog";
+import { aiCostOf } from "@/lib/pricing/service";
 import { gatherEvidence } from "@/lib/ai/evidence";
 import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
 import { runReportAgent, runTriageAgent } from "@/lib/ai/agents";
@@ -23,7 +24,7 @@ import { approversFor, markCaseAfterResponse, performResponseAction, recordRespo
 const CLOSED = ["RESOLVED", "FALSE_POSITIVE"];
 const MAX_CONCURRENT = Number(process.env.AI_MAX_CONCURRENT_RUNS ?? 2);
 
-// A small in-process queue so a burst of new cases (a simulation, a noisy
+// A small in-process queue so a burst of new cases (a log upload, a noisy
 // tool) doesn't fan out into dozens of simultaneous model calls.
 let running = 0;
 const waiting: Array<() => void> = [];
@@ -94,7 +95,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
         evidence,
         {
           triage: (latest?.output as TriageOutput | null) ?? null,
-          actions: actions.map((a) => ({ label: ACTION_LABEL[a.actionType], target: a.target, status: a.status, simulated: !!(a.result as { simulated?: boolean } | null)?.simulated })),
+          actions: actions.map((a) => ({ label: ACTION_LABEL[a.actionType], target: a.target, status: a.status, manual: !!(a.result as { manual?: unknown } | null)?.manual })),
         },
         profile,
         provider,
@@ -269,5 +270,5 @@ async function applyTriage(
 
 export async function aiSpend(since: Date) {
   const runs = await db.aiRun.findMany({ where: { createdAt: { gte: since } }, select: { model: true, inputTokens: true, outputTokens: true } });
-  return runs.reduce((sum, r) => sum + estimateCostUsd(r.model, r.inputTokens ?? 0, r.outputTokens ?? 0), 0);
+  return aiCostOf(runs);
 }

@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { CaseSeverity } from "@prisma/client";
 
-import type { Detection, Detector, ScoredDetection, UnifiedEvent } from "@/lib/siem/types";
+import type { Detection, DetectionContext, Detector, ScoredDetection, UnifiedEvent } from "@/lib/siem/types";
+import { EMPTY_INTEL } from "@/lib/threat-intel/local-intel";
 import {
   anomalousActionDetector,
   fsmChainDetector,
@@ -75,10 +76,10 @@ export function fingerprintFor(detection: Detection): string {
   return createHash("sha256").update(`${detection.detector}|${detection.ruleId}|${ids}`).digest("hex");
 }
 
-export function runDetections(events: UnifiedEvent[]): ScoredDetection[] {
+export function runDetections(events: UnifiedEvent[], ctx: DetectionContext = { intel: EMPTY_INTEL }): ScoredDetection[] {
   const out: ScoredDetection[] = [];
   for (const detector of DETECTORS) {
-    for (const detection of detector.run(events)) {
+    for (const detection of detector.run(events, ctx)) {
       out.push({ ...detection, riskScore: riskScoreFor(detection), ...riskObjectFor(detection) });
     }
   }

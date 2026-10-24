@@ -5,7 +5,7 @@ import { ArrowLeft, Check, CircleCheck, Pencil, X } from "lucide-react";
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
-import { PLANS } from "@/lib/plans";
+import { formatMinutes } from "@/lib/plans";
 import { CONTROLS } from "@/lib/endpoints/controls";
 import { formatMoney, quoteConfigSchema, type QuoteResult } from "@/lib/pricing/calculator";
 import { formatDateTime } from "@/lib/format";
@@ -23,7 +23,7 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
   const cfg = quoteConfigSchema.parse(quote.config);
   const r = quote.totals as unknown as QuoteResult;
   const money = (usd: number, decimals?: number) => formatMoney(usd, quote.currency, r.fxRate, { decimals });
-  const plan = PLANS[cfg.plan];
+  const plan = r.plan ?? null;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
@@ -44,7 +44,7 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
           <CardDescription className="font-mono">{quote.reference} · valid until {quote.validUntil ? formatDateTime(quote.validUntil).slice(0, 10) : "—"}</CardDescription>
           <CardTitle className="text-2xl">Managed security proposal for {quote.clientName}</CardTitle>
           <CardDescription>
-            {plan.name} — {plan.tagline}. {r.endpoints.toLocaleString()} endpoints, {cfg.profile.users.toLocaleString()} users. Prepared by {quote.createdBy?.name ?? quote.createdBy?.email ?? "HELIOS"}.
+            {plan ? `${plan.name}${plan.tagline ? ` — ${plan.tagline}` : ""}. ` : ""}{r.endpoints.toLocaleString()} endpoints, {cfg.profile.users.toLocaleString()} users. Prepared by {quote.createdBy?.name ?? quote.createdBy?.email ?? "HELIOS"}.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -108,13 +108,13 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Service levels</CardTitle>
-            <CardDescription>{plan.coverage} analyst coverage, AI first response around the clock</CardDescription>
+            <CardDescription>{plan ? `${plan.coverage} analyst coverage${cfg.ai.mode !== "none" ? ", AI first response around the clock" : ""}` : "No service plan on this quote"}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
-            {(["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const).map((s) => (
-              <p key={s} className="flex justify-between"><span className="text-muted-foreground">Acknowledge {s.toLowerCase()}</span><span>≤ {plan.ackMinutes[s]} min</span></p>
+            {plan && (["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const).filter((s) => plan.ackMinutes[s] != null).map((s) => (
+              <p key={s} className="flex justify-between"><span className="text-muted-foreground">Acknowledge {s.toLowerCase()}</span><span>≤ {formatMinutes(plan.ackMinutes[s])}</span></p>
             ))}
-            <p className="flex justify-between"><span className="text-muted-foreground">Incident response retainer</span><span>{plan.irRetainerHours + cfg.services.irExtraHours} h / year</span></p>
+            <p className="flex justify-between"><span className="text-muted-foreground">Incident response retainer</span><span>{(plan?.irRetainerHours ?? 0) + cfg.services.irExtraHours} h / year</span></p>
           </CardContent>
         </Card>
         <Card>
@@ -140,9 +140,9 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
           <CardTitle className="text-base">Assumptions</CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 text-xs text-muted-foreground">
-          <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> Third-party licences at {r.estimates ? "list prices or estimates where vendors sell by quote" : "list prices"}; final pricing subject to vendor confirmation.</p>
+          <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> Third-party licences at {r.lines.some((l) => l.basis === "list") ? "vendor list prices" : "agreed prices"}; final pricing subject to vendor confirmation.</p>
           <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> Amounts in {quote.currency} at 1 USD = {r.fxRate} {quote.currency}.</p>
-          {cfg.ai.mode === "cloud" && <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> AI usage estimated at ~{r.aiUsage?.alertsPerMonth.toLocaleString()} triaged alerts per month on {cfg.ai.model}.</p>}
+          {cfg.ai.mode === "cloud" && <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> AI usage estimated at ~{r.aiUsage?.alertsPerMonth.toLocaleString()} alerts ({r.aiUsage?.runsPerMonth.toLocaleString()} AI runs) per month on {cfg.ai.model}{r.aiUsage?.source === "history" ? ", based on measured volumes" : ""}.</p>}
           {cfg.ai.mode === "local" && <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> Local AI hardware is installed on the client&apos;s premises or a dedicated host; telemetry stays on-prem.</p>}
           <p className="flex gap-1.5"><Check className="size-3.5 shrink-0" /> {cfg.commercial.term === "monthly" ? "Month-to-month, 30 days' notice." : cfg.commercial.term === "annual" ? "12-month term, billed annually in advance." : "36-month term."}</p>
         </CardContent>

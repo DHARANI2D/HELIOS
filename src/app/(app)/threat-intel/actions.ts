@@ -9,6 +9,7 @@ import { requirePermission } from "@/lib/session";
 import { classifyIndicator } from "@/lib/threat-intel/indicators";
 import { indicatorReasons, indicatorVerdict, lookupIndicator } from "@/lib/threat-intel/service";
 import { configuredProviders } from "@/lib/threat-intel/providers";
+import { importFeed } from "@/lib/threat-intel/feeds";
 
 function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>) {
   const { indicator } = result;
@@ -64,4 +65,18 @@ export async function setBlockedAction(indicatorId: string, blocked: boolean) {
     detail: { type: indicator.type, value: indicator.value },
   });
   revalidatePath("/threat-intel");
+}
+
+export async function setFeedEnabledAction(feedId: string, enabled: boolean) {
+  const user = await requirePermission("intel.manage");
+  const feed = await db.threatFeed.update({ where: { id: feedId }, data: { enabled } });
+  await logAction({ actorId: user.id, action: enabled ? "intel.feed_enabled" : "intel.feed_disabled", detail: { feed: feed.name } });
+  revalidatePath("/threat-intel");
+}
+
+export async function importFeedAction(feedId: string) {
+  const user = await requirePermission("intel.manage");
+  const feed = await importFeed(feedId, user.id);
+  revalidatePath("/threat-intel");
+  return { name: feed.name, count: feed.lastCount ?? 0 };
 }

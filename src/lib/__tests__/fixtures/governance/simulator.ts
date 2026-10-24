@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { generateAgentIdentity } from "@/lib/governance/identity";
 import { processAction } from "@/lib/governance/sidecar";
-import { buildScenarios, getScenario, SCENARIO_TECHNIQUES, type Scenario } from "@/lib/governance/scenarios";
+import { buildScenarios, getScenario, SCENARIO_TECHNIQUES, type Scenario } from "@/lib/__tests__/fixtures/governance/scenarios";
 import { logAction } from "@/lib/audit";
 import { createCase, type NewDetection, type NewTimelineEntry } from "@/lib/cases/writer";
 import type { CaseSeverity, DetectionSource } from "@prisma/client";

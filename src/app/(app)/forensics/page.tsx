@@ -66,7 +66,7 @@ export default async function ForensicsPage() {
         </CardHeader>
         <CardContent>
           {analyses.length === 0 ? (
-            <EmptyState icon={MailWarning} title="Nothing analyzed yet" description="Upload an .eml, or try the sample phishing email." />
+            <EmptyState icon={MailWarning} title="Nothing analyzed yet" description="Upload a reported message (.eml or .msg) or a suspicious file to analyze it." />
           ) : (
             <Table>
               <TableHeader>

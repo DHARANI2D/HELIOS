@@ -17,11 +17,10 @@ import { executePlaybook } from "@/lib/playbooks/engine";
 import { logAction } from "@/lib/audit";
 import { isTelemetrySource } from "@/lib/siem/adapters";
 import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
-import { availableTactics, runSimulation, type SimulationConfig } from "@/lib/siem/simulation";
 import { DISPATCHABLE_AGENTS, type AgentKey } from "@/lib/ai/catalog";
 import { runAgentOnCase } from "@/lib/ai/first-response";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
-import { decideResponseAction, requestAnalystAction, rollbackResponseAction } from "@/lib/response/service";
+import { completeManualAction, decideResponseAction, requestAnalystAction, rollbackResponseAction } from "@/lib/response/service";
 
 const MAX_INGEST_EVENTS = 5000;
 
@@ -37,26 +36,6 @@ async function caseActor(caseId: string, ...permissions: Permission[]): Promise<
   const user = await requirePermission(...permissions);
   await assertCaseAccess(user, caseId);
   return user;
-}
-
-export async function listTacticsAction() {
-  await requirePermission("simulation.run");
-  return availableTactics();
-}
-
-const simulationSchema = z.object({
-  tactics: z.array(z.string()).max(20).optional(),
-  count: z.number().int().min(1).max(48).optional(),
-  intensity: z.enum(["low", "medium", "high"]).optional(),
-  tenantId: z.string().optional(),
-});
-
-export async function runSimulationAction(config: SimulationConfig & { tenantId?: string }) {
-  const user = await requirePermission("simulation.run");
-  const { tenantId, ...parsed } = simulationSchema.parse(config);
-  const result = await runSimulation(parsed, user.id, await resolveTenantInput(user, tenantId));
-  revalidateCases();
-  return result;
 }
 
 // Accepts either a JSON array of raw logs (all from `source`), a single raw
@@ -93,7 +72,7 @@ function parseIngestPayload(defaultSource: string, text: string): IngestItem[] {
 }
 
 export async function ingestLogsAction(source: string, text: string, tenantId?: string) {
-  const user = await requirePermission("simulation.run");
+  const user = await requirePermission("telemetry.ingest");
   const items = parseIngestPayload(source, text);
   const summary = await ingestTelemetry(items, { actorId: user.id, label: "manual ingest", tenantId: await resolveTenantInput(user, tenantId) });
   revalidateCases();
@@ -221,6 +200,16 @@ export async function rollbackResponseActionAction(actionId: string) {
   const user = await caseActor(action.caseId, "containment.approve");
   const result = await rollbackResponseAction(actionId, { id: user.id, name: user.name ?? "analyst" });
   revalidateCases(action.caseId);
+  return { status: result.status };
+}
+
+// The analyst carried out a MANUAL_REQUIRED action by hand and says so.
+export async function completeManualActionAction(actionId: string, note: string) {
+  const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId }, select: { caseId: true } });
+  const user = await caseActor(action.caseId, "containment.approve");
+  const result = await completeManualAction(actionId, { id: user.id, name: user.name ?? user.email ?? "analyst" }, z.string().max(1000).parse(note));
+  revalidateCases(action.caseId);
+  revalidatePath("/endpoints");
   return { status: result.status };
 }
 

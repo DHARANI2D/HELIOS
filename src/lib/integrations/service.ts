@@ -9,7 +9,8 @@ import { CLOSED_STATUSES } from "@/lib/cases/labels";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
 import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
 import { applyInventory, touchEndpoints } from "@/lib/endpoints/service";
-import { getCategory, getTool } from "@/lib/integrations/catalog";
+import { getCategory } from "@/lib/integrations/catalog";
+import { getCatalogTool } from "@/lib/integrations/tools";
 import { inventoryFrom, mapRecord, recordsFrom, type VendorAlert } from "@/lib/integrations/mappers";
 import type { IntegrationConfig, IntegrationSecrets } from "@/lib/integrations/dispatch";
 import type { SessionUser } from "@/lib/session";
@@ -40,7 +41,7 @@ export interface OnboardInput {
 }
 
 export async function onboardIntegration(input: OnboardInput, actorId: string) {
-  const tool = getTool(input.vendor);
+  const tool = await getCatalogTool(input.vendor);
   if (!tool) throw new Error("Unknown tool");
   const category = getCategory(tool.category)!;
   const { token, hash, display } = newToken("hel");
@@ -92,7 +93,7 @@ function fingerprint(integrationId: string, alert: VendorAlert) {
 }
 
 async function fileVendorAlerts(integration: Integration, alerts: VendorAlert[]) {
-  const tool = getTool(integration.vendor);
+  const tool = await getCatalogTool(integration.vendor);
   const fingerprints = alerts.map((a) => fingerprint(integration.id, a));
   const existing = new Set((await db.detection.findMany({ where: { fingerprint: { in: fingerprints } }, select: { fingerprint: true } })).map((d) => d.fingerprint));
 
@@ -175,7 +176,7 @@ export interface IngestResult {
 }
 
 export async function ingestForIntegration(integration: Integration, body: unknown): Promise<IngestResult> {
-  const tool = getTool(integration.vendor);
+  const tool = await getCatalogTool(integration.vendor);
   if (!tool?.ingest) throw new Error("This tool doesn't push data");
   const config = (integration.config ?? {}) as IntegrationConfig;
   const source = (config.telemetrySource ?? getCategory(tool.category)?.telemetry ?? "endpoint") as TelemetrySource;

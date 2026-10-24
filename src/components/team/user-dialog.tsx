@@ -118,7 +118,7 @@ export function UserDialogButton({ initial, tenants }: { initial?: UserDraft; te
             ) : (
               <div className="grid gap-1.5">
                 <Label>Title</Label>
-                <Input value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Senior SOC analyst" />
+                <Input value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} />
               </div>
             )}
           </div>

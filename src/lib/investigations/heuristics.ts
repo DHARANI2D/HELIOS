@@ -4,7 +4,7 @@ import type { UesEvent } from "@/lib/investigations/normalize";
 import { ancestry, type EntityGraph } from "@/lib/investigations/graph";
 import { getTactic, getTechnique, resolveTechnique } from "@/lib/mitre/catalog";
 import { isPrivateIp } from "@/lib/threat-intel/indicators";
-import { localVerdict } from "@/lib/threat-intel/local-intel";
+import { EMPTY_INTEL, localVerdict, type IntelSnapshot } from "@/lib/threat-intel/local-intel";
 import { maxSeverity, severityRank } from "@/lib/severity";
 
 // Deterministic forensic rules over normalized telemetry. They do two jobs:
@@ -41,7 +41,7 @@ function finding(partial: Omit<Finding, "confidence"> & { confidence?: number })
   return { confidence: 0.75, ...partial };
 }
 
-export function runForensicRules(events: UesEvent[]): Finding[] {
+export function runForensicRules(events: UesEvent[], intel: IntelSnapshot = EMPTY_INTEL): Finding[] {
   const out: Finding[] = [];
   const byRule = new Map<string, Finding>();
   // One finding per rule, accumulating every matching event — reads better
@@ -276,12 +276,12 @@ export function runForensicRules(events: UesEvent[]): Finding[] {
     }
 
     if (e.dstIp && !isPrivateIp(e.dstIp)) {
-      const intel = localVerdict("IP", e.dstIp);
-      if (intel.score >= 0.7) {
+      const verdict = localVerdict("IP", e.dstIp, intel);
+      if (verdict.score >= 0.7) {
         add(finding({
           ruleId: "known_bad_destination",
           title: "Connection to known-malicious infrastructure",
-          description: `Outbound connection to ${e.dstIp} (${intel.reasons.join("; ")}).`,
+          description: `Outbound connection to ${e.dstIp} (${verdict.reasons.join("; ")}).`,
           severity: "CRITICAL",
           detectionSource: "THREAT_INTEL_MATCH",
           techniques: ["T1071"],

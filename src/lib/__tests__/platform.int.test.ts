@@ -1,14 +1,26 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { createServer, type IncomingMessage } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
 import { logAction, verifyAuditChain } from "@/lib/audit";
 import { DEFAULT_PLAYBOOKS } from "@/lib/playbooks/defaults";
 import { decideExecution } from "@/lib/playbooks/engine";
-import { runSimulation } from "@/lib/siem/simulation";
-import { runScenario } from "@/lib/governance/simulator";
-import { SAMPLE_INVESTIGATION } from "@/lib/investigations/samples";
+import { runSimulation } from "@/lib/__tests__/fixtures/siem/simulation";
+import { buildScenarios } from "@/lib/__tests__/fixtures/governance/scenarios";
+import { agentForToken, issueAgentIdentity } from "@/lib/governance/agents";
+import { evaluateAgentAction } from "@/lib/governance/runtime";
+import { createCase } from "@/lib/cases/writer";
+import { completeManualAction, performResponseAction, recordResponseAction } from "@/lib/response/service";
+import { onboardIntegration } from "@/lib/integrations/service";
+import { signPayload } from "@/lib/integrations/dispatch";
+import { invalidateCatalog } from "@/lib/integrations/tools";
+import { ingestTelemetry } from "@/lib/siem/service";
+import { importFeed } from "@/lib/threat-intel/feeds";
+import { CATALOG_TOOLS } from "../../../prisma/seed-data/tools";
+import { SAMPLE_INVESTIGATION } from "@/lib/__tests__/fixtures/investigations";
 import { runInvestigationPipeline, startInvestigation } from "@/lib/investigations/service";
-import { buildSampleEmail } from "@/lib/forensics/samples";
+import { buildSampleEmail } from "@/lib/__tests__/fixtures/forensics";
 import { analyzeSubmission } from "@/lib/forensics/service";
 import { findRelatedCases } from "@/lib/cases/related";
 
@@ -21,14 +33,39 @@ const enabled = process.env.RUN_DB_TESTS === "1" && /\/[\w-]*_test(\?|$)/.test(d
 process.env.FORENSICS_DNS_LOOKUPS = "false";
 process.env.INVESTIGATIONS_ENGINE = "heuristic";
 
+// A local stand-in for the client's automation / firewall feed host.
+const received: Array<{ path: string; headers: IncomingMessage["headers"]; body: string }> = [];
+let feedBody = "";
+const stub = createServer((req, res) => {
+  let body = "";
+  req.on("data", (c) => (body += c));
+  req.on("end", () => {
+    received.push({ path: req.url ?? "", headers: req.headers, body });
+    if (req.url === "/feed.txt") {
+      res.writeHead(200, { "content-type": "text/plain" }).end(feedBody);
+      return;
+    }
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
+  });
+});
+let stubUrl = "";
+
 describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
   let adminId: string;
+
+  afterAll(() => {
+    stub.close();
+  });
 
   beforeAll(async () => {
     const tables = await db.$queryRaw<Array<{ tablename: string }>>`SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'`;
     await db.$executeRawUnsafe(`TRUNCATE ${tables.map((t) => `"${t.tablename}"`).join(", ")} RESTART IDENTITY CASCADE`);
     const admin = await db.user.create({ data: { email: "admin@test.local", name: "Test Admin", role: "ADMIN" } });
     adminId = admin.id;
+    for (const t of CATALOG_TOOLS) await db.catalogTool.create({ data: t });
+    invalidateCatalog();
+    await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
+    stubUrl = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
     for (const pb of DEFAULT_PLAYBOOKS) {
       await db.playbook.create({
         data: {
@@ -49,9 +86,15 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(first.summary.casesCreated).toBeGreaterThan(0);
     expect(first.summary.newDetections).toBeGreaterThan(0);
 
+    // The repeat lands on the existing cases; a finding only the combined
+    // window reveals (e.g. spraying across both runs) may open a new one, but
+    // never a second case for the same risk object.
     const second = await runSimulation({ tactics: ["Credential Access"] }, adminId);
-    expect(second.summary.casesCreated).toBe(0);
     expect(second.summary.casesUpdated).toBeGreaterThan(0);
+    expect(second.summary.caseIds).toEqual(expect.arrayContaining(first.summary.caseIds));
+    const siem = await db.case.findMany({ where: { sourceType: "SIEM_ALERT" }, select: { metadata: true } });
+    const objects = siem.map((c) => (c.metadata as { riskObject?: string }).riskObject);
+    expect(new Set(objects).size).toBe(objects.length);
 
     const mapped = await db.caseMitreTechnique.count();
     expect(mapped).toBeGreaterThan(0);
@@ -68,8 +111,11 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     const done = await decideExecution(pending!.id, "approved", adminId, "integration test");
     expect(done.status).toBe("SUCCEEDED");
     const after = await db.case.findUniqueOrThrow({ where: { id: pending!.caseId }, include: { timeline: true } });
-    expect(after.status).toBe("CONTAINED");
-    expect(after.timeline.some((t) => t.action === "playbook.isolate_host")).toBe(true);
+    // No response connector: isolation is left to a person, never claimed.
+    expect(after.status).not.toBe("CONTAINED");
+    const isolate = after.timeline.find((t) => t.action === "playbook.isolate_host");
+    expect(isolate?.detail).toMatch(/no response connector/);
+    expect(await db.endpoint.count({ where: { isolated: true } })).toBe(0);
     expect(await db.playbookApproval.count({ where: { executionId: pending!.id, decision: "approved" } })).toBe(1);
   });
 
@@ -124,12 +170,87 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(iocs.some((i) => i.indicator.type === "FILE_HASH")).toBe(true);
   });
 
-  it("files governance scenarios as cases mapped to ATT&CK", async () => {
-    const result = await runScenario("data_exfiltration", adminId);
-    expect(result.revoked).toBe(true);
-    const kase = await db.case.findUniqueOrThrow({ where: { id: result.caseId }, include: { mitreTechniques: true } });
+  it("gates governed AI agents through the live runtime", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Governance", slug: "test-governance" } });
+    const { agent, token } = await issueAgentIdentity("test-gov-agent", adminId, tenant.id);
+    expect((await agentForToken(`Bearer ${token}`))?.id).toBe(agent.id);
+    expect(await agentForToken("Bearer hga_wrong")).toBeNull();
+
+    const [read, exfil] = buildScenarios().find((s) => s.id === "data_exfiltration")!.events;
+    const allowed = await evaluateAgentAction(agent, read, "production");
+    expect(allowed).toMatchObject({ decision: "ALLOW", caseId: null });
+    const denied = await evaluateAgentAction(await db.agent.findUniqueOrThrow({ where: { id: agent.id } }), exfil, "production");
+    expect(denied).toMatchObject({ decision: "DENY", layer: "DLP", revoked: false });
+    expect(denied.trust).toBeLessThan(allowed.trust);
+    const kase = await db.case.findUniqueOrThrow({ where: { id: denied.caseId! }, include: { mitreTechniques: true } });
+    expect(kase).toMatchObject({ sourceType: "AGENT_GOVERNANCE", tenantId: tenant.id });
     expect(kase.mitreTechniques.map((t) => t.techniqueId)).toEqual(["T1567"]);
-    expect((await db.agent.findUniqueOrThrow({ where: { id: result.agentId } })).status).toBe("REVOKED");
+
+    const breach = await evaluateAgentAction(await db.agent.findUniqueOrThrow({ where: { id: agent.id } }), { name: "ESCALATE_OWN_PRIVILEGE" }, "production");
+    expect(breach).toMatchObject({ decision: "DENY", layer: "CONSTITUTION", revoked: true, caseId: denied.caseId });
+    expect((await db.case.findUniqueOrThrow({ where: { id: denied.caseId! } })).status).toBe("CONTAINED");
+    const after = await evaluateAgentAction(await db.agent.findUniqueOrThrow({ where: { id: agent.id } }), read, "production");
+    expect(after).toMatchObject({ decision: "DENY", layer: "IDENTITY" });
+    expect(await db.securityEvent.count({ where: { platform: "helios-governance", tenantId: tenant.id } })).toBe(3);
+  });
+
+  it("applies the client's plan SLA and none without a plan", async () => {
+    const plan = await db.servicePlan.create({ data: { key: "test-plan", name: "Test plan", coverage: "24x7", ackMinutes: { CRITICAL: 30 }, containMinutes: {}, features: {} } });
+    const onPlan = await db.tenant.create({ data: { name: "Test · Planned", slug: "test-planned", planId: plan.id } });
+    const noPlan = await db.tenant.create({ data: { name: "Test · Unplanned", slug: "test-unplanned" } });
+    const a = await createCase({ sourceType: "SIEM_ALERT", title: "SLA test", severity: "CRITICAL", tenantId: onPlan.id, deferPipelines: true });
+    const b = await createCase({ sourceType: "SIEM_ALERT", title: "SLA test", severity: "CRITICAL", tenantId: noPlan.id, deferPipelines: true });
+    // Due 30 min after creation (createdAt is stamped by the database a moment later).
+    expect(Math.abs(a.slaDueAt!.getTime() - a.createdAt.getTime() - 30 * 60_000)).toBeLessThan(1000);
+    expect(b.slaDueAt).toBeNull();
+  });
+
+  it("leaves actions without a connector to a person, and counts them only once done", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Manual", slug: "test-manual" } });
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Manual containment", severity: "HIGH", tenantId: tenant.id, deferPipelines: true, metadata: { hostName: "TEST-MANUAL-01" } });
+    const action = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: "TEST-MANUAL-01", source: "analyst", status: "PENDING_APPROVAL" });
+    const done = await performResponseAction(action.id, { id: adminId, name: "Test Admin" });
+    expect(done.status).toBe("MANUAL_REQUIRED");
+    expect(await db.endpoint.count({ where: { hostname: "TEST-MANUAL-01", isolated: true } })).toBe(0);
+    expect((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).status).not.toBe("CONTAINED");
+
+    await expect(completeManualAction(action.id, { id: adminId, name: "Test Admin" }, "")).rejects.toThrow();
+    const confirmed = await completeManualAction(action.id, { id: adminId, name: "Test Admin" }, "Isolated in the EDR console");
+    expect(confirmed.status).toBe("EXECUTED");
+    expect(await db.endpoint.count({ where: { hostname: "TEST-MANUAL-01", isolated: true } })).toBe(1);
+    expect((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).status).toBe("CONTAINED");
+  });
+
+  it("dispatches signed requests to the client's response connector", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Connector", slug: "test-connector" } });
+    await onboardIntegration({ tenantId: tenant.id, vendor: "response_webhook", config: { responseWebhookUrl: `${stubUrl}/actions` }, secrets: { webhookSecret: "test-secret" } }, adminId);
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Connector containment", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    const action = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: "TEST-CONN-01", source: "analyst", status: "PENDING_APPROVAL" });
+    const before = received.length;
+    const done = await performResponseAction(action.id, { id: adminId, name: "Test Admin" });
+    expect(done.status).toBe("EXECUTED");
+    const req = received.slice(before).find((r) => r.path === "/actions")!;
+    expect(JSON.parse(req.body)).toMatchObject({ action: "ISOLATE_HOST", target: "TEST-CONN-01", case: { id: kase.id } });
+    expect(req.headers["x-helios-signature"]).toBe(signPayload("test-secret", String(req.headers["x-helios-timestamp"]), req.body));
+    expect(await db.endpoint.count({ where: { tenantId: tenant.id, hostname: "TEST-CONN-01", isolated: true } })).toBe(1);
+  });
+
+  it("imports a threat feed, matches it in detection, and drops delisted entries", async () => {
+    const feed = await db.threatFeed.create({ data: { name: "Test feed", url: `${stubUrl}/feed.txt`, indicatorType: "IP", maliciousScore: 0.95, enabled: true } });
+    feedBody = "# test feed\n198.51.100.77\n198.51.100.78\n10.0.0.1\nnot-an-ip\n";
+    expect((await importFeed(feed.id)).lastCount).toBe(2);
+    const listed = await db.threatIndicator.findUniqueOrThrow({ where: { type_value: { type: "IP", value: "198.51.100.77" } } });
+    expect(listed).toMatchObject({ maliciousScore: 0.95, sources: ["feed:Test feed"] });
+
+    const summary = await ingestTelemetry([{ source: "network", data: { source_ip: "10.1.1.5", dest_ip: "198.51.100.77", port: 443, hostname: "TEST-NET-01" } }], { actorId: adminId });
+    expect(summary.newDetections).toBeGreaterThan(0);
+    expect(await db.detection.count({ where: { source: "THREAT_INTEL_MATCH" } })).toBeGreaterThan(0);
+
+    feedBody = "198.51.100.78\n";
+    await importFeed(feed.id);
+    const delisted = await db.threatIndicator.findUniqueOrThrow({ where: { type_value: { type: "IP", value: "198.51.100.77" } } });
+    expect(delisted.maliciousScore).toBeNull();
+    expect(delisted.sources).toEqual([]);
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

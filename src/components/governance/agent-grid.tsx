@@ -1,10 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ShieldCheck, ShieldX, ShieldAlert, Loader2 } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { KeyRound, ShieldCheck, ShieldX, ShieldAlert, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
-import { listAgentsAction } from "@/app/(app)/governance/actions";
+import { listAgentsAction, rotateAgentTokenAction } from "@/app/(app)/governance/actions";
+import { Button } from "@/components/ui/button";
+import { AgentTokenDialog } from "@/components/governance/identity-form";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -17,8 +20,14 @@ const STATUS_STYLE: Record<string, { icon: typeof ShieldCheck; badge: "secondary
   REVOKED: { icon: ShieldX, badge: "destructive" },
 };
 
-export function AgentGrid() {
+export function AgentGrid({ origin }: { origin: string }) {
   const [investigatingId, setInvestigatingId] = React.useState<string | null>(null);
+  const [issued, setIssued] = React.useState<{ name: string; token: string } | null>(null);
+  const rotate = useMutation({
+    mutationFn: (id: string) => rotateAgentTokenAction(id),
+    onSuccess: (r) => setIssued({ name: r.name, token: r.token }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
 
   const { data: agents, isLoading } = useQuery({
     queryKey: ["governance-agents"],
@@ -37,14 +46,14 @@ export function AgentGrid() {
   if (!agents?.length) {
     return (
       <p className="py-10 text-center text-sm text-muted-foreground">
-        No agents yet. Issue an identity or run a scenario below.
+        No governed agents yet. Issue an identity for each AI agent that acts on a client&apos;s systems.
       </p>
     );
   }
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {agents.map((agent) => {
           const style = STATUS_STYLE[agent.status] ?? STATUS_STYLE.ACTIVE;
           const Icon = style.icon;
@@ -73,15 +82,25 @@ export function AgentGrid() {
                   </div>
                   <Progress value={agent.trust} />
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Level L{agent.level} · {agent.mode ?? "—"}
-                </p>
+                <div className="flex items-end justify-between gap-2">
+                  <p className="min-w-0 text-xs text-muted-foreground">
+                    <span className="block truncate">{agent.tenant?.name ?? "SOC-wide"}</span>
+                    <span className="block">L{agent.level} · {agent.mode?.toLowerCase().replace("_", " ") ?? "—"}</span>
+                    {agent.tokenPrefix && <span className="block font-mono text-[10px]">{agent.tokenPrefix}</span>}
+                  </p>
+                  {agent.status !== "REVOKED" && (
+                    <Button size="sm" variant="ghost" className="h-7" disabled={rotate.isPending} title="Issue a new API token; the old one stops working" onClick={(e) => { e.stopPropagation(); rotate.mutate(agent.id); }}>
+                      <KeyRound /> Token
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
 
+      <AgentTokenDialog issued={issued} origin={origin} onClose={() => setIssued(null)} />
       <InvestigationDialog
         agentId={investigatingId}
         onClose={() => setInvestigatingId(null)}

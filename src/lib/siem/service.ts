@@ -16,6 +16,7 @@ import { fingerprintFor, runDetections, severityForRisk } from "@/lib/siem/engin
 import type { ScoredDetection, TelemetrySource, UnifiedEvent } from "@/lib/siem/types";
 import type { SecurityDomain } from "@prisma/client";
 import { touchEndpoints } from "@/lib/endpoints/service";
+import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
 
 // Ingestion → detection → correlation. Replaces signal-fusion's
 // IngestionService + DetectionEngine.runDetections, which re-ran every
@@ -173,7 +174,8 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
   await touchEndpoints(tenantId, rows, { integrationId: options.integrationId });
 
   const events = await loadWindow(batchId, tenantId);
-  const detections = runDetections(events);
+  const intel = await loadIntelSnapshot(events.flatMap((e) => [e.network.sourceIp, e.network.destIp]).map((value) => ({ type: "IP" as const, value })));
+  const detections = runDetections(events, { intel });
 
   // Drop findings already filed (in an earlier run) or repeated in this one.
   const fingerprints = detections.map(fingerprintFor);

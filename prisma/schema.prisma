@@ -124,7 +124,7 @@ model Tenant {
   slug              String       @unique
   industry          String?
   status            TenantStatus @default(ONBOARDING)
-  plan              String       @default("professional") // service plan key, src/lib/pricing/catalog.ts
+  planId            String? // the managed-service plan the client is on (sets its SLA)
   contactName       String?
   contactEmail      String?
   endpointsLicensed Int          @default(0)
@@ -136,6 +136,7 @@ model Tenant {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
+  plan         ServicePlan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
   users        User[]
   cases        Case[]
   events       SecurityEvent[]
@@ -431,6 +432,9 @@ model Agent {
   status       AgentStatus @default(ACTIVE)
   mode         String?
   tenantId     String?
+  // SHA-256 of the agent's API token for POST /api/governance/evaluate.
+  apiTokenHash String?     @unique
+  tokenPrefix  String?
   createdAt    DateTime    @default(now())
   lastUpdateAt DateTime    @updatedAt
 
@@ -788,6 +792,9 @@ enum ResponseActionStatus {
   FAILED
   BLOCKED // failed a guardrail (ungrounded target, kill switch, ...)
   ROLLED_BACK
+  // Approved, but no response connector can carry it out: someone does it
+  // in the tool's own console and marks it done here.
+  MANUAL_REQUIRED
 }
 
 model ResponseAction {
@@ -859,13 +866,122 @@ model Quote {
   @@map("quotes")
 }
 
-// Price book edits over the defaults in src/lib/pricing/catalog.ts.
-model PriceOverride {
-  itemKey     String   @id
-  unitPrice   Float
-  unitCost    Float?
+// ---------------------------------------------------------------------------
+// Reference data — all admin-managed. The seed only loads verifiable facts
+// (published vendor list prices with their source, Anthropic's published
+// model prices, public threat feeds); company policy such as rates, SLAs and
+// exchange rates starts empty.
+// ---------------------------------------------------------------------------
+
+model ServicePlan {
+  id                 String     @id @default(cuid())
+  key                String     @unique
+  name               String
+  tagline            String?
+  coverage           String // e.g. "24x7", "8x5"
+  // Minutes to acknowledge / contain, by severity ({ "CRITICAL": 30, ... }).
+  ackMinutes         Json
+  containMinutes     Json
+  irRetainerHours    Int        @default(0)
+  pricePerEndpoint   Float? // monthly sell price, USD
+  costPerEndpoint    Float? // your monthly delivery cost, USD
+  onboardingMinimum  Float?
+  defaultAutonomyCap AiAutonomy @default(CONTAIN_WITH_APPROVAL)
+  features           Json // { "threatHunting": "Monthly", ... }
+  active             Boolean    @default(true)
+  sortOrder          Int        @default(0)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  tenants Tenant[]
+
+  @@map("service_plans")
+}
+
+// Your own service rates and commercial terms (keys in src/lib/pricing/items.ts).
+model PriceItem {
+  key         String   @id
+  group       String
+  label       String
+  unit        String
+  price       Float?
+  cost        Float?
+  note        String?
+  sortOrder   Int      @default(0)
   updatedById String?
   updatedAt   DateTime @updatedAt
 
-  @@map("price_overrides")
+  @@map("price_items")
+}
+
+model VolumeDiscount {
+  minEndpoints Int      @id
+  discountPct  Float
+  updatedAt    DateTime @updatedAt
+
+  @@map("volume_discounts")
+}
+
+// Third-party security tools HELIOS can onboard and price.
+model CatalogTool {
+  key            String               @id
+  name           String
+  vendor         String
+  category       String
+  description    String
+  controls       String[]
+  actions        PlaybookActionType[]
+  ingest         String? // payload mapper, src/lib/integrations/mappers.ts
+  platforms      String[]
+  deployment     String
+  offlineCapable Boolean              @default(false)
+  priceUnit      String // endpoint | user | server | gb | flat
+  // Vendor-published list price, USD per unit per month, with its source.
+  listPrice      Float?
+  priceSource    String?
+  // What you actually pay or resell at; overrides listPrice in quotes.
+  customPrice    Float?
+  active         Boolean              @default(true)
+  updatedAt      DateTime             @updatedAt
+
+  @@map("catalog_tools")
+}
+
+model Currency {
+  code        String   @id // ISO 4217
+  symbol      String
+  rate        Float // units per 1 USD
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("currencies")
+}
+
+// Model prices for AI spend estimates (USD per million tokens).
+model AiModelPrice {
+  model     String   @id
+  provider  String
+  inputPer  Float
+  outputPer Float
+  source    String?
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_model_prices")
+}
+
+// Public or private indicator feeds imported into the threat-intel store.
+model ThreatFeed {
+  id             String        @id @default(cuid())
+  name           String        @unique
+  url            String
+  indicatorType  IndicatorType
+  maliciousScore Float         @default(0.8)
+  description    String?
+  enabled        Boolean       @default(false)
+  lastImportedAt DateTime?
+  lastCount      Int?
+  lastError      String?
+  createdAt      DateTime      @default(now())
+
+  @@map("threat_feeds")
 }

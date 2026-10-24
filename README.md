@@ -1,90 +1,84 @@
 # HELIOS
 
-**A unified security operations platform**: one Next.js application consolidating four previously separate tools into a single product.
+**A managed detection & response (MDR) platform for a small security company.** It runs your SOC for many client organisations at once:
+- client tools stream alerts into one case queue;
+- AI agents do the first containment and initial analysis;
+- your analysts do the primary analysis;
+- a Build & Price configurator quotes the service.
 
-| Feature area | Ported from | What it does |
-|---|---|---|
-| Cases & Alerts | `signal-fusion` | Telemetry ingestion, 11 SIEM detectors, 48 replayable ATT&CK attack scenarios, and correlation of detections into cases |
-| Investigations | `asip` | Log normalization (Sysmon, CrowdStrike, Wazuh, Google SecOps, Splunk CSV, JSON/JSONL, raw text), a process-lineage graph, and a triage → RCA ⇄ adversarial QA → report pipeline (Claude agent swarm or deterministic engine) |
-| Email & File Forensics | `desas` | `.eml` and Outlook `.msg` intake, SPF/DKIM/DMARC and sender-identity checks, phishing content and link heuristics, attachment forensics, HTTP-level link detonation, and scored verdicts |
-| Agent Governance | `aegis` | Zero-trust identity, trust scoring, DLP, and breach investigation for autonomous AI agents |
-| Threat Intelligence | all four | One shared IOC store: built-in intel plus VirusTotal and AbuseIPDB, 24h cache, and a blocklist feed |
-| Response Playbooks | `signal-fusion` | Trigger-matched containment workflows on *any* case source, with an admin approval gate |
-| MITRE ATT&CK Coverage | all four | Matrix of the techniques HELIOS rules can detect vs. the techniques observed in cases |
-| Audit Log | `aegis` | A hash-chained, tamper-evident record of every write action, with verification and export |
+| Area | What it does |
+|---|---|
+| **Clients & plans** | Each client (tenant) has a service plan that sets its SLA targets, the most autonomy its AI agents may take, and what it pays. Client users get their own portal: incidents, endpoints, approvals, AI consent. |
+| **Roles** | 11 roles (platform admin, SOC manager, tier-1/2/3 analysts, threat hunter, detection engineer, auditor, account manager, client admin, client stakeholder). Navigation, queues and actions follow the role; analysts can be limited to security domains (endpoint, identity, email, network, cloud, AI agents). |
+| **Tools & integrations** | Onboard each client's EDR, antivirus, MDM, email security, identity, firewall, SIEM, backup, ticketing and chat tools. Tools are assigned per role or per person. Vendor alerts arrive on a per-tool ingest URL and become cases; hosts become the endpoint inventory with the protection each tool provides. |
+| **Cases & alerts** | One queue for every source, with: <ul><li>tier-1/2/3 escalation;</li><li>assignment, watchers, @mentions and internal or client-visible discussion;</li><li>SLA clocks from the client's plan;</li><li>notifications;</li><li>correlation of related alerts into one case.</li></ul> |
+| **AI first responder** | On every new case an AI agent triages, explains its verdict with cited evidence, and proposes containment. A grounding check rejects targets the evidence doesn't contain. A deterministic policy (kill switch, client consent, per-agent autonomy, allow-list, confidence bar, critical-endpoint guard, rate limit) decides what runs, what waits for approval, and what is only suggested. Agent types and models are chosen per agent: Claude online today, local or offline models (Ollama, LM Studio, vLLM) when you're ready. |
+| **Response actions** | Containment goes through the client's response connector: a signed webhook to your automation, a SOAR or the vendor's API. Without a connector, an action is left **to do by hand** and only counts once an analyst confirms they did it. Every action can be rolled back and is audited. |
+| **Investigations, forensics, threat intel, playbooks, ATT&CK coverage, audit log** | Log investigations with an agent pipeline. Email and file forensics. A shared indicator store with public threat feeds. Approval-gated playbooks. Detection coverage against ATT&CK. A hash-chained audit trail. |
+| **Agent governance** | Govern the AI agents your clients run. Each agent asks `POST /api/governance/evaluate` before acting; constitution, reasoning-drift, DLP and policy checks decide; trust adapts; breaches revoke the agent and open a case. |
+| **Build & Price** | Configure a client's stack across every protection layer and compare vendors and plans. Estimate monthly, annual, one-time, maintenance (AMC) and 3-year costs, with cloud-vs-local AI, margins and multi-currency, then save versioned quotes. |
 
-Every module writes through one case writer into one shared data model. That means:
-- one `Case` / `Detection` / `TimelineEntry` stream;
-- one `SecurityEvent` telemetry table;
-- one MITRE ATT&CK reference set;
-- one threat-indicator cache;
-- one audit chain.
+### Real data only
 
-So a phishing verdict, a SIEM correlation, an investigation, and a rogue AI agent all show up in the same case list. They also share the coverage matrix and trigger the same playbooks.
+HELIOS ships no sample clients, no invented prices and no fake intelligence.
+- **Seeded:** only facts. These are vendors' published list prices (each with its source), Anthropic's published model prices, the MITRE ATT&CK reference set, the public threat-feed addresses (disabled until you enable them), starter playbooks and agent profiles.
+- **Yours to enter:** your plans, rates, SLAs and exchange rates. The overview shows admins a setup checklist, and a quote that needs a price nobody has set says so and can't be saved.
+- **Test data:** there's a separate, clearly labelled seed for testing (see below).
 
-See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit together, and [`docs/porting-notes.md`](docs/porting-notes.md) for what changed relative to each legacy app (bugs fixed, behaviour intentionally not ported). The original sources live in `legacy/components/` for reference only.
+See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit together, and [`docs/porting-notes.md`](docs/porting-notes.md) for the history of the original modules.
 
 ## Stack
 
-- **Framework**: Next.js 16 (App Router, Server Actions, `after()` for background work), React 19, TypeScript.
-- **UI**: Tailwind CSS 4 and shadcn/ui primitives, set up manually under `src/components/ui` because the shadcn CLI registry isn't reachable from this environment's network. Also ECharts and Cytoscape (process graphs).
-- **Data**: Prisma + PostgreSQL 16, TanStack Query on the client, Zustand for local UI state.
-- **Auth**: Auth.js (credentials provider + Prisma adapter). Every Server Action re-checks the session, because the proxy redirect isn't a security boundary.
-- **AI**: `@anthropic-ai/sdk` (Claude, structured outputs) for the Investigations agent swarm.
-- **Tests**: Vitest, with unit tests plus a Postgres-backed integration suite.
+- **Framework:** Next.js 16 (App Router, Server Actions, `after()` for background work), React 19, TypeScript.
+- **UI:** Tailwind CSS 4 and shadcn/ui primitives, with light and dark themes. Charts use ECharts; process graphs use Cytoscape.
+- **Data:** Prisma + PostgreSQL 16, TanStack Query.
+- **Auth:** Auth.js credentials, with lockout after repeated failures. Every page and Server Action re-checks the session, the role's permissions and the client scope.
+- **AI:** `@anthropic-ai/sdk` with structured outputs, plus any OpenAI-compatible local server.
+- **Tests:** Vitest unit tests, plus a Postgres-backed integration suite.
 
 ## Getting started
 
-### 1. Start Postgres
-
 ```bash
-docker compose up -d
-```
-
-If Docker isn't available, any local Postgres 16 instance works; point `DATABASE_URL` at it.
-
-### 2. Configure environment
-
-```bash
-cp .env.example .env
-# set AUTH_SECRET; everything else is optional
-```
-
-`.env.example` documents every variable. None of the integrations is required:
-
-| Variable | Without it |
-|---|---|
-| `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY` | Built-in intel only (known C2 / Tor ranges, suspicious TLDs, brand impersonation) |
-| `ANTHROPIC_API_KEY` | Investigations use the deterministic forensic engine instead of the Claude agent swarm |
-| `SLACK_WEBHOOK_URL` | `NOTIFY_SLACK` playbook actions are recorded as simulated |
-| `MXTOOLBOX_API_KEY` | Email forensics skips the sender-domain diagnostics (MX, blacklist, SPF, DMARC, SMTP) |
-
-### 3. Install dependencies and set up the database
-
-```bash
+docker compose up -d              # or any Postgres 16; point DATABASE_URL at it
+cp .env.example .env              # set AUTH_SECRET (and HELIOS_ENCRYPTION_KEY in production)
 npm install
-npm run db:migrate   # applies prisma/migrations
-npm run db:seed      # admin user, MITRE ATT&CK reference set, starter playbooks
-```
-
-### 4. Run the app
-
-```bash
+npm run db:migrate                # applies prisma/migrations
+npm run db:seed                   # first admin + reference facts (idempotent)
 npm run dev
 ```
 
-Visit `http://localhost:3000` and sign in with the seeded admin account, `admin@helios.local` / `helios-admin`. Override these with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` before seeding.
+The seed creates the first admin, `admin@helios.local` by default. The password is `SEED_ADMIN_PASSWORD` if you set it; otherwise a random one is printed once.
 
-### Try it
+Sign in, then work through the **Get HELIOS ready** checklist on the overview:
+1. Define service plans and fill in the price book (Build & Price → Pricing setup).
+2. Connect an AI provider (AI Agents).
+3. Invite your team (Team & Roles).
+4. Add clients (Clients).
+5. Onboard their tools (Tools & Integrations).
+6. Enable threat feeds (Threat Intelligence).
 
-Each module has a built-in demo:
+None of the environment integrations is required:
 
-- **Cases & Alerts**: click **Run simulation** to replay signal-fusion's attack scenarios through the live ingestion and detection pipeline.
-- **Investigations**: click **Load sample**, then **Start investigation**. The sample is a phishing macro → encoded PowerShell → C2 → persistence → LSASS dump → PsExec trace.
-- **Email & File Forensics**: click **Analyze sample phishing email**. It carries failing SPF/DKIM/DMARC, a look-alike login link, and a macro-enabled `.docm`.
-- **Agent Governance**: run any of the five scenarios.
+| Variable | Without it |
+|---|---|
+| `ANTHROPIC_API_KEY` | AI agents use a provider configured in the app (including local models), or the built-in deterministic engine |
+| `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY` | Reputation comes from enabled threat feeds and your own blocks only |
+| `SLACK_WEBHOOK_URL` | Chat steps use the client's Slack or Teams integration; with neither, they're left to do by hand |
+| `MXTOOLBOX_API_KEY` | Email forensics skips sender-domain diagnostics |
 
-Then look at the **Response Playbooks** approval queue, the **MITRE ATT&CK Coverage** matrix, and the **Audit Log**. Use **Verify chain integrity** on the Audit Log page to check the chain.
+### Test data
+
+```bash
+npm run db:seed:test
+```
+
+This loads data for exercising the platform end to end:
+- two test clients, two test plans, and test values for any unset price-book items;
+- one account per role under the reserved `.test` domain;
+- vendor alerts and attack telemetry from the fixtures in `src/lib/__tests__/fixtures`, pushed through the real ingest, detection and AI first-response pipeline;
+- a governed test agent driven through the real governance gate.
+
+Everything is labelled "Test ·". The command refuses to run with `NODE_ENV=production`. Use a separate database if you don't want test data next to real clients.
 
 ## Scripts
 
@@ -95,48 +89,33 @@ Then look at the **Response Playbooks** approval queue, the **MITRE ATT&CK Cover
 | `npm run lint` | ESLint |
 | `npm run typecheck` | Generate route types and run `tsc --noEmit` |
 | `npm test` | Unit tests (Vitest) |
-| `RUN_DB_TESTS=1 DATABASE_URL=…/helios_test npm test` | Also run the Postgres integration suite. It **truncates every table**, so it refuses to run unless the database name ends in `_test` |
+| `RUN_DB_TESTS=1 DATABASE_URL=…/helios_test npm test` | Also runs the Postgres integration suite. It **truncates every table**, so it refuses to run unless the database name ends in `_test` |
 | `npm run db:migrate` | Create / apply Prisma migrations (dev) |
-| `npm run db:seed` | Seed admin user, ATT&CK reference set, starter playbooks (idempotent) |
+| `npm run db:seed` | First admin and reference facts (idempotent; never overwrites your prices) |
+| `npm run db:seed:test` | Labelled test clients, accounts and alerts (never in production) |
 | `npm run db:studio` | Open Prisma Studio |
 
-CI (`.github/workflows/ci.yml`) runs lint, typecheck, unit tests, migrations plus the integration suite against a Postgres service, and a production build.
+CI (`.github/workflows/ci.yml`) runs:
+- lint, typecheck and unit tests;
+- migrations plus the integration suite against a Postgres service;
+- a production build.
 
-## Project structure
+## Machine endpoints
 
-```
-src/
-  app/
-    (app)/                 # authenticated shell — one route per feature area, each with its Server Actions
-      cases/[id]/          # unified case view (shared by every source, plus a source-specific panel)
-    api/                   # Auth.js, audit export, threat-intel blocklist feed
-    login/
-  components/
-    ui/                    # shadcn/ui primitives
-    shared/                # badges, pagination, JSON/Markdown views
-    cases/ investigations/ forensics/ governance/ playbooks/ threat-intel/ audit/ dashboard/ shell/
-  lib/
-    cases/                 # the shared case writer + lifecycle helpers
-    siem/                  # adapters, 11 detectors, risk engine, correlation, 48 attack scenarios
-    investigations/        # normalizer, entity graph, forensic rules, Claude agents, pipeline
-    forensics/             # headers, body, HTML intel, attachment forensics, sandbox, scoring
-    governance/            # aegis engines (identity, trust, policy, DLP, reasoning, sidecar, scenarios)
-    threat-intel/          # IOC extraction, built-in intel, providers, shared cache
-    playbooks/             # trigger matching, execution engine, starter playbooks
-    mitre/                 # ATT&CK catalog + detection-coverage registry
-    audit.ts               # hash-chained audit log
-    session.ts             # requireUser / requireAdmin for Server Actions
-prisma/
-  schema.prisma            # the unified data model
-  migrations/
-  seed.ts
-docs/                      # architecture and porting notes
-legacy/components/         # original aegis / asip / desas / signal-fusion sources (reference only)
-```
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /api/ingest/<integrationId>` | Bearer ingest token (shown once at onboarding) | A client tool pushes alerts, telemetry or inventory in its own format |
+| `POST /api/governance/evaluate` | Bearer agent token (shown once at identity issue) | A governed AI agent asks before acting |
+| `GET /api/threat-intel/blocklist` | — | Plain-text blocklist for firewalls to pull |
+| `GET /api/health` | — | Liveness and database check |
+
+Response connectors receive `POST`s with an `x-helios-timestamp` header and an `x-helios-signature: sha256=<HMAC(secret, "<timestamp>.<body>")>` header.
 
 ## Security notes
 
-- **Server Actions:** each one authenticates. Org-wide or destructive operations are admin-only: playbook authoring, approving containment, and global purge.
-- **Audit log:** appends serialize on a Postgres advisory lock so concurrent writers can't fork the chain. Cases and users referenced by audit entries can't be deleted, because nulling those references would rewrite hashed rows.
-- **URL detonation:** fetches attacker URLs from the server. Every connection's resolved address is checked against private, loopback and link-local ranges at connect time, which also blocks DNS rebinding. JavaScript is not executed. Detonation needs direct outbound HTTP(S); it does not go through an HTTP proxy.
-- **Model output:** rendered as Markdown with raw HTML disabled.
+- **Authorization:** every page and Server Action checks the session, the role's permission and the client scope. Out-of-scope records look like missing ones.
+- **Secrets:** integration secrets and AI provider keys are stored encrypted with AES-256-GCM. Ingest and agent tokens are stored only as SHA-256 hashes.
+- **AI containment:** it never acts on a target that isn't in the case evidence. Account actions and process kills always need a human. Clients can cap autonomy for their estate.
+- **Audit log:** appends serialize on a Postgres advisory lock, so the chain can't fork. Records referenced by audit entries can't be deleted.
+- **URL detonation:** connections are checked against private, loopback and link-local ranges at connect time. JavaScript is never executed.
+- **Rendering:** model output is rendered as Markdown with raw HTML disabled.

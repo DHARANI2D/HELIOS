@@ -1,4 +1,5 @@
 import type { DetectionSource } from "@prisma/client";
+import type { IntelSnapshot } from "@/lib/threat-intel/local-intel";
 
 // Ported from signal-fusion's backend/src/types.ts. UnifiedEvent is the
 // in-memory shape detectors consume; it maps 1:1 onto the SecurityEvent table.
@@ -36,7 +37,13 @@ export interface Detector {
   // Techniques this detector can emit — feeds the "detectable" layer of the
   // MITRE coverage matrix.
   techniques: string[];
-  run(events: UnifiedEvent[]): Detection[];
+  run(events: UnifiedEvent[], ctx: DetectionContext): Detection[];
+}
+
+// What detectors may consult besides the events: the indicator store's
+// knowledge about the IPs in this batch (see threat-intel/snapshot.ts).
+export interface DetectionContext {
+  intel: IntelSnapshot;
 }
 
 export interface ScoredDetection extends Detection {

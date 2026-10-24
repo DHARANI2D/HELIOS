@@ -10,7 +10,7 @@ What changed relative to each legacy app in `legacy/components/`. It records bug
 - the enterprise risk model;
 - the playbook engine (generalized to every case source);
 - threat-intel services (merged into the shared module);
-- all 48 attack scenarios.
+- all 48 attack scenarios, now as test fixtures (`src/lib/__tests__/fixtures/siem`), not an in-app simulator.
 
 **Fixed:**
 - **Duplicate alerts.** signal-fusion re-ran every detector over the *entire* event table on each ingest and filed one alert per detection, so findings were re-filed every run. HELIOS uses a 24h window, fingerprint de-duplication, and risk-object correlation into cases.
@@ -18,12 +18,13 @@ What changed relative to each legacy app in `legacy/components/`. It records bug
 - **Unenforced FSM window.** The FSM chain detector declared `maxChainTimeGapMs` but never enforced it. It now resets after 30 minutes.
 - **Scheduler false positives.** The persistence rule matched the substring `"at "`, which fires on `cat`, `format`, and so on. It now requires the `at HH:MM` command shape.
 - **Event-log rule tightened.** The defense-evasion rule `wevtutil` + `cl` substring now requires the `cl` / `clear-log` verb.
-- **Threat intel on destinations.** The threat-intel detector only checked source IPs, so outbound beacons to known C2 were missed. It now also checks destinations and uses the shared built-in intel, which includes the Tor exit range.
+- **Threat intel on destinations.** The threat-intel detector only checked source IPs, so outbound beacons to known C2 were missed. It now also checks destinations. It matches against the shared indicator store (imported feeds, provider answers, blocks); signal-fusion's hardcoded "known bad" IPs were dropped as invented data.
 - **Biased shuffle.** Random scenario selection used `sort(() => 0.5 - Math.random())`, which is biased. It is now Fisher–Yates.
 - **Stale timestamps.** Scenario timestamps were computed at module load. They are now computed per run.
 - **Impossible travel distances.** Impossible travel assumed a flat 1000 km between any two locations. It now uses country centroids, with 1000 km as the fallback.
 
 **Changed:**
+- **No hardcoded intel:** the built-in blocklist and Tor range are gone. The Tor Project exit list and the abuse.ch feeds are importable threat feeds instead.
 - **OSINT rule:** `github.com` was removed from the OSINT list because it's routine developer traffic.
 
 **Not ported:**
@@ -89,8 +90,10 @@ What changed relative to each legacy app in `legacy/components/`. It records bug
 
 ## aegis → Agent Governance
 
-This was ported in an earlier change. In this pass:
-- **Shared case writer.** Scenario runs now go through it, so they get ATT&CK mappings (data exfiltration → T1567, etc.), indicators, playbooks and the shared audit path.
+This was ported in an earlier change. Since then:
+- **Live gate instead of scenarios.** aegis's sidecar is now a real endpoint, `POST /api/governance/evaluate`, authenticated with a per-agent token. Its five attack scenarios became test fixtures.
+- **Shared case writer.** Decisions go through the shared case writer, so they get ATT&CK mappings (DLP → T1567, constitution breaches → T1078 / T1485 / T1562 / T1552), playbooks and the shared audit path.
+- **Breaches.** A constitution breach revokes the agent.
 - **Action authentication.** All governance Server Actions authenticate; global purge is admin-only.
 
 ## Cross-cutting fixes found along the way

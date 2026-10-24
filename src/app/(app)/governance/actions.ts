@@ -5,8 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireAdmin, requirePermission } from "@/lib/session";
 import { selectedTenantId, tenantScope } from "@/lib/access";
-import { issueAgentIdentity } from "@/lib/governance/agents";
-import { runScenario, globalPurge, getAllScenarios } from "@/lib/governance/simulator";
+import { globalPurge, issueAgentIdentity, rotateAgentToken } from "@/lib/governance/agents";
 import {
   restoreAgent,
   confirmBreach,
@@ -22,32 +21,29 @@ async function assertAgentInScope(agentId: string, user: Awaited<ReturnType<type
 
 export async function listAgentsAction() {
   const user = await requirePermission("governance.manage");
-  return db.agent.findMany({ where: await tenantScope(user), orderBy: { lastUpdateAt: "desc" } });
+  return db.agent.findMany({
+    where: await tenantScope(user),
+    orderBy: { lastUpdateAt: "desc" },
+    select: { id: true, name: true, trust: true, level: true, status: true, mode: true, tokenPrefix: true, tenant: { select: { name: true } } },
+  });
 }
 
-export async function listScenariosAction() {
-  await requirePermission("governance.manage");
-  return getAllScenarios().map((s) => ({
-    id: s.id,
-    name: s.name,
-    description: s.description,
-    severity: s.severity,
-  }));
-}
-
+// The agent's API token is returned once, here; only its hash is kept.
 export async function issueIdentityAction(name: string) {
   const user = await requirePermission("governance.manage");
-  const agent = await issueAgentIdentity(name, user.id, await selectedTenantId(user));
+  const clean = name.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/.test(clean)) throw new Error("Name: 3–64 letters, digits, dots, dashes or underscores");
+  const { agent, token } = await issueAgentIdentity(clean, user.id, await selectedTenantId(user));
   revalidatePath("/governance");
-  return { id: agent.id, name: agent.name };
+  return { id: agent.id, name: agent.name, token };
 }
 
-export async function runScenarioAction(scenarioId: string) {
+export async function rotateAgentTokenAction(agentId: string) {
   const user = await requirePermission("governance.manage");
-  const result = await runScenario(scenarioId, user.id, await selectedTenantId(user));
+  await assertAgentInScope(agentId, user);
+  const { agent, token } = await rotateAgentToken(agentId, user.id);
   revalidatePath("/governance");
-  revalidatePath("/");
-  return result;
+  return { id: agent.id, name: agent.name, token };
 }
 
 // Revokes every agent in the focused tenant (all tenants when unfocused).

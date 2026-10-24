@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { classifyIndicator, extractIndicators, isPrivateIp, refang } from "@/lib/threat-intel/indicators";
-import { localVerdict, verdictForScore } from "@/lib/threat-intel/local-intel";
+import { intelKey, localVerdict, verdictForScore } from "@/lib/threat-intel/local-intel";
 import { scoreVirusTotalStats } from "@/lib/threat-intel/providers";
 
 describe("indicator extraction", () => {
@@ -48,10 +48,11 @@ describe("indicator extraction", () => {
 });
 
 describe("built-in intel", () => {
-  it("flags known C2 IPs and the Tor exit range", () => {
-    expect(localVerdict("IP", "99.88.77.66").score).toBeGreaterThanOrEqual(0.9);
-    expect(localVerdict("IP", "185.220.101.200").score).toBe(0.7);
-    expect(localVerdict("IP", "8.8.8.8").score).toBe(0);
+  it("scores IPs only from the indicator store, never a built-in list", () => {
+    expect(localVerdict("IP", "198.51.100.7").score).toBe(0);
+    const intel = new Map([[intelKey("IP", "198.51.100.7"), { score: 0.95, reasons: ["abuse.ch Feodo Tracker reputation 0.95"] }]]);
+    expect(localVerdict("IP", "198.51.100.7", intel)).toEqual({ score: 0.95, reasons: ["abuse.ch Feodo Tracker reputation 0.95"] });
+    expect(localVerdict("URL", "http://198.51.100.7/payload", intel).score).toBe(0.95);
   });
 
   it("flags brand impersonation but not the brand itself", () => {

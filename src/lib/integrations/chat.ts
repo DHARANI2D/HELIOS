@@ -11,7 +11,7 @@ export async function dispatchChatMessage(tenantId: string | null, text: string)
     orderBy: [{ tenantId: { sort: "desc", nulls: "last" } }, { createdAt: "asc" }],
   });
   const webhook = chat ? readSecrets(chat.secretCipher).chatWebhookUrl : process.env.SLACK_WEBHOOK_URL;
-  if (!webhook) return { sent: false, message: "No chat channel connected — recorded only (add Slack or Teams under Tools & Integrations)" };
+  if (!webhook) return { sent: false, message: "No chat channel connected (add Slack or Teams under Tools & Integrations)" };
   try {
     const res = await fetch(webhook, {
       method: "POST",

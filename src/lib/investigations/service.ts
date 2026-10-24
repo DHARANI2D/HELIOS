@@ -25,6 +25,7 @@ import {
 import { buildEvidence, qaAgent, rcaAgent, reportAgent, triageAgent } from "@/lib/investigations/agents";
 import { resolveProvider } from "@/lib/ai/resolve";
 import type { LlmProvider } from "@/lib/ai/provider";
+import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
 
 // Orchestrates an investigation as a SOC_INVESTIGATION case: intake →
 // normalize → entity graph → triage → RCA ⇄ QA (≤3 rounds, as in asip's
@@ -345,7 +346,8 @@ export async function runInvestigationPipeline(caseId: string) {
     const rows = await db.securityEvent.findMany({ where: { caseId }, orderBy: { timestamp: "asc" } });
     const events = rows.map(fromRow);
     const graph = buildEntityGraph(events);
-    const findings = runForensicRules(events);
+    const intel = await loadIntelSnapshot(events.map((e) => ({ type: "IP" as const, value: e.dstIp })));
+    const findings = runForensicRules(events, intel);
     const flaggedEvents = [...new Set(findings.flatMap((f) => f.events))];
     const prior: PriorCase[] = (
       await findRelatedCases(caseId, { limit: 5, extraIndicators: indicatorsFrom(flaggedEvents.length ? flaggedEvents : events) })

@@ -35,12 +35,12 @@ export const DEFAULT_PLAYBOOKS: PlaybookTemplate[] = [
       {
         name: "Notify SOC channel",
         actionType: "NOTIFY_SLACK",
-        parameters: { channel: "#soc-critical", message: "Host {{host}} isolated: {{case.title}} ({{case.severity}})" },
+        parameters: { channel: "#soc-critical", message: "Containment started for {{host}}: {{case.title}} ({{case.severity}}) — check the case for anything still to do by hand" },
       },
       {
         name: "Open incident ticket",
         actionType: "CREATE_TICKET",
-        parameters: { system: "jira", project: "SEC", title: "Investigate isolated host {{host}}" },
+        parameters: { system: "jira", project: "SEC", title: "Contain and investigate host {{host}}" },
       },
     ],
   },

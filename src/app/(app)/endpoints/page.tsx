@@ -146,7 +146,7 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
           </form>
 
           {data.endpoints.length === 0 ? (
-            <EmptyState icon={Laptop} title="No endpoints yet" description="Onboard an EDR under Tools & Integrations, run an attack simulation, or import an inventory CSV." />
+            <EmptyState icon={Laptop} title="No endpoints yet" description="Onboard an EDR under Tools & Integrations or import an inventory CSV." />
           ) : (
             <div className="overflow-x-auto">
               <Table>

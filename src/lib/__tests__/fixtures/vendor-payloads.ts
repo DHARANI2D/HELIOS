@@ -1,7 +1,7 @@
-import { getTool, type IngestFormat } from "@/lib/integrations/catalog";
+import type { IngestFormat } from "@/lib/integrations/catalog";
 
-// One realistic payload per vendor format, in that vendor's own shape. Used by
-// "Send test event" and shown in the onboarding instructions as a curl body.
+// TEST FIXTURES — synthetic payloads in each vendor's own shape, for the
+// mapper tests and `npm run db:seed:test`. Never used by the running app.
 
 const NOW = () => new Date().toISOString();
 const HASH = "3f8a1c0e9b7d6a5f4e3d2c1b0a9f8e7d6c5b4a3928170f6e5d4c3b2a19087f6e";
@@ -36,7 +36,7 @@ const SAMPLES: Record<IngestFormat, () => unknown> = {
         createdDateTime: NOW(),
         mitreTechniques: ["T1059.001", "T1105"],
         evidence: [
-          { "@odata.type": "#microsoft.graph.security.deviceEvidence", deviceDnsName: "HR-DESKTOP-12.contoso.local" },
+          { "@odata.type": "#microsoft.graph.security.deviceEvidence", deviceDnsName: "HR-DESKTOP-12.corp.helios.test" },
           { "@odata.type": "#microsoft.graph.security.userEvidence", userAccount: { accountName: "m.chen" } },
           { "@odata.type": "#microsoft.graph.security.ipEvidence", ipAddress: "185.220.101.34" },
           { "@odata.type": "#microsoft.graph.security.processEvidence", imageFile: { fileName: "powershell.exe" }, processCommandLine: "powershell -nop -w hidden -enc SQBFAFgA..." },
@@ -79,13 +79,13 @@ const SAMPLES: Record<IngestFormat, () => unknown> = {
     },
   ],
   entra: () => [
-    { id: String(Date.now()), riskEventType: "unfamiliarFeatures", riskLevel: "high", userPrincipalName: "cfo@contoso.com", ipAddress: "185.220.101.34", detectedDateTime: NOW() },
-    { userPrincipalName: "cfo@contoso.com", ipAddress: "185.220.101.34", status: { errorCode: 0 }, location: { countryOrRegion: "RO" }, createdDateTime: NOW() },
+    { id: String(Date.now()), riskEventType: "unfamiliarFeatures", riskLevel: "high", userPrincipalName: "cfo@corp.helios.test", ipAddress: "185.220.101.34", detectedDateTime: NOW() },
+    { userPrincipalName: "cfo@corp.helios.test", ipAddress: "185.220.101.34", status: { errorCode: 0 }, location: { countryOrRegion: "RO" }, createdDateTime: NOW() },
   ],
   okta: () =>
     Array.from({ length: 6 }, (_, i) => ({
       eventType: "user.session.start",
-      actor: { alternateId: "a.patel@contoso.com" },
+      actor: { alternateId: "a.patel@corp.helios.test" },
       client: { ipAddress: "203.0.113.77", geographicalContext: { country: "Brazil" } },
       outcome: { result: i < 5 ? "FAILURE" : "SUCCESS" },
       published: new Date(Date.now() - (6 - i) * 20_000).toISOString(),
@@ -112,17 +112,16 @@ const EMAIL_SAMPLE = () => ({
       createdDateTime: NOW(),
       mitreTechniques: ["T1566.002"],
       evidence: [
-        { "@odata.type": "#microsoft.graph.security.mailboxEvidence", userAccount: { accountName: "l.nguyen", userPrincipalName: "l.nguyen@contoso.com" } },
-        { "@odata.type": "#microsoft.graph.security.urlEvidence", url: "https://login-microsoft365-secure.example.xyz/verify" },
+        { "@odata.type": "#microsoft.graph.security.mailboxEvidence", userAccount: { accountName: "l.nguyen", userPrincipalName: "l.nguyen@corp.helios.test" } },
+        { "@odata.type": "#microsoft.graph.security.urlEvidence", url: "https://login-microsoft365-secure.helios.test/verify" },
         { "@odata.type": "#microsoft.graph.security.ipEvidence", ipAddress: "185.220.101.34" },
       ],
     },
   ],
 });
 
-export function samplePayloadFor(vendor: string): unknown | null {
-  const tool = getTool(vendor);
-  if (!tool?.ingest) return null;
+export function samplePayloadFor(tool: { ingest: IngestFormat | null; category: string }): unknown | null {
+  if (!tool.ingest) return null;
   if (tool.category === "email" && tool.ingest === "defender") return EMAIL_SAMPLE();
   return SAMPLES[tool.ingest]();
 }

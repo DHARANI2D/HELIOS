@@ -7,9 +7,10 @@ import { can, DOMAIN_LABEL } from "@/lib/rbac";
 import { caseScope, tenantScope } from "@/lib/access";
 import { loadCommercialDashboard, loadOperationsDashboard } from "@/lib/dashboard";
 import { formatDuration } from "@/lib/metrics";
-import { planFor } from "@/lib/plans";
+import { formatMinutes, parsePlan } from "@/lib/plans";
 import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
 import { aiSettings } from "@/lib/settings";
+import { setupChecklist } from "@/lib/setup";
 import { formatMoney, type QuoteResult } from "@/lib/pricing/calculator";
 import { CASE_SOURCE_LABEL, CASE_STATUS_LABEL } from "@/lib/cases/labels";
 import { formatRelative } from "@/lib/format";
@@ -38,7 +39,12 @@ export default async function OverviewPage() {
 }
 
 async function SocOverview({ user }: { user: SessionUser }) {
-  const [d, settings] = await Promise.all([loadOperationsDashboard(await caseScope(user), await tenantScope(user), user.id), aiSettings()]);
+  const [d, settings, setup] = await Promise.all([
+    loadOperationsDashboard(await caseScope(user), await tenantScope(user), user.id),
+    aiSettings(),
+    user.role === "ADMIN" ? setupChecklist() : Promise.resolve(null),
+  ]);
+  const setupLeft = setup?.filter((s) => !s.done) ?? [];
   const attention = d.slaDue + d.awaiting + d.unassignedCritical;
   const sla = d.metrics.slaCompliance;
 
@@ -54,6 +60,30 @@ async function SocOverview({ user }: { user: SessionUser }) {
           <LiveRefresh />
         </div>
       </div>
+
+      {setup && setupLeft.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Get HELIOS ready · {setup.length - setupLeft.length} of {setup.length} done</CardTitle>
+            <CardDescription>Everything here is your own business data, so nothing comes pre-filled. Quotes, SLAs and AI agents use it as soon as it&apos;s set.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ol className="grid gap-2 sm:grid-cols-2">
+              {setup.map((s) => (
+                <li key={s.key}>
+                  <Link href={s.href} className={cn("flex items-start gap-2 rounded-lg border p-3 hover:bg-accent", s.done && "opacity-60")}>
+                    <CircleCheck className={cn("mt-0.5 size-4 shrink-0", s.done ? "text-success-ink" : "text-muted-foreground/40")} aria-label={s.done ? "Done" : "To do"} />
+                    <span>
+                      <span className="block text-sm font-medium">{s.label}</span>
+                      <span className="block text-xs text-muted-foreground">{s.detail}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="surface-glow">
         <CardContent className="flex flex-wrap items-center justify-between gap-6 py-2">
@@ -146,7 +176,7 @@ async function SocOverview({ user }: { user: SessionUser }) {
           </CardHeader>
           <CardContent>
             {d.recent.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No cases yet — run a simulation from Cases &amp; Alerts or onboard a tool.</p>
+              <p className="text-sm text-muted-foreground">No cases yet — they open when an onboarded tool sends an alert or uploaded logs trip a detection.</p>
             ) : (
               <ul className="divide-y">
                 {d.recent.map((c) => (
@@ -234,17 +264,17 @@ async function ClientOverview({ user }: { user: SessionUser }) {
   const tenantId = user.tenantId!;
   const [d, tenant, pending] = await Promise.all([
     loadOperationsDashboard(await caseScope(user), await tenantScope(user), user.id),
-    db.tenant.findUniqueOrThrow({ where: { id: tenantId } }),
+    db.tenant.findUniqueOrThrow({ where: { id: tenantId }, include: { plan: true } }),
     db.responseAction.findMany({ where: { tenantId, status: "PENDING_APPROVAL" }, include: { case: { select: { id: true, title: true } } }, take: 5 }),
   ]);
-  const plan = planFor(tenant.plan);
+  const plan = tenant.plan ? parsePlan(tenant.plan) : null;
   const sla = d.metrics.slaCompliance;
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-sm text-muted-foreground">{tenant.name} · {plan.name}</p>
+          <p className="text-sm text-muted-foreground">{tenant.name}{plan ? ` · ${plan.name}` : ""}</p>
           <h2 className="text-xl font-semibold tracking-tight">Your security at a glance</h2>
         </div>
         <LiveRefresh seconds={60} />
@@ -289,11 +319,11 @@ async function ClientOverview({ user }: { user: SessionUser }) {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Your service</CardTitle>
-            <CardDescription>{plan.tagline}</CardDescription>
+            <CardDescription>{plan ? plan.tagline ?? plan.name : "Your service plan hasn't been set up yet."}</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
-            <p className="flex justify-between"><span className="text-muted-foreground">Coverage</span><span>{plan.coverage}</span></p>
-            <p className="flex justify-between"><span className="text-muted-foreground">Critical acknowledged within</span><span>{plan.ackMinutes.CRITICAL} min</span></p>
+            {plan && <p className="flex justify-between"><span className="text-muted-foreground">Coverage</span><span>{plan.coverage}</span></p>}
+            {plan?.ackMinutes.CRITICAL != null && <p className="flex justify-between"><span className="text-muted-foreground">Critical acknowledged within</span><span>{formatMinutes(plan.ackMinutes.CRITICAL)}</span></p>}
             <p className="flex justify-between"><span className="text-muted-foreground">AI containment consent</span><span>{AUTONOMY_LABEL[tenant.aiAutonomyCap]}</span></p>
             <Button variant="outline" size="sm" asChild className="mt-2">
               <Link href={`/tenants/${tenant.id}`}>Service details &amp; AI consent</Link>

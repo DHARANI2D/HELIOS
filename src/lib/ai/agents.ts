@@ -78,13 +78,14 @@ export async function runTriageAgent(
 
 export interface ReportContext {
   triage?: TriageOutput | null;
-  actions: Array<{ label: string; target: string | null; status: string; simulated?: boolean }>;
+  actions: Array<{ label: string; target: string | null; status: string; manual?: boolean }>;
 }
 
 export function builtinReport(evidence: CaseEvidence, ctx: ReportContext): string {
   const t = ctx.triage;
   const done = ctx.actions.filter((a) => a.status === "EXECUTED");
   const pending = ctx.actions.filter((a) => a.status === "PENDING_APPROVAL");
+  const byHand = ctx.actions.filter((a) => a.status === "MANUAL_REQUIRED");
   const lines = [
     `# Incident summary: ${evidence.title}`,
     "",
@@ -94,10 +95,13 @@ export function builtinReport(evidence: CaseEvidence, ctx: ReportContext): strin
     t?.summary.replace(/ Built-in analysis — no language model was used\.$/, "") ?? evidence.summary ?? "Our monitoring flagged activity that is under review.",
     "",
     "## What we have done",
-    done.length ? done.map((a) => `- ${a.label}${a.target ? ` — ${a.target}` : ""}${a.simulated ? " (recorded; carried out by your IT team)" : ""}`).join("\n") : "- Investigation is in progress; no containment has been needed yet.",
+    done.length ? done.map((a) => `- ${a.label}${a.target ? ` — ${a.target}` : ""}${a.manual ? " (carried out by hand by our analyst)" : ""}`).join("\n") : "- Investigation is in progress; no containment has been needed yet.",
   ];
   if (pending.length) {
     lines.push("", "## Waiting on approval", pending.map((a) => `- ${a.label}${a.target ? ` — ${a.target}` : ""}`).join("\n"));
+  }
+  if (byHand.length) {
+    lines.push("", "## Being carried out by our analysts", byHand.map((a) => `- ${a.label}${a.target ? ` — ${a.target}` : ""} (not yet confirmed done)`).join("\n"));
   }
   lines.push(
     "",
@@ -120,7 +124,7 @@ export async function runReportAgent(
   if (provider) {
     try {
       const res = await provider.text({
-        system: `${SOC_CONTEXT}\n\nRole: client communications lead at the SOC. Write a short incident summary for the client's management in GitHub-flavored Markdown with these sections: What happened; What we have done; What we recommend you do; Current status. Plain language, no internal jargon or evidence ids, no speculation beyond the evidence. Mention when a containment step was only recorded (simulated) and still has to be carried out on the client's systems. Start with a level-1 heading. Output only the report.${instructions(profile)}`,
+        system: `${SOC_CONTEXT}\n\nRole: client communications lead at the SOC. Write a short incident summary for the client's management in GitHub-flavored Markdown with these sections: What happened; What we have done; What we recommend you do; Current status. Plain language, no internal jargon or evidence ids, no speculation beyond the evidence. Mention any containment step still waiting to be carried out by hand (status MANUAL_REQUIRED) as an open action. Start with a level-1 heading. Output only the report.${instructions(profile)}`,
         user: `${renderEvidence(evidence)}\n\n<first_response>\n${JSON.stringify({ triage: ctx.triage ?? null, actions: ctx.actions }, null, 2)}\n</first_response>`,
         effort: profile.effort,
       });

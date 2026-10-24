@@ -7,7 +7,8 @@ import { pageGuard } from "@/lib/session";
 import { can, roleLabel } from "@/lib/rbac";
 import { selectedTenantId, tenantScope } from "@/lib/access";
 import { tenantOptions } from "@/lib/tenants";
-import { CATEGORIES, TOOLS, getTool } from "@/lib/integrations/catalog";
+import { CATEGORIES } from "@/lib/integrations/catalog";
+import { listCatalogTools } from "@/lib/integrations/tools";
 import { visibleIntegrationsWhere } from "@/lib/integrations/service";
 import type { IntegrationConfig } from "@/lib/integrations/dispatch";
 import { formatRelative } from "@/lib/format";
@@ -39,7 +40,7 @@ export default async function IntegrationsPage() {
   const canManage = can(user, "integrations.manage");
   const scope = await tenantScope(user);
   const now = new Date();
-  const [integrations, tenants, defaultTenantId, staff, base] = await Promise.all([
+  const [integrations, tenants, defaultTenantId, staff, base, catalog] = await Promise.all([
     db.integration.findMany({
       where: { AND: [visibleIntegrationsWhere(user), scope] },
       orderBy: [{ tenantId: "asc" }, { category: "asc" }, { createdAt: "asc" }],
@@ -49,7 +50,9 @@ export default async function IntegrationsPage() {
     selectedTenantId(user),
     user.isClient ? Promise.resolve([]) : db.user.findMany({ where: { active: true, tenantId: null }, select: { id: true, name: true, email: true, role: true }, orderBy: { name: "asc" } }),
     origin(),
+    listCatalogTools({ includeInactive: true }),
   ]);
+  const toolByKey = new Map(catalog.map((t) => [t.key, t]));
   const team = staff.map((u) => ({ id: u.id, name: u.name ?? u.email, role: roleLabel(u.role) }));
 
   const connected = integrations.filter((i) => i.status === "CONNECTED" && i.enabled).length;
@@ -105,7 +108,7 @@ export default async function IntegrationsPage() {
               defaultTenantId={user.isClient ? user.tenantId : defaultTenantId}
               team={team}
               categories={CATEGORIES.map((c) => ({ key: c.key, label: c.label, description: c.description, defaultRoles: c.defaultRoles }))}
-              tools={TOOLS.map((t) => ({ key: t.key, name: t.name, vendor: t.vendor, category: t.category, description: t.description, controls: t.controls, actions: t.actions, ingest: !!t.ingest, offlineCapable: t.offlineCapable, platforms: t.platforms }))}
+              tools={catalog.filter((t) => t.active).map((t) => ({ key: t.key, name: t.name, vendor: t.vendor, category: t.category, description: t.description, controls: t.controls, actions: t.actions, ingest: !!t.ingest, offlineCapable: t.offlineCapable, platforms: t.platforms }))}
             />
           </CardContent>
         </Card>
@@ -139,7 +142,7 @@ export default async function IntegrationsPage() {
                 </TableHeader>
                 <TableBody>
                   {integrations.map((i) => {
-                    const tool = getTool(i.vendor);
+                    const tool = toolByKey.get(i.vendor);
                     const config = (i.config ?? {}) as IntegrationConfig;
                     return (
                       <TableRow key={i.id}>
@@ -161,7 +164,7 @@ export default async function IntegrationsPage() {
                           {i.assignments.length > 0 && <p className="text-[11px] text-muted-foreground">+ {i.assignments.map((a) => a.user.name ?? a.user.email).join(", ")}</p>}
                         </TableCell>
                         <TableCell className="text-xs">
-                          {tool?.actions.length ? (config.responseWebhookUrl ? <Badge variant="success">connector set</Badge> : <Badge variant="soft">simulated</Badge>) : "—"}
+                          {tool?.actions.length ? (config.responseWebhookUrl ? <Badge variant="success">connector set</Badge> : <Badge variant="soft">by hand</Badge>) : "—"}
                         </TableCell>
                         {canManage && (
                           <TableCell>

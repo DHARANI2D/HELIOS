@@ -16,7 +16,7 @@ import { UserDialogButton, UserRowControls } from "@/components/team/user-dialog
 const GROUPS: Array<{ label: string; prefix: string[] }> = [
   { label: "Cases & collaboration", prefix: ["dashboard.", "cases.", "reports."] },
   { label: "Response", prefix: ["containment.", "endpoints.", "playbooks."] },
-  { label: "Analysis", prefix: ["investigations.", "forensics.", "governance.", "simulation.", "intel.", "mitre."] },
+  { label: "Analysis", prefix: ["investigations.", "forensics.", "governance.", "telemetry.", "intel.", "mitre."] },
   { label: "AI agents", prefix: ["ai."] },
   { label: "Platform", prefix: ["integrations.", "tenants.", "users.", "audit."] },
   { label: "Commercial", prefix: ["pricing."] },

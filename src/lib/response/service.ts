@@ -3,12 +3,15 @@ import type { PlaybookActionType, ResponseActionStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { notify, staffFor } from "@/lib/notifications";
-import { ACTION_LABEL, CONTAINMENT_ACTIONS, ROLLBACK_OF, buildActionContext, executeAction } from "@/lib/response/executor";
+import { ACTION_LABEL, CONTAINMENT_ACTIONS, ROLLBACK_OF, buildActionContext, executeAction, setEndpointIsolation, type ActionResult } from "@/lib/response/executor";
 
 // Lifecycle of individual response actions (ResponseAction rows): proposed by
 // an AI agent or requested by an analyst, approved or rejected by a human
-// with containment.approve, executed through the shared executor, and rolled
-// back when containment turns out to be unnecessary.
+// with containment.approve, executed through the shared executor — or, where
+// the client has no response connector, left MANUAL_REQUIRED until an
+// analyst carries it out and marks it done — and rolled back when
+// containment turns out to be unnecessary. Only EXECUTED containment counts
+// towards a case being contained.
 
 const CLOSED = ["RESOLVED", "FALSE_POSITIVE"];
 
@@ -53,6 +56,7 @@ export async function recordResponseAction(input: {
   policyReason?: string | null;
   aiRunId?: string | null;
   requestedById?: string | null;
+  parameters?: Record<string, string>;
 }) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: input.caseId }, select: { tenantId: true } });
   return db.responseAction.create({ data: { ...input, tenantId: kase.tenantId } });
@@ -86,13 +90,13 @@ export async function performResponseAction(actionId: string, actor: Actor) {
     params.agentId = kase.sourceRef ?? undefined;
   }
 
-  let result;
+  let result: ActionResult;
   try {
     result = await executeAction({ name: ACTION_LABEL[action.actionType], actionType: action.actionType, params }, kase, ctx, actor.name);
   } catch (err) {
-    result = { action: ACTION_LABEL[action.actionType], actionType: action.actionType, status: "failed" as const, summary: err instanceof Error ? err.message : String(err), simulated: false };
+    result = { action: ACTION_LABEL[action.actionType], actionType: action.actionType, status: "failed", summary: err instanceof Error ? err.message : String(err) };
   }
-  const status: ResponseActionStatus = result.status === "succeeded" ? "EXECUTED" : "FAILED";
+  const status: ResponseActionStatus = result.status === "succeeded" ? "EXECUTED" : result.status === "manual" ? "MANUAL_REQUIRED" : "FAILED";
   const updated = await db.responseAction.update({ where: { id: actionId }, data: { status, result: JSON.parse(JSON.stringify(result)) } });
 
   await db.timelineEntry.create({
@@ -101,16 +105,64 @@ export async function performResponseAction(actionId: string, actor: Actor) {
       occurredAt: new Date(),
       actor: actor.name,
       action: `response.${action.actionType.toLowerCase()}`,
-      detail: `${result.summary}${result.simulated ? " (simulated — no response connector configured)" : ""}`,
+      detail: result.summary,
       evidence: { responseActionId: actionId, source: action.source },
     },
   });
   await logAction({
     actorId: actor.id,
     caseId: kase.id,
-    action: status === "EXECUTED" ? "response.executed" : "response.failed",
-    detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, source: action.source, simulated: result.simulated, summary: result.summary },
+    action: status === "EXECUTED" ? "response.executed" : status === "MANUAL_REQUIRED" ? "response.manual_required" : "response.failed",
+    detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, source: action.source, summary: result.summary },
   });
+  if (status === "EXECUTED") await completeRollbackOf(action.parameters);
+  if (status === "MANUAL_REQUIRED") {
+    await notify(await approversFor(kase.id), {
+      kind: "approval",
+      title: `Carry out by hand: ${ACTION_LABEL[action.actionType]}${action.target ? ` ${action.target}` : ""}`,
+      body: "No response connector can do this for the client. Do it in the tool's console, then mark it done on the case.",
+      caseId: kase.id,
+      actorName: actor.name,
+    }, { exclude: actor.id });
+  }
+  await markCaseAfterResponse(kase.id);
+  return updated;
+}
+
+// A rollback that has actually happened retires the action it undoes.
+async function completeRollbackOf(parameters: unknown) {
+  const original = parameters && typeof parameters === "object" ? (parameters as Record<string, unknown>).rollbackOf : undefined;
+  if (typeof original !== "string") return;
+  const orig = await db.responseAction.findUnique({ where: { id: original } });
+  if (!orig || orig.status !== "EXECUTED") return;
+  await db.responseAction.update({ where: { id: orig.id }, data: { status: "ROLLED_BACK" } });
+  const open = await db.responseAction.count({ where: { caseId: orig.caseId, status: "EXECUTED", actionType: { in: [...CONTAINMENT_ACTIONS] } } });
+  if (open === 0) await db.case.updateMany({ where: { id: orig.caseId, status: "CONTAINED" }, data: { status: "INVESTIGATING" } });
+}
+
+// The analyst confirms they carried out a MANUAL_REQUIRED action themselves
+// (in the EDR / IdP / firewall console). Their name and note become the
+// record of it, and only now does it count as done.
+export async function completeManualAction(actionId: string, actor: Actor & { id: string }, note: string) {
+  const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId } });
+  if (action.status !== "MANUAL_REQUIRED") throw new Error("This action isn't waiting to be done by hand");
+  const confirmation = note.trim();
+  if (confirmation.length < 3) throw new Error("Say what you did (for the record)");
+  const kase = await db.case.findUniqueOrThrow({ where: { id: action.caseId } });
+  const previous = (action.result ?? {}) as Record<string, unknown>;
+  const summary = `${ACTION_LABEL[action.actionType]}${action.target ? ` ${action.target}` : ""} carried out by ${actor.name}: ${confirmation}`;
+  const updated = await db.responseAction.update({
+    where: { id: actionId },
+    data: { status: "EXECUTED", result: JSON.parse(JSON.stringify({ ...previous, status: "succeeded", summary, manual: { by: actor.name, byId: actor.id, at: new Date().toISOString(), note: confirmation } })) },
+  });
+  if ((action.actionType === "ISOLATE_HOST" || action.actionType === "RELEASE_HOST") && action.target) {
+    await setEndpointIsolation(kase, action.target, action.actionType === "ISOLATE_HOST", actor.name);
+  }
+  await db.timelineEntry.create({
+    data: { caseId: kase.id, occurredAt: new Date(), actor: actor.name, action: `response.${action.actionType.toLowerCase()}`, detail: summary, evidence: { responseActionId: actionId, manual: true } },
+  });
+  await logAction({ actorId: actor.id, caseId: kase.id, action: "response.manual_completed", detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, note: confirmation } });
+  await completeRollbackOf(action.parameters);
   await markCaseAfterResponse(kase.id);
   return updated;
 }
@@ -154,14 +206,11 @@ export async function rollbackResponseAction(actionId: string, actor: Actor & { 
     status: "PENDING_APPROVAL",
     rationale: `Rollback of ${ACTION_LABEL[action.actionType]}`,
     requestedById: actor.id,
+    parameters: { rollbackOf: action.id },
   });
-  const done = await performResponseAction(rollback.id, actor);
-  if (done.status === "EXECUTED") await db.responseAction.update({ where: { id: actionId }, data: { status: "ROLLED_BACK" } });
-  if (action.actionType === "ISOLATE_HOST") {
-    const open = await db.responseAction.count({ where: { caseId: action.caseId, status: "EXECUTED", actionType: { in: [...CONTAINMENT_ACTIONS] } } });
-    if (open === 0) await db.case.updateMany({ where: { id: action.caseId, status: "CONTAINED" }, data: { status: "INVESTIGATING" } });
-  }
-  return done;
+  // performResponseAction retires the original once the rollback has
+  // actually happened (straight away via a connector, or when marked done).
+  return performResponseAction(rollback.id, actor);
 }
 
 // An analyst asks for one action directly. People who may approve

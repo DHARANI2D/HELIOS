@@ -2,20 +2,23 @@ import type { Case, PlaybookActionType, Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { renderTemplate } from "@/lib/playbooks/trigger";
-import { dispatchAction, type DispatchResult } from "@/lib/integrations/dispatch";
+import { dispatchAction } from "@/lib/integrations/dispatch";
+import { dispatchChatMessage } from "@/lib/integrations/chat";
 
 // The one place a response action actually happens, whether a playbook, an
-// AI agent (after the policy gate) or an analyst asked for it. Effects inside
-// HELIOS are real — the blocklist feed, the endpoint inventory's isolation
-// state, agent revocation; effects on client systems go through the tenant's
-// response connector, and are reported as simulated when there is none.
+// AI agent (after the policy gate) or an analyst asked for it. Effects on
+// client systems go through the tenant's response connector. With no
+// connector the action is "manual": nothing is claimed as done, the endpoint
+// inventory isn't touched, and it waits for an analyst to carry it out in
+// the tool's own console and mark it done. Effects HELIOS owns — agent
+// revocation, attaching telemetry — happen here directly.
 
 export interface ActionResult {
   action: string;
   actionType: string;
-  status: "succeeded" | "failed";
+  // manual: not carried out — needs a person (no connector for this action)
+  status: "succeeded" | "failed" | "manual";
   summary: string;
-  simulated: boolean;
   skipped?: boolean; // no-op (nothing to act on) — never counts as containment
   output?: Record<string, unknown>;
 }
@@ -104,28 +107,25 @@ export function paramsOf(parameters: Prisma.JsonValue | null | undefined): Recor
   return out;
 }
 
-function connectorSummary(base: string, d: DispatchResult) {
-  if (!d.dispatched) return { summary: base, simulated: true };
-  return { summary: `${base} — ${d.message}`, simulated: false };
-}
-
+// `done` describes the effect once it has happened ("Isolated FIN-07");
+// `todo` the same step as an instruction ("Isolate FIN-07").
 async function viaConnector(
   base: Pick<ActionResult, "action" | "actionType">,
   kase: Case,
   actionType: PlaybookActionType,
   target: string,
-  description: string,
+  text: { done: string; todo: string },
   output: Record<string, unknown>,
 ): Promise<ActionResult> {
   const d = await dispatchAction({ tenantId: kase.tenantId, actionType, target, caseRef: { id: kase.id, title: kase.title, severity: kase.severity } });
-  if (d.dispatched && !d.ok) {
-    return { ...base, status: "failed", simulated: false, summary: `${description} failed — ${d.message}`, output: { ...output, connector: d } };
+  if (!d.dispatched) {
+    return { ...base, status: "manual", summary: `${text.todo} — no response connector for this action; carry it out in the tool's console, then mark it done`, output: { ...output, connector: d } };
   }
-  const { summary, simulated } = connectorSummary(description, d);
-  return { ...base, status: "succeeded", simulated, summary, output: { ...output, connector: d } };
+  if (!d.ok) return { ...base, status: "failed", summary: `${text.todo} failed — ${d.message}`, output: { ...output, connector: d } };
+  return { ...base, status: "succeeded", summary: `${text.done} — ${d.message}`, output: { ...output, connector: d } };
 }
 
-async function setEndpointIsolation(kase: Case, host: string, isolated: boolean, by: string) {
+export async function setEndpointIsolation(kase: Pick<Case, "tenantId">, host: string, isolated: boolean, by: string) {
   const where = { tenantId: kase.tenantId, hostname: { equals: host, mode: "insensitive" as const } };
   const { count } = await db.endpoint.updateMany({
     where,
@@ -154,21 +154,20 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       const block = req.actionType === "BLOCK_IP";
       const ips = p.ip ? [p.ip] : block ? ctx.ips : [];
       if (ips.length === 0) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: block ? "No public IPs linked to this case — nothing to block" : "No IP given" };
+        return { ...base, status: "succeeded", skipped: true, summary: block ? "No public IPs linked to this case — nothing to block" : "No IP given" };
       }
-      // A real effect inside HELIOS: the shared indicator store doubles as the
-      // blocklist exported on the Threat Intelligence page.
+      // The shared indicator store doubles as the blocklist feed firewalls can
+      // pull (Threat Intelligence → blocklist); the connector, if any, pushes
+      // the block to the client's firewall directly.
       for (const ip of ips) await setIndicatorBlocked("IP", ip, block);
       const results = await Promise.all(ips.map((ip) => dispatchAction({ tenantId: kase.tenantId, actionType: req.actionType, target: ip, caseRef: { id: kase.id, title: kase.title, severity: kase.severity } })));
       const failed = results.find((r) => r.dispatched && !r.ok);
-      const sent = results.find((r) => r.dispatched && r.ok);
-      return {
-        ...base,
-        status: "succeeded",
-        simulated: false,
-        summary: `${block ? "Added" : "Removed"} ${ips.join(", ")} ${block ? "to" : "from"} the HELIOS blocklist${sent ? ` and ${sent.message}` : ""}${failed ? ` (connector: ${failed.message})` : ""}`,
-        output: { ips, connectors: results },
-      };
+      const listed = `${block ? "Added" : "Removed"} ${ips.join(", ")} ${block ? "to" : "from"} the HELIOS blocklist feed`;
+      if (results.every((r) => !r.dispatched)) {
+        return { ...base, status: "manual", summary: `${listed}; no firewall connector — ${block ? "block" : "unblock"} it on the client's firewall (or confirm it pulls the feed), then mark it done`, output: { ips, connectors: results } };
+      }
+      if (failed) return { ...base, status: "failed", summary: `${listed}, but the firewall connector failed — ${failed.message}`, output: { ips, connectors: results } };
+      return { ...base, status: "succeeded", summary: `${listed} and ${results.find((r) => r.ok)?.message}`, output: { ips, connectors: results } };
     }
 
     case "ISOLATE_HOST":
@@ -176,9 +175,10 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       const isolate = req.actionType === "ISOLATE_HOST";
       const host = p.host ?? ctx.host;
       if (!host) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No host identified on this case — nothing to isolate" };
+        return { ...base, status: "succeeded", skipped: true, summary: "No host identified on this case — nothing to isolate" };
       }
-      const result = await viaConnector(base, kase, req.actionType, host, `${isolate ? "Isolated" : "Released"} ${host}${p.method ? ` via ${p.method}` : ""}`, { host });
+      const result = await viaConnector(base, kase, req.actionType, host, { done: `${isolate ? "Isolated" : "Released"} ${host}`, todo: `${isolate ? "Isolate" : "Release"} ${host}` }, { host });
+      // Only a confirmed isolation changes the endpoint inventory.
       if (result.status === "succeeded") await setEndpointIsolation(kase, host, isolate, actor);
       return result;
     }
@@ -186,41 +186,45 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
     case "DISABLE_USER":
     case "ENABLE_USER": {
       const user = p.user ?? ctx.user;
-      if (!user) return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No account identified on this case" };
-      return viaConnector(base, kase, req.actionType, user, `${req.actionType === "DISABLE_USER" ? "Disabled" : "Re-enabled"} account ${user}`, { user });
+      if (!user) return { ...base, status: "succeeded", skipped: true, summary: "No account identified on this case" };
+      const disable = req.actionType === "DISABLE_USER";
+      return viaConnector(base, kase, req.actionType, user, { done: `${disable ? "Disabled" : "Re-enabled"} account ${user}`, todo: `${disable ? "Disable" : "Re-enable"} account ${user}` }, { user });
     }
 
     case "QUARANTINE_FILE": {
       const hash = p.hash ?? p.file;
-      if (!hash) return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No file identified on this case" };
+      if (!hash) return { ...base, status: "succeeded", skipped: true, summary: "No file identified on this case" };
       if (/^[a-f0-9]{32,64}$/i.test(hash)) await setIndicatorBlocked("FILE_HASH", hash.toLowerCase(), true);
-      return viaConnector(base, kase, "QUARANTINE_FILE", hash, `Quarantined ${hash.length > 20 ? `${hash.slice(0, 16)}…` : hash} and added it to the hash blocklist`, { hash });
+      const short = hash.length > 20 ? `${hash.slice(0, 16)}…` : hash;
+      return viaConnector(base, kase, "QUARANTINE_FILE", hash, { done: `Quarantined ${short}`, todo: `Quarantine ${short}` }, { hash });
     }
 
     case "BLOCK_SENDER": {
       const sender = p.sender;
-      if (!sender) return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No sender identified on this case" };
+      if (!sender) return { ...base, status: "succeeded", skipped: true, summary: "No sender identified on this case" };
       await setIndicatorBlocked(sender.includes("@") ? "EMAIL_ADDRESS" : "DOMAIN", sender.toLowerCase(), true);
-      return viaConnector(base, kase, "BLOCK_SENDER", sender, `Blocked sender ${sender}`, { sender });
+      return viaConnector(base, kase, "BLOCK_SENDER", sender, { done: `Blocked sender ${sender}`, todo: `Block sender ${sender}` }, { sender });
     }
 
     case "KILL_PROCESS": {
-      const process = p.process ?? "the flagged process";
-      return viaConnector(base, kase, "KILL_PROCESS", `${ctx.host ?? "unknown"}:${process}`, `Terminated ${process} on ${p.host ?? ctx.host ?? "the affected host"}`, { process, host: p.host ?? ctx.host });
+      const process = p.process;
+      const host = p.host ?? ctx.host;
+      if (!process || !host) return { ...base, status: "succeeded", skipped: true, summary: "No process and host identified on this case" };
+      return viaConnector(base, kase, "KILL_PROCESS", `${host}:${process}`, { done: `Terminated ${process} on ${host}`, todo: `Terminate ${process} on ${host}` }, { process, host });
     }
 
     case "REVOKE_AGENT":
     case "RESTORE_AGENT": {
       const agentId = p.agentId ?? (kase.sourceType === "AGENT_GOVERNANCE" ? kase.sourceRef : null);
       if (!agentId) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "Case is not tied to an AI agent — skipped" };
+        return { ...base, status: "succeeded", skipped: true, summary: "Case is not tied to an AI agent — skipped" };
       }
       const revoke = req.actionType === "REVOKE_AGENT";
       const agent = await db.agent.update({
         where: { id: agentId },
         data: revoke ? { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" } : { status: "ACTIVE", trust: 100, level: 10, mode: "FULL_ACCESS" },
       });
-      return { ...base, status: "succeeded", simulated: false, summary: `${revoke ? "Revoked" : "Restored"} agent ${agent.name}`, output: { agentId: agent.id, status: agent.status } };
+      return { ...base, status: "succeeded", summary: `${revoke ? "Revoked" : "Restored"} agent ${agent.name}`, output: { agentId: agent.id, status: agent.status } };
     }
 
     case "COLLECT_LOGS": {
@@ -231,7 +235,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       if (host) or.push({ hostName: host });
       if (ctx.user) or.push({ userName: ctx.user });
       if (or.length === 0) {
-        return { ...base, status: "succeeded", simulated: false, skipped: true, summary: "No host or user on this case to collect telemetry for" };
+        return { ...base, status: "succeeded", skipped: true, summary: "No host or user on this case to collect telemetry for" };
       }
       const from = new Date(kase.createdAt.getTime() - windowMinutes * 60_000);
       const to = new Date(kase.createdAt.getTime() + windowMinutes * 60_000);
@@ -239,31 +243,22 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
         where: { caseId: null, tenantId: kase.tenantId, OR: or, timestamp: { gte: from, lte: to } },
         data: { caseId: kase.id },
       });
-      return { ...base, status: "succeeded", simulated: false, summary: `Attached ${count} related events to the case`, output: { attached: count } };
+      return { ...base, status: "succeeded", summary: `Attached ${count} related events to the case`, output: { attached: count } };
     }
 
     case "NOTIFY_SLACK": {
       const message = renderTemplate(p.message ?? "HELIOS case update: {{case.title}}", ctx.vars);
-      const channel = p.channel;
-      const webhook = p.webhookUrl ?? process.env.SLACK_WEBHOOK_URL;
-      if (!webhook) {
-        return { ...base, status: "succeeded", simulated: true, summary: `Would post to ${channel ?? "Slack"}: "${message}"`, output: { channel, message } };
-      }
-      const res = await fetch(webhook, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: message, channel }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new Error(`Chat webhook returned HTTP ${res.status}`);
-      return { ...base, status: "succeeded", simulated: false, summary: `Posted to ${channel ?? "Slack"}: "${message}"`, output: { channel, message } };
+      const sent = await dispatchChatMessage(kase.tenantId, message);
+      return sent.sent
+        ? { ...base, status: "succeeded", summary: `${sent.message}: "${message}"`, output: { message } }
+        : { ...base, status: "manual", summary: `Not sent — ${sent.message}`, output: { message } };
     }
 
     case "CREATE_TICKET": {
       const title = renderTemplate(p.title ?? "{{case.title}}", ctx.vars);
-      const project = p.project ?? "SEC";
-      const ticketId = `${project}-${kase.id.slice(-6).toUpperCase()}`;
-      return { ...base, status: "succeeded", simulated: true, summary: `Ticket ${ticketId}: "${title}"`, output: { ticketId, title, system: p.system ?? "jira" } };
+      // The connector (Jira, ServiceNow or your automation) opens the ticket
+      // and answers with its id; HELIOS never invents one.
+      return viaConnector(base, kase, "CREATE_TICKET", title, { done: `Ticket requested: "${title}"`, todo: `Open a ticket "${title}"` }, { title });
     }
   }
 }

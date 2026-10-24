@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { normalize } from "@/lib/siem/adapters";
 import { DETECTORS, fingerprintFor, riskScoreFor, runDetections, severityForRisk } from "@/lib/siem/engine";
-import { allScenarios, selectScenarios } from "@/lib/siem/simulation";
+import { allScenarios, selectScenarios } from "@/lib/__tests__/fixtures/siem/simulation";
 import { geoDistanceKm } from "@/lib/siem/detectors/behavioral";
 import type { TelemetrySource, UnifiedEvent } from "@/lib/siem/types";
+import { intelKey } from "@/lib/threat-intel/local-intel";
 
 let seq = 0;
 function ev(source: TelemetrySource, data: Record<string, unknown>): UnifiedEvent {
@@ -80,8 +81,14 @@ describe("detectors", () => {
   });
 
   it("matches threat intel on destination as well as source IPs", () => {
-    const d = runDetections([ev("network", { source_ip: "10.0.0.2", dest_ip: "99.88.77.66", port: 443 })]);
-    expect(d.some((x) => x.detectionSource === "THREAT_INTEL_MATCH")).toBe(true);
+    const intel = new Map([[intelKey("IP", "198.51.100.23"), { score: 0.95, reasons: ["test feed reputation 0.95"] }]]);
+    const events = [ev("network", { source_ip: "10.0.0.2", dest_ip: "198.51.100.23", port: 443 })];
+    expect(runDetections(events, { intel }).some((x) => x.detectionSource === "THREAT_INTEL_MATCH")).toBe(true);
+  });
+
+  it("never treats an IP as malicious without intelligence saying so", () => {
+    const events = [ev("network", { source_ip: "10.0.0.2", dest_ip: "198.51.100.23", port: 443 })];
+    expect(runDetections(events).some((x) => x.detectionSource === "THREAT_INTEL_MATCH")).toBe(false);
   });
 });
 

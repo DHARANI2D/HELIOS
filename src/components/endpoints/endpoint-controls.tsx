@@ -7,7 +7,9 @@ import { Loader2, Lock, LockOpen, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { importInventoryAction, setIsolationAction, updateEndpointAction } from "@/app/(app)/endpoints/actions";
+import { CONTROLS } from "@/lib/endpoints/controls";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -18,7 +20,7 @@ export function IsolationButton({ id, isolated, hostname }: { id: string; isolat
   const mut = useMutation({
     mutationFn: () => setIsolationAction(id, !isolated),
     onSuccess: (r) => {
-      toast.success(`${isolated ? "Released" : "Isolated"} ${hostname}${r.simulated ? " (recorded — no EDR connector, carry it out in the console)" : ` — ${r.message}`}`);
+      toast.success(r.manual ? `Marked ${hostname} as ${isolated ? "released" : "isolated"} — no EDR connector, so make sure it's done in the EDR console` : `${isolated ? "Released" : "Isolated"} ${hostname} — ${r.message}`);
       router.refresh();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
@@ -47,10 +49,6 @@ export function CriticalitySelect({ id, value }: { id: string; value: string }) 
   );
 }
 
-const SAMPLE = `hostname,os,ip,owner,criticality,controls
-FIN-LAPTOP-07,Windows 11,10.20.4.17,j.alvarez,standard,edr=active;av=active;disk_encryption=active;patching=degraded;host_firewall=active
-DC-01,Windows Server 2022,10.20.0.10,it-ops,critical,edr=active;av=active;patching=active;host_firewall=active;backup=active
-MAC-DESIGN-03,macOS 15,10.20.6.33,l.nguyen,standard,edr=missing;av=active;disk_encryption=active;mdm=active`;
 
 export function InventoryImport({ tenants, defaultTenantId, isClient }: { tenants: Array<{ id: string; name: string }>; defaultTenantId: string | null; isClient: boolean }) {
   const router = useRouter();
@@ -77,13 +75,21 @@ export function InventoryImport({ tenants, defaultTenantId, isClient }: { tenant
           <DialogHeader>
             <DialogTitle>Import endpoint inventory</DialogTitle>
             <DialogDescription>
-              CSV with a header row: hostname, os, ip, owner, criticality, controls (control=active|degraded|missing, separated by ;). Existing hosts are updated.
+              CSV with a header row: hostname, os, ip, owner, criticality (standard, high, critical), controls — each <code className="text-[11px]">control=active|degraded|missing</code>, separated by <code>;</code>, using the keys {CONTROLS.map((c) => c.key).join(", ")}. Existing hosts are updated. Export it from your RMM, MDM or EDR console.
             </DialogDescription>
           </DialogHeader>
           {!isClient && <TenantSelect tenants={tenants} value={tenantId} onChange={setTenantId} />}
-          <Textarea value={csv} onChange={(e) => setCsv(e.target.value)} placeholder={SAMPLE} className="min-h-40 font-mono text-xs" />
+          <Input
+            type="file"
+            accept=".csv,text/csv"
+            aria-label="Inventory CSV file"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (file) setCsv(await file.text());
+            }}
+          />
+          <Textarea value={csv} onChange={(e) => setCsv(e.target.value)} aria-label="Inventory CSV" className="min-h-40 font-mono text-xs" />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setCsv(SAMPLE)}>Load example</Button>
             <Button onClick={() => mut.mutate()} disabled={mut.isPending || !csv.trim()}>
               {mut.isPending && <Loader2 className="animate-spin" />}
               Import

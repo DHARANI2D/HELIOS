@@ -9,7 +9,6 @@ import type { AiAutonomy } from "@prisma/client";
 
 import { saveTenantAction, setAiCapAction } from "@/app/(app)/tenants/actions";
 import { AUTONOMY_LABEL, AUTONOMY_ORDER } from "@/lib/ai/catalog";
-import { PLANS, PLAN_KEYS, type PlanKey } from "@/lib/plans";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -20,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 export interface TenantDraft {
   name: string;
   industry: string;
-  plan: PlanKey;
+  planId: string | null;
   status: "ONBOARDING" | "ACTIVE" | "SUSPENDED";
   contactName: string;
   contactEmail: string;
@@ -29,9 +28,15 @@ export interface TenantDraft {
   notes: string;
 }
 
-const EMPTY: TenantDraft = { name: "", industry: "", plan: "professional", status: "ONBOARDING", contactName: "", contactEmail: "", endpointsLicensed: 50, usersLicensed: 50, notes: "" };
+const EMPTY: TenantDraft = { name: "", industry: "", planId: null, status: "ONBOARDING", contactName: "", contactEmail: "", endpointsLicensed: 0, usersLicensed: 0, notes: "" };
 
-export function TenantFormButton({ tenantId, initial }: { tenantId?: string; initial?: TenantDraft }) {
+export interface PlanOption {
+  id: string;
+  name: string;
+  tagline: string | null;
+}
+
+export function TenantFormButton({ tenantId, initial, plans }: { tenantId?: string; initial?: TenantDraft; plans: PlanOption[] }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [d, setD] = React.useState<TenantDraft>(initial ?? EMPTY);
@@ -64,7 +69,7 @@ export function TenantFormButton({ tenantId, initial }: { tenantId?: string; ini
             </div>
             <div className="grid gap-1.5">
               <Label>Industry</Label>
-              <Input value={d.industry} onChange={(e) => setD({ ...d, industry: e.target.value })} placeholder="Healthcare, fintech, retail…" />
+              <Input value={d.industry} onChange={(e) => setD({ ...d, industry: e.target.value })} />
             </div>
             <div className="grid gap-1.5">
               <Label>Status</Label>
@@ -76,11 +81,13 @@ export function TenantFormButton({ tenantId, initial }: { tenantId?: string; ini
             </div>
             <div className="grid gap-1.5 sm:col-span-2">
               <Label>Service plan</Label>
-              <NativeSelect value={d.plan} onChange={(e) => setD({ ...d, plan: e.target.value as PlanKey })}>
-                {PLAN_KEYS.map((k) => (
-                  <option key={k} value={k}>{PLANS[k].name} — {PLANS[k].tagline}</option>
+              <NativeSelect value={d.planId ?? ""} onChange={(e) => setD({ ...d, planId: e.target.value || null })}>
+                <option value="">No plan yet (no SLA)</option>
+                {plans.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}{p.tagline ? ` — ${p.tagline}` : ""}</option>
                 ))}
               </NativeSelect>
+              {plans.length === 0 && <p className="text-[11px] text-muted-foreground">No plans defined yet — create them in Build &amp; Price → Pricing setup.</p>}
             </div>
             <div className="grid gap-1.5">
               <Label>Endpoints licensed</Label>
@@ -100,7 +107,8 @@ export function TenantFormButton({ tenantId, initial }: { tenantId?: string; ini
             </div>
             <div className="grid gap-1.5 sm:col-span-2">
               <Label>Notes</Label>
-              <Textarea value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} className="min-h-16" placeholder="Escalation contacts, maintenance windows, crown-jewel systems…" />
+              <Textarea value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} className="min-h-16" aria-describedby="tenant-notes-hint" />
+              <p id="tenant-notes-hint" className="text-[11px] text-muted-foreground">Escalation contacts, maintenance windows, business-critical systems.</p>
             </div>
           </div>
           <DialogFooter>

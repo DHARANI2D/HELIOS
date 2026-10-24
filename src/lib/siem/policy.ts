@@ -1,6 +1,6 @@
 // Ported from signal-fusion's config/policy.ts — detection thresholds in one
-// place. Known-bad indicators now live in the shared threat-intel module
-// (lib/threat-intel/local-intel.ts) so every module matches the same list.
+// place. Known-bad indicators come from the shared indicator store (feeds,
+// provider lookups, blocks — lib/threat-intel/snapshot.ts), never a list here.
 
 export const SecurityPolicy = {
   geoVelocity: {

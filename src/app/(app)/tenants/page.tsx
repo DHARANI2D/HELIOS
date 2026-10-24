@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
-import { planFor } from "@/lib/plans";
+import { listPlans } from "@/lib/service-plans";
 import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
 import { computeMetrics, formatDuration } from "@/lib/metrics";
 import { StatTile } from "@/components/dashboard/stat-tile";
@@ -22,7 +22,7 @@ async function loadTenants() {
   const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const tenants = await db.tenant.findMany({
     orderBy: { name: "asc" },
-    include: { _count: { select: { users: true, endpoints: true, integrations: true } } },
+    include: { _count: { select: { users: true, endpoints: true, integrations: true } }, plan: { select: { name: true, coverage: true } } },
   });
   const [open, critical, recent] = await Promise.all([
     db.case.groupBy({ by: ["tenantId"], where: { status: { notIn: CLOSED_STATUSES } }, _count: { _all: true } }),
@@ -40,7 +40,7 @@ async function loadTenants() {
 
 export default async function TenantsPage() {
   const user = await pageGuard("tenants.view");
-  const tenants = await loadTenants();
+  const [tenants, plans] = await Promise.all([loadTenants(), listPlans()]);
   const active = tenants.filter((t) => t.status === "ACTIVE").length;
   const endpoints = tenants.reduce((s, t) => s + t.endpointsLicensed, 0);
   const seats = tenants.reduce((s, t) => s + t.usersLicensed, 0);
@@ -60,7 +60,7 @@ export default async function TenantsPage() {
             <CardTitle className="text-base">Clients</CardTitle>
             <CardDescription>Each client&apos;s plan, live risk, service performance over the last 30 days, and how much autonomy they&apos;ve given AI agents.</CardDescription>
           </div>
-          {can(user, "tenants.manage") && <TenantFormButton />}
+          {can(user, "tenants.manage") && <TenantFormButton plans={plans.map((p) => ({ id: p.id, name: p.name, tagline: p.tagline }))} />}
         </CardHeader>
         <CardContent>
           {tenants.length === 0 ? (
@@ -92,7 +92,7 @@ export default async function TenantsPage() {
                             {t.industry && <span className="text-[11px] text-muted-foreground">{t.industry}</span>}
                           </div>
                         </TableCell>
-                        <TableCell className="text-xs">{planFor(t.plan).name}<p className="text-[11px] text-muted-foreground">{planFor(t.plan).coverage}</p></TableCell>
+                        <TableCell className="text-xs">{t.plan?.name ?? <span className="text-muted-foreground">No plan</span>}{t.plan && <p className="text-[11px] text-muted-foreground">{t.plan.coverage}</p>}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {t.open}
                           {t.critical > 0 && <span className="ml-1 text-destructive">({t.critical})</span>}

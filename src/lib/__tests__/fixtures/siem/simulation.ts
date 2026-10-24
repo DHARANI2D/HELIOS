@@ -1,16 +1,16 @@
 import type { SimulationScenario } from "@/lib/siem/types";
-import { collectionScenarios } from "@/lib/siem/scenarios/collection";
-import { commandControlScenarios } from "@/lib/siem/scenarios/commandControl";
-import { credentialAccessScenarios } from "@/lib/siem/scenarios/credentialAccess";
-import { defenseEvasionScenarios } from "@/lib/siem/scenarios/defenseEvasion";
-import { discoveryScenarios } from "@/lib/siem/scenarios/discovery";
-import { executionScenarios } from "@/lib/siem/scenarios/execution";
-import { exfiltrationScenarios } from "@/lib/siem/scenarios/exfiltration";
-import { impactScenarios } from "@/lib/siem/scenarios/impact";
-import { initialAccessScenarios } from "@/lib/siem/scenarios/initialAccess";
-import { lateralMovementScenarios } from "@/lib/siem/scenarios/lateralMovement";
-import { persistenceScenarios } from "@/lib/siem/scenarios/persistence";
-import { privilegeEscalationScenarios } from "@/lib/siem/scenarios/privilegeEscalation";
+import { collectionScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/collection";
+import { commandControlScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/commandControl";
+import { credentialAccessScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/credentialAccess";
+import { defenseEvasionScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/defenseEvasion";
+import { discoveryScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/discovery";
+import { executionScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/execution";
+import { exfiltrationScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/exfiltration";
+import { impactScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/impact";
+import { initialAccessScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/initialAccess";
+import { lateralMovementScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/lateralMovement";
+import { persistenceScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/persistence";
+import { privilegeEscalationScenarios } from "@/lib/__tests__/fixtures/siem/scenarios/privilegeEscalation";
 import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
 
 // Ported from signal-fusion's simulation/engine.ts: 48 attack scenarios

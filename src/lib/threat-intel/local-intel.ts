@@ -2,20 +2,11 @@ import type { IndicatorType } from "@prisma/client";
 
 import { hostFromUrl } from "@/lib/threat-intel/indicators";
 
-// Built-in intelligence that works with no provider API keys configured:
-// signal-fusion's SecurityPolicy.threatIntel blocklist plus desas's domain
-// heuristics (suspicious TLDs, brand-impersonation keywords). Provider
-// lookups (VirusTotal / AbuseIPDB) layer on top of this when keys are set.
-
-export const KNOWN_BAD_IPS: Record<string, string> = {
-  "99.88.77.66": "Known C2 infrastructure",
-  "45.33.22.11": "Tor exit node",
-  "103.22.11.55": "Botnet IP",
-};
-
-const KNOWN_BAD_IP_PREFIXES: Array<{ prefix: string; reason: string; score: number }> = [
-  { prefix: "185.220.101.", reason: "Tor exit relay range (185.220.101.0/24)", score: 0.7 },
-];
+// Verdicts that need no provider API keys: what your own indicator store
+// already knows (imported feeds, earlier provider lookups, blocks — passed
+// in as an IntelSnapshot), plus desas's domain heuristics (suspicious TLDs,
+// brand-impersonation keywords). Nothing here is a hardcoded list of "bad"
+// addresses: an IP is only ever malicious because a feed or provider said so.
 
 export const SUSPICIOUS_TLDS = new Set([
   "cc", "xyz", "top", "download", "review", "country", "stream", "tk", "ml", "ga", "cf", "gq", "zip", "mov",
@@ -62,29 +53,40 @@ function scoreDomain(domain: string): LocalVerdict {
   return { score, reasons };
 }
 
-export function localVerdict(type: IndicatorType, value: string): LocalVerdict {
+// Known indicators by "TYPE:value" (value lowercased), from
+// threat-intel/snapshot.ts. Detectors are synchronous, so callers load the
+// snapshot for a batch first and pass it in.
+export type IntelSnapshot = ReadonlyMap<string, LocalVerdict>;
+export const EMPTY_INTEL: IntelSnapshot = new Map();
+
+export function intelKey(type: IndicatorType, value: string) {
+  return `${type}:${value.trim().toLowerCase()}`;
+}
+
+function merge(a: LocalVerdict, b: LocalVerdict | undefined): LocalVerdict {
+  if (!b) return a;
+  return { score: Math.max(a.score, b.score), reasons: [...a.reasons, ...b.reasons.filter((r) => !a.reasons.includes(r))] };
+}
+
+const NONE: LocalVerdict = { score: 0, reasons: [] };
+
+export function localVerdict(type: IndicatorType, value: string, intel: IntelSnapshot = EMPTY_INTEL): LocalVerdict {
+  const known = intel.get(intelKey(type, value));
   switch (type) {
-    case "IP": {
-      const known = KNOWN_BAD_IPS[value];
-      if (known) return { score: 0.9, reasons: [known] };
-      const prefix = KNOWN_BAD_IP_PREFIXES.find((p) => value.startsWith(p.prefix));
-      if (prefix) return { score: prefix.score, reasons: [prefix.reason] };
-      return { score: 0, reasons: [] };
-    }
+    case "IP":
+    case "FILE_HASH":
+      return merge(NONE, known);
     case "DOMAIN":
-      return scoreDomain(value);
+      return merge(scoreDomain(value), known);
     case "URL": {
       const host = hostFromUrl(value);
-      const verdict = host ? scoreDomain(host) : { score: 0, reasons: [] };
-      if (host && KNOWN_BAD_IPS[host]) return { score: 0.9, reasons: [KNOWN_BAD_IPS[host]] };
-      return verdict;
+      const byHost = host ? merge(scoreDomain(host), intel.get(intelKey("DOMAIN", host)) ?? intel.get(intelKey("IP", host))) : NONE;
+      return merge(byHost, known);
     }
     case "EMAIL_ADDRESS": {
       const domain = value.split("@")[1] ?? "";
-      return domain ? scoreDomain(domain) : { score: 0, reasons: [] };
+      return merge(domain ? merge(scoreDomain(domain), intel.get(intelKey("DOMAIN", domain))) : NONE, known);
     }
-    case "FILE_HASH":
-      return { score: 0, reasons: [] };
   }
 }
 

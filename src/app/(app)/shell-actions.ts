@@ -67,13 +67,13 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
       ? db.endpoint.findMany({ where: { ...tenantFilter, OR: [{ hostname: contains }, { ipAddress: contains }, { owner: contains }] }, select: { id: true, hostname: true, os: true, isolated: true }, take: 4 })
       : [],
     can(user, "intel.view") ? db.threatIndicator.findMany({ where: { value: contains }, select: { id: true, type: true, value: true, maliciousScore: true }, take: 4 }) : [],
-    can(user, "tenants.view") ? db.tenant.findMany({ where: { name: contains }, select: { id: true, name: true, plan: true }, take: 3 }) : [],
+    can(user, "tenants.view") ? db.tenant.findMany({ where: { name: contains }, select: { id: true, name: true, plan: { select: { name: true } } }, take: 3 }) : [],
   ]);
 
   return [
     ...cases.map((c) => ({ kind: "case" as const, id: c.id, title: c.title, subtitle: `${c.severity.toLowerCase()} · ${c.status.toLowerCase().replaceAll("_", " ")}${c.tenant ? ` · ${c.tenant.name}` : ""}`, href: `/cases/${c.id}` })),
     ...endpoints.map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.hostname, subtitle: `${e.os ?? "unknown OS"}${e.isolated ? " · isolated" : ""}`, href: `/endpoints?q=${encodeURIComponent(e.hostname)}` })),
     ...indicators.map((i) => ({ kind: "indicator" as const, id: i.id, title: i.value, subtitle: `${i.type.toLowerCase().replace("_", " ")}${i.maliciousScore !== null ? ` · score ${i.maliciousScore.toFixed(2)}` : ""}`, href: `/threat-intel?q=${encodeURIComponent(i.value)}` })),
-    ...tenants.map((t) => ({ kind: "tenant" as const, id: t.id, title: t.name, subtitle: `${t.plan} plan`, href: `/tenants/${t.id}` })),
+    ...tenants.map((t) => ({ kind: "tenant" as const, id: t.id, title: t.name, subtitle: t.plan?.name ?? "no plan", href: `/tenants/${t.id}` })),
   ];
 }

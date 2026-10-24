@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import { parseCsv, parseTelemetry, parseSysmonXml } from "@/lib/investigations/normalize";
 import { ancestry, buildEntityGraph } from "@/lib/investigations/graph";
 import { heuristicQa, heuristicRca, heuristicReport, heuristicTriage, runForensicRules } from "@/lib/investigations/heuristics";
-import { SAMPLE_INVESTIGATION } from "@/lib/investigations/samples";
+import { SAMPLE_INVESTIGATION } from "@/lib/__tests__/fixtures/investigations";
 import { buildEvidence } from "@/lib/investigations/agents";
 import { expandIntake, focusGraph } from "@/lib/investigations/service";
 import { zipSync, strToU8 } from "fflate";
+import { intelKey } from "@/lib/threat-intel/local-intel";
 
 describe("log normalization", () => {
   it("auto-detects Sysmon JSON and maps process lineage fields", () => {
@@ -76,7 +77,9 @@ describe("entity graph", () => {
 describe("deterministic investigation engine", () => {
   const { events } = parseTelemetry(SAMPLE_INVESTIGATION.logs);
   const graph = buildEntityGraph(events);
-  const findings = runForensicRules(events);
+  // The C2 address in the fixture, as an imported feed would list it.
+  const intel = new Map([[intelKey("IP", "185.220.101.5"), { score: 0.9, reasons: ["test feed reputation 0.90"] }]]);
+  const findings = runForensicRules(events, intel);
 
   it("finds the attack chain in the sample and ignores the benign browser noise", () => {
     const rules = findings.map((f) => f.ruleId);

@@ -1,15 +1,16 @@
 import { createHmac } from "node:crypto";
-import type { PlaybookActionType } from "@prisma/client";
+import type { Integration, PlaybookActionType } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { unseal } from "@/lib/secrets";
-import { getTool } from "@/lib/integrations/catalog";
+import { getCatalogTool } from "@/lib/integrations/tools";
 
 // Response connectors: an onboarded tool with a responseWebhookUrl carries out
 // the containment actions its catalog entry supports. HELIOS POSTs a signed
 // JSON request; the receiving automation (the vendor's API through n8n /
 // Tines / a script, or a SOAR) does the work and answers 2xx. Without a
-// connector the action is recorded as simulated, never silently dropped.
+// connector the action is left for an analyst to carry out by hand
+// (MANUAL_REQUIRED) — never pretended done, never silently dropped.
 
 export interface DispatchResult {
   dispatched: boolean;
@@ -50,11 +51,12 @@ export async function findConnector(tenantId: string | null, actionType: Playboo
     where: { tenantId, enabled: true, status: { not: "DISCONNECTED" } },
     orderBy: { createdAt: "asc" },
   });
-  return candidates.find((i) => {
-    const tool = getTool(i.vendor);
+  for (const i of candidates) {
+    const tool = await getCatalogTool(i.vendor);
     const config = (i.config ?? {}) as IntegrationConfig;
-    return !!tool?.actions.includes(actionType) && !!config.responseWebhookUrl;
-  });
+    if (tool?.actions.includes(actionType) && config.responseWebhookUrl) return i;
+  }
+  return undefined;
 }
 
 export async function dispatchAction(input: {
@@ -67,9 +69,7 @@ export async function dispatchAction(input: {
   const connector = await findConnector(input.tenantId, input.actionType);
   if (!connector) return { dispatched: false, message: "no response connector configured" };
 
-  const config = (connector.config ?? {}) as IntegrationConfig;
-  const { webhookSecret } = readSecrets(connector.secretCipher);
-  const body = JSON.stringify({
+  return postSigned(connector, {
     id: input.requestId,
     action: input.actionType,
     target: input.target,
@@ -77,6 +77,23 @@ export async function dispatchAction(input: {
     case: input.caseRef,
     requestedAt: new Date().toISOString(),
   });
+}
+
+// A signed no-op the receiving automation should acknowledge with 2xx: proves
+// the URL, the network path and the signature check without acting on
+// anything.
+export async function pingConnector(connector: Integration): Promise<DispatchResult> {
+  const config = (connector.config ?? {}) as IntegrationConfig;
+  if (!config.responseWebhookUrl) return { dispatched: false, message: "no response webhook set on this integration" };
+  const result = await postSigned(connector, { action: "PING", tool: connector.vendor, requestedAt: new Date().toISOString() });
+  if (result.ok) await db.integration.update({ where: { id: connector.id }, data: { status: "CONNECTED", lastError: null } });
+  return result;
+}
+
+async function postSigned(connector: Integration, payload: Record<string, unknown>): Promise<DispatchResult> {
+  const config = (connector.config ?? {}) as IntegrationConfig;
+  const { webhookSecret } = readSecrets(connector.secretCipher);
+  const body = JSON.stringify(payload);
   const timestamp = String(Math.floor(Date.now() / 1000));
   try {
     const res = await fetch(config.responseWebhookUrl!, {

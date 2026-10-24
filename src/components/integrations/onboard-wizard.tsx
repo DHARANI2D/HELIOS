@@ -244,7 +244,8 @@ export function OnboardWizard({ categories, tools, tenants, defaultTenantId, isC
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label>Response connector URL (optional)</Label>
-                <Input value={responseUrl} onChange={(e) => setResponseUrl(e.target.value)} placeholder="https://automation.example.com/helios-actions" />
+                <Input value={responseUrl} onChange={(e) => setResponseUrl(e.target.value)} type="url" aria-describedby="response-url-hint" />
+                <p id="response-url-hint" className="text-[11px] text-muted-foreground">HTTPS endpoint of your automation (n8n, Tines, a SOAR or a script) that carries out actions on this tool.</p>
                 <p className="text-[11px] text-muted-foreground">Receives signed JSON for: {tool.actions.map((a) => a.toLowerCase().replaceAll("_", " ")).join(", ")}.</p>
               </div>
               <div className="grid gap-1.5">
@@ -256,7 +257,8 @@ export function OnboardWizard({ categories, tools, tenants, defaultTenantId, isC
           {tool.category === "chatops" && (
             <div className="grid gap-1.5">
               <Label>Incoming webhook URL</Label>
-              <Input type="password" value={chatUrl} onChange={(e) => setChatUrl(e.target.value)} placeholder="https://hooks.slack.com/services/…" autoComplete="off" />
+              <Input type="password" value={chatUrl} onChange={(e) => setChatUrl(e.target.value)} autoComplete="off" aria-describedby="chat-url-hint" />
+              <p id="chat-url-hint" className="text-[11px] text-muted-foreground">The incoming-webhook URL from Slack or a Teams workflow.</p>
             </div>
           )}
 

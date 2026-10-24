@@ -1,7 +1,6 @@
 import type { CaseSeverity, CaseSource, DetectionSource, SecurityDomain } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { planFor } from "@/lib/plans";
 import { findRelatedCases } from "@/lib/cases/related";
 
 // Everything an AI agent may base a conclusion on, with a short reference id
@@ -39,7 +38,7 @@ export interface CaseEvidence {
   riskScore: number | null;
   tenantId: string | null;
   tenantName: string | null;
-  planName: string;
+  planName: string | null;
   detectionSources: DetectionSource[];
   maliciousIndicators: number;
   techniques: string[];
@@ -65,7 +64,7 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
   const kase = await db.case.findUniqueOrThrow({
     where: { id: caseId },
     include: {
-      tenant: { select: { name: true, plan: true } },
+      tenant: { select: { name: true, plan: { select: { name: true } } } },
       detections: { orderBy: { createdAt: "asc" }, take: MAX_DETECTIONS },
       indicators: { include: { indicator: true }, take: MAX_INDICATORS },
       mitreTechniques: { select: { techniqueId: true } },
@@ -152,7 +151,7 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
     riskScore: kase.riskScore,
     tenantId: kase.tenantId,
     tenantName: kase.tenant?.name ?? null,
-    planName: planFor(kase.tenant?.plan ?? "enterprise").name,
+    planName: kase.tenant?.plan?.name ?? null,
     detectionSources: [...new Set(kase.detections.map((d) => d.source))],
     maliciousIndicators: kase.indicators.filter((ci) => (ci.indicator.maliciousScore ?? 0) >= 0.4).length,
     techniques: kase.mitreTechniques.map((t) => t.techniqueId),
@@ -167,7 +166,7 @@ export function renderEvidence(ev: CaseEvidence): string {
   const section = (tag: string, body: string) => (body ? `<${tag}>\n${body}\n</${tag}>` : "");
   const entity = (label: string, values: string[]) => (values.length ? `${label}: ${values.slice(0, 25).join(", ")}` : null);
   return [
-    `<case id="${ev.caseId}" source="${ev.sourceType}" severity="${ev.severity}" status="${ev.status}"${ev.verdict ? ` module_verdict="${ev.verdict}"` : ""}${ev.riskScore != null ? ` risk="${Math.round(ev.riskScore)}"` : ""} client="${ev.tenantName ?? "internal"}" plan="${ev.planName}">`,
+    `<case id="${ev.caseId}" source="${ev.sourceType}" severity="${ev.severity}" status="${ev.status}"${ev.verdict ? ` module_verdict="${ev.verdict}"` : ""}${ev.riskScore != null ? ` risk="${Math.round(ev.riskScore)}"` : ""} client="${ev.tenantName ?? "internal"}"${ev.planName ? ` plan="${ev.planName}"` : ""}>`,
     `Title: ${ev.title}`,
     ev.summary ? `Summary: ${ev.summary.slice(0, 1500)}` : "",
     ev.techniques.length ? `ATT&CK: ${ev.techniques.join(", ")}` : "",

@@ -12,11 +12,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 
-const EXAMPLE = `[
-  {"user": "jane.roe", "source_ip": "203.0.113.7", "result": "FAILED", "geo_location": "Brazil"},
-  {"user": "jane.roe", "source_ip": "203.0.113.7", "result": "SUCCESS", "geo_location": "Brazil"}
-]`;
-
 export function IngestPanel({ tenantId, tenantName }: { tenantId: string | null; tenantName: string | null }) {
   const router = useRouter();
   const [source, setSource] = React.useState("auth");
@@ -35,16 +30,16 @@ export function IngestPanel({ tenantId, tenantName }: { tenantId: string | null;
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Ingest telemetry</CardTitle>
+        <CardTitle className="text-base">Upload logs</CardTitle>
         <CardDescription>
-          Paste a JSON array, a single object, or JSON Lines into <span className="font-medium text-foreground">{tenantName ?? "the internal tenant"}</span>. Items shaped <code className="text-[11px]">{"{source, data}"}</code> may mix sources.
+          Paste exported logs — a JSON array, a single object, or JSON Lines — to run them through detection for <span className="font-medium text-foreground">{tenantName ?? "the internal tenant"}</span>. Items shaped <code className="text-[11px]">{"{source, data}"}</code> may mix sources; for continuous feeds, onboard the tool under Tools &amp; Integrations instead.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={EXAMPLE}
+          aria-label="Log entries"
           className="min-h-32 font-mono text-xs"
         />
         <div className="flex items-center gap-2">

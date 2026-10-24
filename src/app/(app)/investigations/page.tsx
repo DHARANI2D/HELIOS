@@ -92,7 +92,7 @@ export default async function InvestigationsPage() {
         </CardHeader>
         <CardContent>
           {investigations.length === 0 ? (
-            <EmptyState icon={Search} title="No investigations yet" description="Start one above — try the sample to see the full pipeline." />
+            <EmptyState icon={Search} title="No investigations yet" description="Start one above with the alert and the telemetry exported from the affected systems." />
           ) : (
             <Table>
               <TableHeader>

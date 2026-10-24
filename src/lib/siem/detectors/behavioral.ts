@@ -170,7 +170,7 @@ export const threatIntelDetector: Detector = {
   detectionSource: "THREAT_INTEL_MATCH",
   description: "Events touching known-malicious IPs or known attacker tooling.",
   techniques: ["T1071", "T1190"],
-  run(events) {
+  run(events, ctx) {
     const detections: Detection[] = [];
     const suspiciousProcesses = SecurityPolicy.threatIntel.suspiciousProcesses;
 
@@ -182,7 +182,7 @@ export const threatIntelDetector: Detector = {
       // C2 show up as the destination instead.
       for (const [role, ip] of [["source", event.network.sourceIp], ["destination", event.network.destIp]] as const) {
         if (!ip) continue;
-        const verdict = localVerdict("IP", ip);
+        const verdict = localVerdict("IP", ip, ctx.intel);
         if (verdict.score >= 0.7) {
           signals.push("intel_malicious_ip");
           reasoning.push(`Matched threat intel for ${role} IP ${ip} (${verdict.reasons.join("; ")})`);

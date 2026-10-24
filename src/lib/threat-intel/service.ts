@@ -15,12 +15,20 @@ import {
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h, matching signal-fusion
 
-interface StoredProviderData {
+export interface FeedHit {
+  score: number;
+  importedAt: string;
+  description?: string;
+}
+
+export interface StoredProviderData {
   local?: { score: number; reasons: string[] };
+  // Imported feeds that list this indicator (threat-intel/feeds.ts).
+  feeds?: Record<string, FeedHit>;
   [provider: string]: unknown;
 }
 
-function asProviderData(value: Prisma.JsonValue): StoredProviderData {
+export function asProviderData(value: Prisma.JsonValue): StoredProviderData {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as StoredProviderData) : {};
 }
 
@@ -68,13 +76,16 @@ export async function lookupIndicator(
   const ok = results.filter((r): r is ProviderResult => !isProviderError(r));
   const errors = results.filter(isProviderError).map((e) => ({ provider: e.provider, error: e.error }));
 
-  const providerData: StoredProviderData = { local };
+  // Feed listings survive a provider refresh; they change only on re-import.
+  const feeds = existing ? asProviderData(existing.providerData).feeds ?? {} : {};
+  const providerData: StoredProviderData = { local, feeds };
   for (const r of results) providerData[r.provider] = isProviderError(r) ? { error: r.error } : r;
 
-  const scores = [local.score, ...ok.map((r) => r.score)];
-  const sources = [...(local.score > 0 ? ["local"] : []), ...ok.map((r) => r.provider)];
+  const feedScores = Object.values(feeds).map((f) => f.score);
+  const scores = [local.score, ...ok.map((r) => r.score), ...feedScores];
+  const sources = [...(local.score > 0 ? ["local"] : []), ...ok.map((r) => r.provider), ...Object.keys(feeds).map((f) => `feed:${f}`)];
   const consulted = ok.length > 0;
-  const maliciousScore = consulted || local.score > 0 ? Math.max(...scores) : null;
+  const maliciousScore = consulted || local.score > 0 || feedScores.length > 0 ? Math.max(...scores) : null;
 
   const data = {
     maliciousScore,
@@ -103,8 +114,9 @@ export function indicatorVerdict(indicator: Pick<ThreatIndicator, "maliciousScor
 export function indicatorReasons(indicator: Pick<ThreatIndicator, "providerData">): string[] {
   const data = asProviderData(indicator.providerData);
   const reasons = [...(data.local?.reasons ?? [])];
+  for (const [feed, hit] of Object.entries(data.feeds ?? {})) reasons.push(`Listed by ${feed}${hit.description ? ` — ${hit.description}` : ""}`);
   for (const [provider, value] of Object.entries(data)) {
-    if (provider === "local" || !value || typeof value !== "object") continue;
+    if (provider === "local" || provider === "feeds" || !value || typeof value !== "object") continue;
     const v = value as { summary?: string; error?: string };
     if (v.summary) reasons.push(`${provider}: ${v.summary}`);
     if (v.error) reasons.push(`${provider}: lookup failed (${v.error})`);

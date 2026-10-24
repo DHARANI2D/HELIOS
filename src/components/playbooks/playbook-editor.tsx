@@ -29,19 +29,19 @@ import { Textarea } from "@/components/ui/textarea";
 
 const ACTION_TYPES: Array<{ value: PlaybookActionType; label: string; hint: string }> = [
   { value: "ISOLATE_HOST", label: "Isolate host", hint: "method=edr_network_containment" },
-  { value: "BLOCK_IP", label: "Block IP", hint: "ip=203.0.113.7 (blank = all case IPs)" },
-  { value: "NOTIFY_SLACK", label: "Notify channel", hint: "channel=#soc\nmessage=Case {{case.title}} on {{host}}" },
-  { value: "CREATE_TICKET", label: "Create ticket", hint: "project=SEC\ntitle=Investigate {{case.title}}" },
-  { value: "KILL_PROCESS", label: "Kill process", hint: "process=malware.exe" },
+  { value: "BLOCK_IP", label: "Block IP", hint: "ip=<address> (blank = all case IPs)" },
+  { value: "NOTIFY_SLACK", label: "Notify channel", hint: "message=<text; {{case.title}}, {{host}}, {{user}} are filled in>" },
+  { value: "CREATE_TICKET", label: "Create ticket", hint: "title=<text; {{case.title}}, {{host}} are filled in>" },
+  { value: "KILL_PROCESS", label: "Kill process", hint: "process=<image name>\nhost=<hostname> (blank = case host)" },
   { value: "COLLECT_LOGS", label: "Collect telemetry", hint: "windowMinutes=60" },
   { value: "REVOKE_AGENT", label: "Revoke AI agent", hint: "" },
   { value: "RESTORE_AGENT", label: "Restore AI agent", hint: "" },
-  { value: "DISABLE_USER", label: "Disable account", hint: "user=jdoe (blank = case account)" },
-  { value: "ENABLE_USER", label: "Re-enable account", hint: "user=jdoe" },
+  { value: "DISABLE_USER", label: "Disable account", hint: "user=<account> (blank = case account)" },
+  { value: "ENABLE_USER", label: "Re-enable account", hint: "user=<account>" },
   { value: "QUARANTINE_FILE", label: "Quarantine file", hint: "hash=<sha256>" },
-  { value: "BLOCK_SENDER", label: "Block sender", hint: "sender=attacker@example.com" },
-  { value: "RELEASE_HOST", label: "Release host", hint: "host=WS-042" },
-  { value: "UNBLOCK_IP", label: "Unblock IP", hint: "ip=203.0.113.7" },
+  { value: "BLOCK_SENDER", label: "Block sender", hint: "sender=<address or domain>" },
+  { value: "RELEASE_HOST", label: "Release host", hint: "host=<hostname> (blank = case host)" },
+  { value: "UNBLOCK_IP", label: "Unblock IP", hint: "ip=<address>" },
 ];
 
 const DETECTION_SOURCES = [
@@ -217,11 +217,11 @@ export function PlaybookEditor({ playbook }: { playbook?: EditablePlaybook }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="pb-tech" className="text-xs">ATT&amp;CK techniques</Label>
-                <Input id="pb-tech" value={techniques} onChange={(e) => setTechniques(e.target.value)} placeholder="T1486, T1003" className="font-mono" />
+                <Input id="pb-tech" value={techniques} onChange={(e) => setTechniques(e.target.value)} placeholder="ATT&CK IDs, comma-separated" className="font-mono" />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="pb-verdict" className="text-xs">Verdicts</Label>
-                <Input id="pb-verdict" value={verdicts} onChange={(e) => setVerdicts(e.target.value)} placeholder="malicious, suspicious" />
+                <Input id="pb-verdict" value={verdicts} onChange={(e) => setVerdicts(e.target.value)} placeholder="Verdicts, comma-separated" />
               </div>
             </div>
             <details>

@@ -7,7 +7,7 @@ import { assertCaseAccess } from "@/lib/access";
 import { can, roleLabel } from "@/lib/rbac";
 import { formatDateTime, formatPercent, formatRelative } from "@/lib/format";
 import { CASE_SOURCE_HREF, CASE_SOURCE_LABEL } from "@/lib/cases/labels";
-import { planFor } from "@/lib/plans";
+import { formatMinutes, parsePlan } from "@/lib/plans";
 import { findMatchingPlaybooks } from "@/lib/playbooks/engine";
 import { findRelatedCases } from "@/lib/cases/related";
 import { indicatorVerdict } from "@/lib/threat-intel/service";
@@ -105,7 +105,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
 
   const ranPlaybookIds = new Set(kase.playbookRuns.map((r) => r.playbookId));
   const suggestions = matching.filter((p) => !ranPlaybookIds.has(p.id));
-  const plan = planFor(kase.tenant?.plan ?? "enterprise");
+  const plan = kase.tenant?.plan ? parsePlan(kase.tenant.plan) : null;
   const watching = kase.watchers.some((w) => w.userId === user.id);
   const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel"].includes(r.agentKey) && r.status !== "failed");
   const triage = latestTriage?.output as TriageOutput | undefined;
@@ -170,7 +170,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
           <Meta label="Assignee">{kase.assignedTo ? (kase.assignedTo.name ?? kase.assignedTo.email) : "Unassigned"}</Meta>
           <Meta label="Risk score">{kase.riskScore != null ? Math.round(kase.riskScore) : "—"}</Meta>
           <Meta label="Confidence">{formatPercent(kase.confidence)}</Meta>
-          <Meta label="Service plan">{kase.tenant ? plan.name : "Internal"}</Meta>
+          <Meta label="Service plan">{kase.tenant ? plan?.name ?? "None" : "Internal"}</Meta>
         </CardContent>
       </Card>
 
@@ -275,7 +275,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                 canRequest={can(user, "containment.request")}
                 requestable={requestable}
                 actions={kase.responseActions.map((a) => {
-                  const result = (a.result ?? null) as { summary?: string; simulated?: boolean } | null;
+                  const result = (a.result ?? null) as { summary?: string; manual?: { by?: string } } | null;
                   return {
                     id: a.id,
                     actionType: a.actionType,
@@ -287,7 +287,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     policyReason: a.policyReason,
                     confidence: a.confidence,
                     summary: result?.summary ?? null,
-                    simulated: !!result?.simulated,
+                    manualBy: result?.manual?.by ?? null,
                     rollbackable: !!ROLLBACK_OF[a.actionType],
                     createdAt: a.createdAt.toISOString(),
                   };
@@ -434,10 +434,10 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     </div>
                   </div>
                 )}
-                {kase.slaDueAt && (
+                {kase.slaDueAt && plan && (
                   <p className="text-xs text-muted-foreground">
-                    {kase.tenant ? plan.name : "Internal"} SLA: acknowledge {kase.severity.toLowerCase()} cases within {plan.ackMinutes[kase.severity]} min
-                    {plan.containMinutes[kase.severity] ? `, contain within ${plan.containMinutes[kase.severity]} min` : ""}.
+                    {plan.name} SLA: acknowledge {kase.severity.toLowerCase()} cases within {formatMinutes(plan.ackMinutes[kase.severity])}
+                    {plan.containMinutes[kase.severity] ? `, contain within ${formatMinutes(plan.containMinutes[kase.severity])}` : ""}.
                   </p>
                 )}
               </CardContent>
@@ -541,7 +541,11 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                   <div key={run.id} className="rounded-md border p-3">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-medium">{run.playbook.name}</p>
-                      <Badge variant={EXECUTION_VARIANT[run.status]}>{run.status.replaceAll("_", " ").toLowerCase()}</Badge>
+                      {run.status === "SUCCEEDED" && Array.isArray(run.results) && (run.results as Array<{ status?: string }>).some((r) => r.status === "manual") ? (
+                        <Badge variant="warning">steps to do by hand</Badge>
+                      ) : (
+                        <Badge variant={EXECUTION_VARIANT[run.status]}>{run.status.replaceAll("_", " ").toLowerCase()}</Badge>
+                      )}
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {run.triggeredBy} · {formatRelative(run.startedAt, now)}
@@ -550,10 +554,10 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     {run.error && <p className="mt-1 text-xs text-destructive">{run.error}</p>}
                     {Array.isArray(run.results) && run.results.length > 0 && (
                       <ul className="mt-2 space-y-0.5 text-xs">
-                        {(run.results as Array<{ action: string; summary: string; simulated?: boolean; status: string }>).map((r, i) => (
+                        {(run.results as Array<{ action: string; summary: string; status: string }>).map((r, i) => (
                           <li key={i} className={r.status === "failed" ? "text-destructive" : undefined}>
                             <span className="font-medium">{r.action}</span>: {r.summary}
-                            {r.simulated && <span className="text-muted-foreground"> (simulated)</span>}
+                            {r.status === "manual" && <span className="text-warning-ink"> (do by hand)</span>}
                           </li>
                         ))}
                       </ul>
