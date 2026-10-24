@@ -5,6 +5,7 @@ import type { CaseSeverity, Prisma, SecurityEvent } from "@prisma/client";
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
+import { findRelatedCases } from "@/lib/cases/related";
 import { extractIndicators, isPrivateIp } from "@/lib/threat-intel/indicators";
 import { parseTelemetry, type UesEvent } from "@/lib/investigations/normalize";
 import { buildEntityGraph, type EntityGraph } from "@/lib/investigations/graph";
@@ -16,6 +17,7 @@ import {
   heuristicTriage,
   runForensicRules,
   type Finding,
+  type PriorCase,
   type QaResult,
   type RcaResult,
   type TriageResult,
@@ -337,6 +339,18 @@ export async function runInvestigationPipeline(caseId: string) {
     const events = rows.map(fromRow);
     const graph = buildEntityGraph(events);
     const findings = runForensicRules(events);
+    const flaggedEvents = [...new Set(findings.flatMap((f) => f.events))];
+    const prior: PriorCase[] = (
+      await findRelatedCases(caseId, { limit: 5, extraIndicators: indicatorsFrom(flaggedEvents.length ? flaggedEvents : events) })
+    ).map((c) => ({
+      title: c.title,
+      source: c.sourceType,
+      verdict: c.verdict,
+      severity: c.severity,
+      openedAt: c.createdAt.toISOString(),
+      sharedEvidence: c.reasons,
+      rootCause: c.rootCauseNarrative?.slice(0, 400),
+    }));
     const evidence = useClaude ? buildEvidence(events, findings, graph) : "";
 
     const triage = await stage(caseId, "triage", useClaude, () => triageAgent(kase.title, meta.input.alertDetails, evidence), () => heuristicTriage(kase.title, findings));
@@ -350,7 +364,7 @@ export async function runInvestigationPipeline(caseId: string) {
     while (iterations < MAX_QA_ITERATIONS) {
       iterations++;
       const feedback = qa?.issues;
-      rca = await stage(caseId, "rca", useClaude, () => rcaAgent(triage, evidence, feedback), () => heuristicRca(findings, graph));
+      rca = await stage(caseId, "rca", useClaude, () => rcaAgent(triage, evidence, feedback, prior), () => heuristicRca(findings, graph, prior));
       const currentRca = rca;
       qa = await stage(caseId, "qa", useClaude, () => qaAgent(currentRca, evidence), () => heuristicQa(currentRca, events, graph));
       const mechanical = heuristicQa(currentRca, events, graph);
@@ -401,7 +415,7 @@ export async function runInvestigationPipeline(caseId: string) {
       },
     });
 
-    const flagged = [...new Set(findings.flatMap((f) => f.events))].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    const flagged = [...flaggedEvents].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     await appendToCase(caseId, {
       severity,
       detections: findings.map((f) => ({

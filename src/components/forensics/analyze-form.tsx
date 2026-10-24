@@ -36,10 +36,10 @@ export function AnalyzeForm() {
       }}
     >
       <div className="grid gap-1.5">
-        <Label htmlFor="fx-file">Email (.eml) or suspicious file</Label>
+        <Label htmlFor="fx-file">Email (.eml / Outlook .msg) or suspicious file</Label>
         <Input id="fx-file" name="file" type="file" />
         <p className="text-xs text-muted-foreground">
-          .eml messages get header, body, attachment, and link analysis. Any other file (Office, PDF, archive, executable, script, image) gets file forensics.
+          .eml and .msg messages get header, body, attachment, and link analysis (embedded messages are opened one level deep). Any other file (Office, PDF, archive, executable, script, image) gets file forensics.
         </p>
       </div>
       <div className="grid gap-1.5">

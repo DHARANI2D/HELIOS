@@ -20,6 +20,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.2.0",
     "@auth/prisma-adapter": "^2.11.3",
+    "@kenjiuno/msgreader": "1.28.0",
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-avatar": "^1.2.6",
     "@radix-ui/react-dialog": "^1.1.23",

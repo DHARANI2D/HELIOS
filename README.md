@@ -6,7 +6,7 @@
 |---|---|---|
 | Cases & Alerts | `signal-fusion` | Telemetry ingestion, 11 SIEM detectors, 48 replayable ATT&CK attack scenarios, and correlation of detections into cases |
 | Investigations | `asip` | Log normalization (Sysmon, CrowdStrike, Wazuh, Google SecOps, Splunk CSV, JSON/JSONL, raw text), a process-lineage graph, and a triage → RCA ⇄ adversarial QA → report pipeline (Claude agent swarm or deterministic engine) |
-| Email & File Forensics | `desas` | SPF/DKIM/DMARC and sender-identity checks, phishing content and link heuristics, attachment forensics, HTTP-level link detonation, and scored verdicts |
+| Email & File Forensics | `desas` | `.eml` and Outlook `.msg` intake, SPF/DKIM/DMARC and sender-identity checks, phishing content and link heuristics, attachment forensics, HTTP-level link detonation, and scored verdicts |
 | Agent Governance | `aegis` | Zero-trust identity, trust scoring, DLP, and breach investigation for autonomous AI agents |
 | Threat Intelligence | all four | One shared IOC store: built-in intel plus VirusTotal and AbuseIPDB, 24h cache, and a blocklist feed |
 | Response Playbooks | `signal-fusion` | Trigger-matched containment workflows on *any* case source, with an admin approval gate |
@@ -57,6 +57,7 @@ cp .env.example .env
 | `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY` | Built-in intel only (known C2 / Tor ranges, suspicious TLDs, brand impersonation) |
 | `ANTHROPIC_API_KEY` | Investigations use the deterministic forensic engine instead of the Claude agent swarm |
 | `SLACK_WEBHOOK_URL` | `NOTIFY_SLACK` playbook actions are recorded as simulated |
+| `MXTOOLBOX_API_KEY` | Email forensics skips the sender-domain diagnostics (MX, blacklist, SPF, DMARC, SMTP) |
 
 ### 3. Install dependencies and set up the database
 

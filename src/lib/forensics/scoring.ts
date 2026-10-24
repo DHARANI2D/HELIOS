@@ -26,7 +26,7 @@ export const VERDICT_RULES = {
 export type Verdict = "malicious" | "suspicious" | "benign";
 
 export interface ScoreComponent {
-  component: "Header analysis" | "Content analysis" | "Attachment forensics" | "Sandbox behavior" | "Threat intel";
+  component: "Header analysis" | "Content analysis" | "Attachment forensics" | "Sandbox behavior" | "Threat intel" | "Sender infrastructure";
   points: number;
   reasons: string[];
 }

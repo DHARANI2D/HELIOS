@@ -52,7 +52,10 @@ What changed relative to each legacy app in `legacy/components/`. It records bug
 - **XLSX intake.**
 - **Encrypted-archive password prompts.**
 - **The OpenAI and Ollama providers.** Claude is the supported model provider.
-- **Qdrant incident memory and playbook RAG.** Related context comes from the shared case store instead.
+- **Playbook RAG.**
+
+**Replaced:**
+- **Qdrant incident memory → related-case memory.** asip embedded past incidents into Qdrant and retrieved "similar" ones by vector distance, which analysts couldn't audit. HELIOS links prior cases that share concrete evidence (`src/lib/cases/related.ts`): IOCs (weighted up when malicious), hosts and accounts, the same AI agent, with ATT&CK overlap only reinforcing an evidence match. Generic accounts (`SYSTEM`, `root`, …) and indicators seen in more than 50 cases are ignored. Every match lists its reasons; the RCA stage (Claude or deterministic) cites the overlap as context, not evidence, and the case page shows a *Related cases* card.
 
 ## desas → Email & File Forensics
 
@@ -75,10 +78,12 @@ What changed relative to each legacy app in `legacy/components/`. It records bug
 - **New checks:** remote template injection, macros inside non-macro extensions, disk-image attachments, and raw-IP links.
 - **HTTP-level sandbox.** The Selenium browser sandbox is replaced by HTTP-level detonation with an SSRF guard: no JavaScript execution, no screenshots, no form interaction. Pillars are judged from the landing page's HTML.
 
+- **`.msg` (Outlook) parsing** uses `@kenjiuno/msgreader` instead of `extract-msg`. Transport headers are used when the message carries them; otherwise sender, recipients, sent time and bodies come from the MAPI properties. Messages attached inside a message (`.msg` embedded items or `message/rfc822` parts) are analyzed one level deep: their attachments, links and reasons count towards the outer verdict.
+- **MxToolbox** runs only with `MXTOOLBOX_API_KEY`. It feeds a separate *Sender infrastructure* score component (+5 per failed check) instead of being folded into header analysis.
+- **Sender IP reputation** is looked up through the shared threat-intel providers when they are configured (+20 above 0.5, +10 above 0.1).
+
 **Not ported:**
-- `.msg` (Outlook) parsing;
 - OCR of image attachments;
-- MxToolbox lookups;
 - PDF report generation;
 - the Electron desktop shell.
 

@@ -10,6 +10,7 @@ import { SAMPLE_INVESTIGATION } from "@/lib/investigations/samples";
 import { runInvestigationPipeline, startInvestigation } from "@/lib/investigations/service";
 import { buildSampleEmail } from "@/lib/forensics/samples";
 import { analyzeSubmission } from "@/lib/forensics/service";
+import { findRelatedCases } from "@/lib/cases/related";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -91,6 +92,28 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(kase._count.events).toBe(21);
     expect(kase._count.detections).toBeGreaterThanOrEqual(8);
     expect(kase.mitreTechniques.map((t) => t.techniqueId)).toContain("T1003.001");
+  });
+
+  it("links a repeat intrusion to the earlier case and cites it in the RCA", async () => {
+    const first = await db.case.findFirstOrThrow({ where: { sourceType: "SOC_INVESTIGATION" }, orderBy: { createdAt: "asc" } });
+    const { caseId } = await startInvestigation({
+      title: "Repeat activity on WS-FIN-042",
+      alertDetails: "",
+      files: [],
+      pastedLogs: SAMPLE_INVESTIGATION.logs,
+      actorId: adminId,
+    });
+    await runInvestigationPipeline(caseId);
+
+    const related = await findRelatedCases(caseId);
+    const link = related.find((r) => r.id === first.id);
+    expect(link).toBeDefined();
+    expect(link!.reasons).toEqual(expect.arrayContaining(["Same host WS-FIN-042.acme.local", "Shared ip 185.220.101.5"]));
+    expect(related.some((r) => r.reasons.some((x) => /system/i.test(x)))).toBe(false);
+
+    const kase = await db.case.findUniqueOrThrow({ where: { id: caseId } });
+    expect(kase.rootCauseNarrative).toContain("overlaps");
+    expect(kase.rootCauseNarrative).toContain(first.title);
   });
 
   it("analyzes the sample phishing email into a malicious case with IOCs", async () => {

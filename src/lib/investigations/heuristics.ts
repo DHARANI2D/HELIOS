@@ -467,9 +467,35 @@ export function heuristicTriage(title: string, findings: Finding[]): TriageResul
   };
 }
 
-export function heuristicRca(findings: Finding[], graph: EntityGraph): RcaResult {
+// Prior cases that share evidence with this one (lib/cases/related), passed to
+// the RCA as context — asip fed its Qdrant "similar incidents" the same way.
+export interface PriorCase {
+  title: string;
+  source: string;
+  verdict: string | null;
+  severity: string;
+  openedAt: string;
+  sharedEvidence: string[];
+  rootCause?: string;
+}
+
+function priorCaseSentence(prior: PriorCase[]): string {
+  if (prior.length === 0) return "";
+  const shown = prior
+    .slice(0, 3)
+    .map((p) => `"${p.title}" (${p.verdict ?? "no verdict"}; ${p.sharedEvidence.slice(0, 2).join(", ")})`)
+    .join("; ");
+  return `This activity overlaps ${prior.length} earlier case(s): ${shown}.`;
+}
+
+export function heuristicRca(findings: Finding[], graph: EntityGraph, prior: PriorCase[] = []): RcaResult {
   if (findings.length === 0) {
-    return { root_cause: "No attack chain could be established from the supplied telemetry.", timeline: [], confidence_score: 0.3, mitre_techniques: [] };
+    return {
+      root_cause: ["No attack chain could be established from the supplied telemetry.", priorCaseSentence(prior)].filter(Boolean).join(" "),
+      timeline: [],
+      confidence_score: 0.3,
+      mitre_techniques: [],
+    };
   }
 
   const first = findings[0].events[0];
@@ -487,6 +513,7 @@ export function heuristicRca(findings: Finding[], graph: EntityGraph): RcaResult
     `Activity${who ? ` for ${who}` : ""} most likely began with ${entry}.`,
     chain.length > 1 ? `Observed process lineage: ${chain.join(" → ")}.` : "",
     ...findings.map((f) => `${f.title}: ${f.description}`),
+    priorCaseSentence(prior),
   ].filter(Boolean);
 
   const timelineEvents = [...new Set(findings.flatMap((f) => f.events))].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());

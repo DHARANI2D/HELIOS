@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Ban, Crosshair, Fingerprint, Radar, ScrollText, Workflow } from "lucide-react";
+import { ArrowLeft, Ban, Crosshair, Fingerprint, Link2, Radar, ScrollText, Workflow } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { formatDateTime, formatPercent, formatRelative } from "@/lib/format";
 import { CASE_SOURCE_HREF, CASE_SOURCE_LABEL } from "@/lib/cases/labels";
 import { findMatchingPlaybooks } from "@/lib/playbooks/engine";
+import { findRelatedCases } from "@/lib/cases/related";
 import { indicatorVerdict } from "@/lib/threat-intel/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -59,9 +60,10 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   });
   if (!kase) notFound();
 
-  const [matching, events] = await Promise.all([
+  const [matching, events, related] = await Promise.all([
     findMatchingPlaybooks(kase.id),
     db.securityEvent.findMany({ where: { caseId: kase.id }, orderBy: { timestamp: "asc" }, take: 50 }),
+    findRelatedCases(kase.id),
   ]);
   const ranPlaybookIds = new Set(kase.playbookRuns.map((r) => r.playbookId));
   const suggestions = matching.filter((p) => !ranPlaybookIds.has(p.id));
@@ -253,6 +255,33 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                         <VerdictBadge verdict={indicatorVerdict(indicator)} />
                         <RecheckButton indicatorId={indicator.id} />
                       </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><Link2 className="size-4" /> Related cases ({related.length})</CardTitle>
+              <CardDescription>Earlier or concurrent cases sharing indicators, hosts, accounts, or the same agent.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {related.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No other case shares evidence with this one.</p>
+              ) : (
+                <ul className="flex flex-col gap-3">
+                  {related.map((r) => (
+                    <li key={r.id} className="text-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <Link href={`/cases/${r.id}`} className="line-clamp-2 font-medium hover:underline">{r.title}</Link>
+                        <SeverityBadge severity={r.severity} />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {CASE_SOURCE_LABEL[r.sourceType]} · {formatRelative(r.createdAt)}{r.verdict ? ` · ${r.verdict}` : ""}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{r.reasons.slice(0, 3).join(" · ")}{r.reasons.length > 3 ? ` +${r.reasons.length - 3}` : ""}</p>
                     </li>
                   ))}
                 </ul>

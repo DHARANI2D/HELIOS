@@ -1,16 +1,19 @@
 import { createHash } from "node:crypto";
-import { simpleParser, type AddressObject } from "mailparser";
 import type { CaseSeverity } from "@prisma/client";
 
 import { logAction } from "@/lib/audit";
 import { createCase, type NewDetection, type NewIndicator, type NewTimelineEntry } from "@/lib/cases/writer";
-import { analyzeHeaders, type HeaderAnalysis, type HeaderLine } from "@/lib/forensics/headers";
+import { analyzeHeaders, type HeaderAnalysis } from "@/lib/forensics/headers";
+import { parseMessage } from "@/lib/forensics/message";
 import { analyzeBody, domainWhitelist, type BodyAnalysis } from "@/lib/forensics/body";
-import { analyzeFile, type AttachmentAnalysis } from "@/lib/forensics/files";
+import { analyzeFile, riskFor, type AttachmentAnalysis } from "@/lib/forensics/files";
 import { detonateUrl, type DetonationResult } from "@/lib/forensics/sandbox";
 import { aggregateVerdict, type ScoreComponent, type VerdictResult } from "@/lib/forensics/scoring";
 import { hostOf, registrableDomain } from "@/lib/forensics/urls";
 import { localVerdict } from "@/lib/threat-intel/local-intel";
+import { configuredProviders } from "@/lib/threat-intel/providers";
+import { indicatorReasons, lookupIndicator } from "@/lib/threat-intel/service";
+import { MX_CHECKS, mxToolboxConfigured, queryMxToolbox, type MxDiagnostics } from "@/lib/forensics/mxtoolbox";
 
 // Orchestrates desas's analysis pipeline (eel_main.analyze_email): parse →
 // headers → body → attachments → optional URL detonation → verdict, then
@@ -21,6 +24,7 @@ const MAX_ATTACHMENTS = 50;
 const MAX_DETONATIONS = 5;
 
 export interface EmailSummary {
+  format: "eml" | "msg";
   subject: string;
   from?: string;
   to?: string;
@@ -39,18 +43,9 @@ export interface ForensicsMetadata {
   attachments: AttachmentAnalysis[];
   sandbox: DetonationResult[];
   detonationRequested: boolean;
+  mxtoolbox?: MxDiagnostics | null;
   verdict: VerdictResult;
   blockRecommendations: string[];
-}
-
-function addressText(value: AddressObject | AddressObject[] | undefined): string | undefined {
-  if (!value) return undefined;
-  return (Array.isArray(value) ? value : [value]).map((v) => v.text).join(", ") || undefined;
-}
-
-function unfold(line: string) {
-  const idx = line.indexOf(":");
-  return { key: line.slice(0, idx).trim().toLowerCase(), value: line.slice(idx + 1).replace(/\r?\n[ \t]+/g, " ").trim() };
 }
 
 function severityFor(points: number): CaseSeverity {
@@ -71,16 +66,28 @@ function flattenAttachments(list: AttachmentAnalysis[]): AttachmentAnalysis[] {
   return list.flatMap((a) => [a, ...flattenAttachments(a.children ?? [])]);
 }
 
-// Intel on the sending infrastructure itself (built-in feed; provider
-// enrichment runs on the case afterwards).
-function intelComponent(headers: HeaderAnalysis | undefined, body: BodyAnalysis | undefined): ScoreComponent {
+// Intel on the sending infrastructure. Built-in intel always applies; with
+// provider keys the sender IP is looked up synchronously (cached 24h) the way
+// desas scored AbuseIPDB reputation: > 0.5 → +20, > 0.1 → +10.
+async function intelComponent(headers: HeaderAnalysis | undefined, body: BodyAnalysis | undefined): Promise<ScoreComponent> {
   const reasons: string[] = [];
   let points = 0;
   if (headers?.senderIp) {
-    const v = localVerdict("IP", headers.senderIp);
-    if (v.score >= 0.7) {
+    const ip = headers.senderIp;
+    const local = localVerdict("IP", ip);
+    let score = local.score;
+    const why = [...local.reasons];
+    if (configuredProviders().length) {
+      const { indicator } = await lookupIndicator("IP", ip);
+      score = Math.max(score, indicator.maliciousScore ?? 0);
+      why.push(...indicatorReasons(indicator).filter((r) => !why.includes(r)));
+    }
+    if (score > 0.5) {
       points += 20;
-      reasons.push(`Sending IP ${headers.senderIp} matches threat intel (${v.reasons.join("; ")})`);
+      reasons.push(`Sending IP ${ip} has a high-risk reputation (${why.join("; ")})`);
+    } else if (score > 0.1) {
+      points += 10;
+      reasons.push(`Sending IP ${ip} has prior abuse reports (${why.join("; ")})`);
     }
   }
   for (const domain of body?.suspiciousDomains ?? []) {
@@ -93,6 +100,20 @@ function intelComponent(headers: HeaderAnalysis | undefined, body: BodyAnalysis 
   return { component: "Threat intel", points: Math.min(points, 40), reasons };
 }
 
+// desas verdict_explainer.analyze_infrastructure: +5 per failed MxToolbox monitor.
+function infrastructureComponent(mx: MxDiagnostics | null): ScoreComponent {
+  const reasons: string[] = [];
+  let points = 0;
+  for (const check of MX_CHECKS) {
+    const result = mx?.[check];
+    if (!result?.checked || result.passed) continue;
+    points += 5;
+    const failed = result.details.filter((d) => d.status === "FAIL").map((d) => d.name);
+    reasons.push(`MxToolbox ${check.toUpperCase()} check failed${failed.length ? `: ${failed.slice(0, 3).join(", ")}` : ""}`);
+  }
+  return { component: "Sender infrastructure", points, reasons };
+}
+
 export interface AnalyzeInput {
   filename: string;
   bytes: Uint8Array;
@@ -100,40 +121,48 @@ export interface AnalyzeInput {
   actorId?: string;
 }
 
-function looksLikeEmail(filename: string, bytes: Uint8Array) {
-  if (/\.(eml|mht|txt)$/i.test(filename)) return true;
-  const head = Buffer.from(bytes.subarray(0, 4096)).toString("latin1");
-  return /^(received|return-path|from|delivered-to|message-id|mime-version|subject|date|x-[\w-]+):/im.test(head) && /\r?\n\r?\n/.test(head + "\n\n");
-}
-
 export async function analyzeSubmission(input: AnalyzeInput) {
-  const isEmail = looksLikeEmail(input.filename, input.bytes);
+  const message = await parseMessage(input.filename, input.bytes);
+  const isEmail = message !== null;
   let email: EmailSummary | undefined;
   let headers: HeaderAnalysis | undefined;
   let body: BodyAnalysis | undefined;
   let attachments: AttachmentAnalysis[];
-  let headerLines: HeaderLine[] = [];
   let sentAt: Date | undefined;
 
-  if (isEmail) {
-    const parsed = await simpleParser(Buffer.from(input.bytes), { skipImageLinks: true });
-    headerLines = parsed.headerLines.map((h) => unfold(h.line));
+  if (message) {
     email = {
-      subject: parsed.subject ?? "(no subject)",
-      from: addressText(parsed.from),
-      to: addressText(parsed.to),
-      cc: addressText(parsed.cc),
-      replyTo: addressText(parsed.replyTo),
-      date: parsed.date?.toISOString(),
-      messageId: parsed.messageId,
-      bodyPreview: (parsed.text ?? "").slice(0, 3000),
+      format: message.format,
+      subject: message.subject,
+      from: message.from,
+      to: message.to,
+      cc: message.cc,
+      replyTo: message.replyTo,
+      date: message.date?.toISOString(),
+      messageId: message.messageId,
+      bodyPreview: message.text.slice(0, 3000),
     };
-    sentAt = parsed.date;
-    headers = await analyzeHeaders(headerLines, email.subject);
-    body = analyzeBody(parsed.text ?? "", typeof parsed.html === "string" ? parsed.html : undefined);
-    attachments = parsed.attachments
-      .slice(0, MAX_ATTACHMENTS)
-      .map((a) => analyzeFile(a.filename ?? "unnamed", new Uint8Array(a.content), a.contentType));
+    sentAt = message.date;
+    headers = await analyzeHeaders(message.headerLines, message.subject);
+    body = analyzeBody(message.text, message.html);
+    attachments = await Promise.all(
+      message.attachments.slice(0, MAX_ATTACHMENTS).map(async (a) => {
+        const analysis = analyzeFile(a.filename, a.content, a.contentType);
+        // Attackers wrap the real payload in a forwarded mail item; open it one
+        // level deep and analyze what it carries.
+        const inner = a.embeddedMessage ? await parseMessage(a.filename, a.content).catch(() => null) : null;
+        if (inner) {
+          analysis.reasons.unshift(`Embedded email message: "${inner.subject}"${inner.from ? ` from ${inner.from}` : ""}`);
+          analysis.children = inner.attachments.slice(0, MAX_ATTACHMENTS).map((c) => analyzeFile(c.filename, c.content, c.contentType, 1));
+          const innerBody = analyzeBody(inner.text, inner.html);
+          analysis.urls = [...new Set([...analysis.urls, ...innerBody.urls])];
+          analysis.reasons.push(...innerBody.reasons.map((r) => `Embedded message: ${r}`));
+          analysis.score += innerBody.score + analysis.children.reduce((sum, c) => sum + c.score, 0);
+          analysis.risk = riskFor(analysis.score);
+        }
+        return analysis;
+      }),
+    );
   } else {
     attachments = [analyzeFile(input.filename, input.bytes)];
   }
@@ -144,6 +173,9 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     const host = hostOf(u);
     return host && !whitelist.some((w) => registrableDomain(host) === w);
   });
+
+  const senderDomain = headers?.fromAddress?.split("@")[1];
+  const mxtoolbox = senderDomain && mxToolboxConfigured() ? await queryMxToolbox(senderDomain, headers?.dkimSelector) : null;
 
   const sandbox = input.detonate ? await Promise.all(candidateUrls.slice(0, MAX_DETONATIONS).map(detonateUrl)) : [];
 
@@ -156,7 +188,8 @@ export async function analyzeSubmission(input: AnalyzeInput) {
       reasons: attachments.flatMap((a) => a.reasons.map((r) => `${a.filename}: ${r}`)),
     },
     { component: "Sandbox behavior", points: sandbox.reduce((s, r) => s + r.score, 0), reasons: sandbox.flatMap((r) => r.reasons) },
-    intelComponent(headers, body),
+    await intelComponent(headers, body),
+    infrastructureComponent(mxtoolbox),
   ]);
 
   const blockRecommendations = [
@@ -176,6 +209,7 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     attachments,
     sandbox,
     detonationRequested: input.detonate,
+    mxtoolbox,
     verdict,
     blockRecommendations,
   };

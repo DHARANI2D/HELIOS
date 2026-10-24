@@ -304,7 +304,7 @@ export function techniquesFor(signals: ForensicSignals): string[] {
   return [...new Set((Object.keys(TECHNIQUE_FOR_SIGNAL) as Array<keyof ForensicSignals>).filter((k) => signals[k] === true).map((k) => TECHNIQUE_FOR_SIGNAL[k]!))].sort();
 }
 
-function riskFor(score: number): AttachmentAnalysis["risk"] {
+export function riskFor(score: number): AttachmentAnalysis["risk"] {
   if (score >= 70) return "Malicious";
   if (score >= 40) return "High Risk";
   if (score >= 15) return "Suspicious";

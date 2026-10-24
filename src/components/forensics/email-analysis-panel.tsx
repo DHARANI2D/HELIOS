@@ -2,6 +2,7 @@ import type { Case } from "@prisma/client";
 
 import type { ForensicsMetadata } from "@/lib/forensics/service";
 import type { AttachmentAnalysis } from "@/lib/forensics/files";
+import { MX_CHECKS } from "@/lib/forensics/mxtoolbox";
 import { formatBytes } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -94,6 +95,7 @@ export function EmailAnalysisPanel({ kase }: { kase: Case }) {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Message & sender</CardTitle>
+              <CardDescription>{email.format === "msg" ? "Outlook .msg — headers from the transport header block" : "RFC 822 message"}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 text-sm">
               <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
@@ -148,6 +150,38 @@ export function EmailAnalysisPanel({ kase }: { kase: Case }) {
             </CardContent>
           </Card>
         </div>
+      )}
+
+      {meta.mxtoolbox && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Sender domain diagnostics</CardTitle>
+            <CardDescription>MxToolbox checks for {headers?.fromAddress?.split("@")[1]}.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex flex-wrap gap-1.5">
+              {MX_CHECKS.map((check) => {
+                const r = meta.mxtoolbox![check];
+                return (
+                  <Badge key={check} variant={!r.checked ? "outline" : r.passed ? "success" : "destructive"}>
+                    {check.toUpperCase()} {!r.checked ? "not checked" : r.passed ? "pass" : "fail"}
+                  </Badge>
+                );
+              })}
+            </div>
+            <ul className="space-y-0.5 text-xs">
+              {MX_CHECKS.flatMap((check) =>
+                meta.mxtoolbox![check].details
+                  .filter((d) => d.status === "FAIL")
+                  .map((d, i) => (
+                    <li key={`${check}-${i}`}>
+                      <span className="font-medium">{check.toUpperCase()}</span> · {d.name}{d.info ? `: ${d.info}` : ""}
+                    </li>
+                  )),
+              )}
+            </ul>
+          </CardContent>
+        </Card>
       )}
 
       {body && (

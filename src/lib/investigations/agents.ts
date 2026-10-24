@@ -7,6 +7,7 @@ import type { EntityGraph } from "@/lib/investigations/graph";
 import {
   hhmmss,
   type Finding,
+  type PriorCase,
   type QaResult,
   type RcaResult,
   type TriageResult,
@@ -150,11 +151,15 @@ export async function triageAgent(title: string, details: string, evidence: stri
   );
 }
 
-export async function rcaAgent(triage: TriageResult, evidence: string, qaFeedback?: string[]): Promise<RcaResult> {
+export async function rcaAgent(triage: TriageResult, evidence: string, qaFeedback?: string[], prior: PriorCase[] = []): Promise<RcaResult> {
   return structured(
     RcaSchema,
     `${ANALYST_CONTEXT}\nRole: lead incident responder producing a root cause analysis. Connect the process graph and events chronologically to explain the attack path from entry point to impact. Timeline entries must be formatted "HH:MM:SS - description" using UTC times copied exactly from the events, and should cite PIDs, process names, and destinations. confidence_score is 0-1. Map each ATT&CK technique you assert to the evidence supporting it, using technique IDs such as T1059.001.`,
     `<triage>\n${JSON.stringify(triage, null, 2)}\n</triage>\n\n${evidence}${
+      prior.length
+        ? `\n\n<related_cases note="Earlier HELIOS cases that share hosts, accounts, or indicators with this one. Use them as context (recurrence, campaign links); they are not evidence for this incident's timeline.">\n${JSON.stringify(prior, null, 2)}\n</related_cases>`
+        : ""
+    }${
       qaFeedback?.length ? `\n\n<qa_feedback>\nThe previous RCA failed validation. Correct these problems:\n${qaFeedback.map((i) => `- ${i}`).join("\n")}\n</qa_feedback>` : ""
     }`,
     "high",
