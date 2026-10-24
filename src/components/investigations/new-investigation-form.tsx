@@ -57,8 +57,13 @@ export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Ar
         <Label htmlFor="inv-files">Telemetry files</Label>
         <Input id="inv-files" name="files" type="file" multiple accept=".evtx,.xlsx,.json,.jsonl,.ndjson,.csv,.tsv,.xml,.log,.txt,.zip" />
         <p className="text-xs text-muted-foreground">
-          Windows event logs (.evtx straight from Event Viewer, or exported XML/JSON — Security, System, PowerShell, Sysmon), CrowdStrike, Wazuh, Google SecOps UDM, search exports as CSV or Excel (.xlsx), generic JSON/JSONL, or plain logs. ZIPs are expanded. Up to 25 MB per upload.
+          Windows event logs (.evtx straight from Event Viewer, or exported XML/JSON — Security, System, PowerShell, Sysmon), CrowdStrike, Wazuh, Google SecOps UDM, search exports as CSV or Excel (.xlsx), generic JSON/JSONL, or plain logs. ZIPs are expanded, password-protected ones too. Up to 25 MB per upload.
         </p>
+      </div>
+      <div className="grid gap-1.5 sm:max-w-sm">
+        <Label htmlFor="inv-archive-password">Archive password (optional)</Label>
+        <Input id="inv-archive-password" name="archivePassword" type="password" autoComplete="off" aria-describedby="inv-archive-password-hint" />
+        <p id="inv-archive-password-hint" className="text-xs text-muted-foreground">For a password-protected ZIP (ZipCrypto or AES). Used to open it, never stored.</p>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="inv-logs">…or paste logs</Label>

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { unzipSync } from "fflate";
 
 import { extractUrls } from "@/lib/forensics/urls";
+import { extractZip } from "@/lib/archive/zip";
 
 // Port of desas's attachments.py + forensics.py + archives.py + pe_analyzer.py
 // without the Python native stack (olefile, oletools, pefile, pdfminer):
@@ -25,6 +26,8 @@ export interface ForensicSignals {
   xlmMacro: boolean;
   highEntropy: boolean;
   executable: boolean;
+  // Password-protected archive: gateways can't scan inside it.
+  encryptedArchive: boolean;
   suspiciousCalls: string[];
 }
 
@@ -52,6 +55,8 @@ export interface AttachmentAnalysis {
   urls: string[];
   pe?: PeInfo;
   archiveEntries?: Array<{ name: string; size: number; encrypted: boolean }>;
+  // Whether a password opened the encrypted members (never the password).
+  archiveUnlocked?: boolean;
   children?: AttachmentAnalysis[];
 }
 
@@ -288,6 +293,7 @@ const TECHNIQUE_FOR_SIGNAL: Partial<Record<keyof ForensicSignals, string>> = {
   oleAnomaly: "T1204.002",
   xlmMacro: "T1059",
   executable: "T1204.002",
+  encryptedArchive: "T1027.013",
 };
 
 // Techniques the forensics module can emit (attachment signals plus the
@@ -311,13 +317,20 @@ export function riskFor(score: number): AttachmentAnalysis["risk"] {
   return "Clean";
 }
 
-export function analyzeFile(filename: string, data: Uint8Array, contentType?: string, depth = 0): AttachmentAnalysis {
+export interface FileOptions {
+  // Tried on encrypted archives: the analyst's passwords first, then any
+  // quoted in the message that carried the file.
+  passwords?: string[];
+  quotedPasswords?: string[];
+}
+
+export function analyzeFile(filename: string, data: Uint8Array, contentType?: string, depth = 0, opts: FileOptions = {}): AttachmentAnalysis {
   const reasons: string[] = [];
   let score = 0;
   const signals: ForensicSignals = {
     hasMacros: false, autoExec: false, obfuscation: false, envFingerprinting: false, stagingLogic: false,
     hasJs: false, hasLaunch: false, embeddedFiles: false, doubleExtension: false, polyglot: false,
-    appendedData: false, oleAnomaly: false, xlmMacro: false, highEntropy: false, executable: false, suspiciousCalls: [],
+    appendedData: false, oleAnomaly: false, xlmMacro: false, highEntropy: false, executable: false, encryptedArchive: false, suspiciousCalls: [],
   };
   const lowerName = filename.toLowerCase();
   const extension = ext(lowerName);
@@ -486,11 +499,26 @@ export function analyzeFile(filename: string, data: Uint8Array, contentType?: st
         }
         if (e.encrypted) {
           score += 15;
+          signals.encryptedArchive = true;
           reasons.push(`Password-protected archive member (evades scanning): ${e.name}`);
         }
       }
       if (depth === 0) {
-        const members = readZipMembers(data, (n) => !n.endsWith("/"));
+        let members: Record<string, Uint8Array>;
+        if (signals.encryptedArchive) {
+          const opened = extractZip(data, { passwords: [...(opts.passwords ?? []), ...(opts.quotedPasswords ?? [])], maxMemberBytes: 50 * 1024 * 1024 });
+          members = opened.files;
+          if (opened.passwordUsed && opts.quotedPasswords?.includes(opened.passwordUsed) && !opts.passwords?.includes(opened.passwordUsed)) {
+            score += 20;
+            reasons.push("Opened with a password quoted in the message — the usual way to slip a payload past gateway scanning");
+          } else if (opened.passwordUsed) {
+            reasons.push("Opened with the password supplied for analysis");
+          }
+          if (opened.locked.length) reasons.push(`${opened.locked.length} encrypted member(s) not opened — supply the archive password to analyze them`);
+          result.archiveUnlocked = !!opened.passwordUsed;
+        } else {
+          members = readZipMembers(data, (n) => !n.endsWith("/"));
+        }
         result.children = Object.entries(members).slice(0, 25).map(([name, bytes]) => analyzeFile(name, bytes, undefined, depth + 1));
         for (const child of result.children) {
           if (child.score > 0) {

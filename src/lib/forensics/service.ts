@@ -15,6 +15,7 @@ import { configuredProviders } from "@/lib/threat-intel/providers";
 import { indicatorReasons, lookupIndicator } from "@/lib/threat-intel/service";
 import { MX_CHECKS, mxToolboxConfigured, queryMxToolbox, type MxDiagnostics } from "@/lib/forensics/mxtoolbox";
 import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
+import { passwordsInText } from "@/lib/archive/zip";
 import { getSetting } from "@/lib/settings";
 
 // Orchestrates desas's analysis pipeline (eel_main.analyze_email): parse →
@@ -123,6 +124,8 @@ export interface AnalyzeInput {
   detonate: boolean;
   actorId?: string;
   tenantId?: string | null;
+  // For encrypted archives; tried, never stored.
+  archivePasswords?: string[];
 }
 
 export async function analyzeSubmission(input: AnalyzeInput) {
@@ -151,9 +154,10 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     sentAt = message.date;
     headers = await analyzeHeaders(message.headerLines, message.subject);
     body = analyzeBody(message.text, message.html, whitelist);
+    const fileOpts = { passwords: input.archivePasswords, quotedPasswords: passwordsInText(`${message.text}\n${(message.html ?? "").replace(/<[^>]+>/g, " ")}`) };
     attachments = await Promise.all(
       message.attachments.slice(0, MAX_ATTACHMENTS).map(async (a) => {
-        const analysis = analyzeFile(a.filename, a.content, a.contentType);
+        const analysis = analyzeFile(a.filename, a.content, a.contentType, 0, fileOpts);
         // Attackers wrap the real payload in a forwarded mail item; open it one
         // level deep and analyze what it carries.
         const inner = a.embeddedMessage ? await parseMessage(a.filename, a.content).catch(() => null) : null;
@@ -170,7 +174,7 @@ export async function analyzeSubmission(input: AnalyzeInput) {
       }),
     );
   } else {
-    attachments = [analyzeFile(input.filename, input.bytes)];
+    attachments = [analyzeFile(input.filename, input.bytes, undefined, 0, { passwords: input.archivePasswords })];
   }
 
   const allFiles = flattenAttachments(attachments);

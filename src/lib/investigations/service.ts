@@ -10,6 +10,7 @@ import { extractIndicators, isPrivateIp } from "@/lib/threat-intel/indicators";
 import { parseEvtxEvents, parseRecords, parseTelemetry, type ParseResult, type UesEvent } from "@/lib/investigations/normalize";
 import { isEvtx, parseEvtx } from "@/lib/investigations/evtx";
 import { isXlsx, readXlsx } from "@/lib/investigations/xlsx";
+import { extractZip, readZipDirectory } from "@/lib/archive/zip";
 import { buildEntityGraph, type EntityGraph } from "@/lib/investigations/graph";
 import {
   describeEvent,
@@ -107,6 +108,16 @@ function unzipBounded(bytes: Uint8Array, name: string, skipped: string[]) {
   });
 }
 
+// Password-protected archives (ZipCrypto or AES) open with the analyst's
+// password; members it doesn't open are reported, not dropped silently.
+function openZip(bytes: Uint8Array, name: string, skipped: string[], passwords: string[]): Unzipped {
+  if (!readZipDirectory(bytes).some((m) => m.encrypted)) return unzipBounded(bytes, name, skipped);
+  const r = extractZip(bytes, { passwords, maxMemberBytes: MAX_MEMBER_BYTES });
+  for (const l of r.locked) skipped.push(`${name}/${l.name} (${l.reason === "no-password" ? "password-protected — enter the archive password" : "wrong archive password"})`);
+  for (const s of r.skipped) skipped.push(`${name}/${s}`);
+  return r.files as Unzipped; // same bytes; fflate's type pins the buffer generic
+}
+
 // Binary formats parsed directly: Windows event logs and Excel workbooks.
 function parseBinary(name: string, bytes: Uint8Array, entries: Unzipped | null, skipped: string[]): ParsedSource[] | null {
   if (isEvtx(bytes)) {
@@ -133,10 +144,12 @@ function parseBinary(name: string, bytes: Uint8Array, entries: Unzipped | null, 
 }
 
 // asip's IntakeGateway recursively extracted ZIP/7z (prompting for archive
-// passwords). Here: ZIPs are expanded one level; EVTX and XLSX are parsed
-// from their binary form, anywhere; encrypted or unknown binary members are
-// reported back rather than silently skipped.
-export function expandIntake(files: IntakeFile[]): { texts: Array<{ name: string; text: string }>; parsed: ParsedSource[]; skipped: string[] } {
+// passwords). Here: ZIPs are expanded one level, password-protected ones
+// with the passwords given; EVTX and XLSX are parsed from their binary form,
+// anywhere; locked or unknown binary members are reported back rather than
+// silently skipped.
+export function expandIntake(files: IntakeFile[], options: { passwords?: string[] } = {}): { texts: Array<{ name: string; text: string }>; parsed: ParsedSource[]; skipped: string[] } {
+  const passwords = options.passwords ?? [];
   const texts: Array<{ name: string; text: string }> = [];
   const parsed: ParsedSource[] = [];
   const skipped: string[] = [];
@@ -146,9 +159,9 @@ export function expandIntake(files: IntakeFile[]): { texts: Array<{ name: string
     let entries: Unzipped | null = null;
     if (zipped) {
       try {
-        entries = unzipBounded(bytes, name, skipped);
+        entries = openZip(bytes, name, skipped, passwords);
       } catch (err) {
-        skipped.push(`${name} (cannot extract: ${err instanceof Error ? err.message : "invalid archive"} — encrypted archives aren't supported)`);
+        skipped.push(`${name} (cannot extract: ${err instanceof Error ? err.message : "invalid archive"})`);
         return;
       }
     }
@@ -161,7 +174,7 @@ export function expandIntake(files: IntakeFile[]): { texts: Array<{ name: string
       for (const [member, data] of Object.entries(entries)) {
         if (member.endsWith("/")) continue;
         const memberName = `${name}/${member}`;
-        const nested = data[0] === 0x50 && data[1] === 0x4b ? (() => { try { return unzipBounded(data, memberName, skipped); } catch { return null; } })() : null;
+        const nested = data[0] === 0x50 && data[1] === 0x4b ? (() => { try { return openZip(data, memberName, skipped, passwords); } catch { return null; } })() : null;
         const inner = parseBinary(memberName, data, nested, skipped);
         if (inner) parsed.push(...inner);
         else if (looksBinary(data)) skipped.push(`${memberName} (unsupported binary format)`);
@@ -241,6 +254,8 @@ export interface StartInvestigationInput {
   pastedLogs?: string;
   actorId?: string;
   tenantId?: string | null;
+  // For password-protected ZIPs; tried, never stored.
+  archivePasswords?: string[];
 }
 
 async function pipelineEngine() {
@@ -250,7 +265,7 @@ async function pipelineEngine() {
 }
 
 export async function startInvestigation(input: StartInvestigationInput) {
-  const { texts, parsed: binary, skipped } = expandIntake(input.files);
+  const { texts, parsed: binary, skipped } = expandIntake(input.files, { passwords: input.archivePasswords });
   if (input.pastedLogs?.trim()) texts.push({ name: "pasted-logs", text: input.pastedLogs });
 
   const parsed = [...binary, ...texts.map((t) => ({ name: t.name, ...parseTelemetry(t.text, t.name) }))];

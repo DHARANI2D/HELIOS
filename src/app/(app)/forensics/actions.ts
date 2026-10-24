@@ -15,6 +15,7 @@ export async function analyzeSubmissionAction(formData: FormData) {
   const detonate = formData.get("detonate") === "on";
   const file = formData.get("file");
   const raw = String(formData.get("raw") ?? "");
+  const archivePassword = String(formData.get("archivePassword") ?? "").slice(0, 200);
 
   let filename: string;
   let bytes: Uint8Array;
@@ -30,7 +31,7 @@ export async function analyzeSubmissionAction(formData: FormData) {
   }
 
   const tenantId = await resolveTenantInput(user, formData.get("tenantId"));
-  const result = await analyzeSubmission({ filename, bytes, detonate, actorId: user.id, tenantId });
+  const result = await analyzeSubmission({ filename, bytes, detonate, actorId: user.id, tenantId, archivePasswords: archivePassword ? [archivePassword] : [] });
   revalidatePath("/forensics");
   revalidatePath("/");
   return result;

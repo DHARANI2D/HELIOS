@@ -103,6 +103,7 @@ export const TECHNIQUES: TechniqueRef[] = [
   // Defense Evasion
   { id: "T1027", name: "Obfuscated Files or Information", tactic: "TA0005" },
   { id: "T1027.001", name: "Binary Padding", tactic: "TA0005" },
+  { id: "T1027.013", name: "Encrypted/Encoded File", tactic: "TA0005" },
   { id: "T1036", name: "Masquerading", tactic: "TA0005" },
   { id: "T1036.007", name: "Double File Extension", tactic: "TA0005" },
   { id: "T1070", name: "Indicator Removal", tactic: "TA0005" },

@@ -22,17 +22,17 @@ export interface RelatedCase {
 }
 
 // Accounts/hosts too generic to link cases (every Windows box has SYSTEM).
-const ENTITY_STOPLIST = new Set([
+export const ENTITY_STOPLIST = new Set([
   "", "-", "n/a", "unknown", "unknown_host", "system", "nt authority\\system", "local service", "network service",
   "nt authority\\local service", "nt authority\\network service", "root", "www-data", "localhost",
 ]);
 // An indicator seen in this many cases is infrastructure noise, not a lead.
-const MAX_INDICATOR_FANOUT = 50;
+export const MAX_INDICATOR_FANOUT = 50;
 const WEIGHT = { maliciousIndicator: 3, indicator: 2, entity: 2, agent: 3, technique: 1 };
 const MAX_TECHNIQUE_POINTS = 3;
 const MIN_SCORE = 3;
 
-const usable = (v: string | null | undefined): v is string => !!v && !ENTITY_STOPLIST.has(v.trim().toLowerCase());
+export const usable = (v: string | null | undefined): v is string => !!v && !ENTITY_STOPLIST.has(v.trim().toLowerCase());
 
 export interface RelatedOptions {
   limit?: number;

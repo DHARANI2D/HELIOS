@@ -27,6 +27,7 @@ export async function startInvestigationAction(formData: FormData) {
     alertDetails: String(formData.get("alertDetails") ?? "").trim(),
     pastedLogs: String(formData.get("pastedLogs") ?? ""),
     files,
+    archivePasswords: [String(formData.get("archivePassword") ?? "").slice(0, 200)].filter(Boolean),
     actorId: user.id,
     tenantId: await resolveTenantInput(user, formData.get("tenantId")),
   });

@@ -52,6 +52,13 @@ export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id:
         <Textarea id="fx-raw" name="raw" className="min-h-28 font-mono text-xs" aria-describedby="fx-raw-hint" />
         <p id="fx-raw-hint" className="text-xs text-muted-foreground">The full message source, headers included (in Outlook: File → Properties; in Gmail: Show original).</p>
       </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="fx-archive-password">Archive password (optional)</Label>
+        <Input id="fx-archive-password" name="archivePassword" type="password" autoComplete="off" aria-describedby="fx-archive-password-hint" />
+        <p id="fx-archive-password-hint" className="text-xs text-muted-foreground">
+          Opens password-protected ZIPs (ZipCrypto or AES). Passwords quoted in the message itself are tried automatically. The password isn&apos;t stored.
+        </p>
+      </div>
       <label className="flex items-start gap-2 text-sm">
         <Switch name="detonate" checked={detonate} onCheckedChange={setDetonate} className="mt-0.5" />
         <span>
