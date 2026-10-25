@@ -6,11 +6,12 @@ import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, Check, CircleCheck, CircleDashed, Cloud, HardDrive, Layers, Loader2, Printer, Save, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { saveQuoteAction } from "@/app/(app)/pricing/actions";
+import { adviseStackAction, saveQuoteAction } from "@/app/(app)/pricing/actions";
 import { CATEGORIES, UNIT_LABEL, toolLabel } from "@/lib/integrations/catalog";
 import { CONTROLS } from "@/lib/endpoints/controls";
 import { PLAN_FEATURES, PLAN_FEATURE_LABEL, formatMinutes, hasFeature } from "@/lib/plans";
 import { calculateQuote, comparePlans, formatMoney, toolMonthlyPrice, type PricingContext, type QuoteConfig, type QuoteResult } from "@/lib/pricing/calculator";
+import { EMPTY_MIX, type EndpointMix } from "@/lib/pricing/endpoint-mix";
 import { useChartTokens } from "@/lib/chart-theme";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,9 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TenantSelect } from "@/components/shared/tenant-select";
+import { EndpointMixFields } from "@/components/pricing/endpoint-mix-fields";
+import { StackAdvisor } from "@/components/pricing/stack-advisor";
+import { UpgradeReview } from "@/components/pricing/upgrade-review";
 
 const KIND_LABEL = { service: "Managed service", license: "Tool licences", ai: "AI first response", services: "Professional services" } as const;
 const KINDS = ["service", "license", "ai", "services"] as const;
@@ -32,7 +36,10 @@ export interface ClientSizing {
   endpoints: number; // licensed, or inventory when larger
   servers: number; // inventory endpoints whose OS is a server OS
   users: number;
+  mix: EndpointMix | null; // from the endpoint inventory
 }
+
+const TABS = ["build", "upgrades", "advisor", "compare", "breakdown"] as const;
 
 interface Props {
   ctx: PricingContext;
@@ -43,6 +50,10 @@ interface Props {
   quoteId?: string;
   quoteReference?: string;
   quoteTenantId?: string | null;
+  // Opens on this tab (e.g. "upgrades" from a client's page).
+  initialTab?: string;
+  // What the upgrade review compares against, in words.
+  baselineLabel?: string;
 }
 
 function NumberField({ label, value, onChange, min = 0, step = 1, suffix }: { label: string; value: number; onChange: (n: number) => void; min?: number; step?: number; suffix?: string }) {
@@ -105,7 +116,7 @@ function CompositionBar({ result, money }: { result: QuoteResult; money: (usd: n
 
 const FIX_HINT = { plan: "Service plans", "price-book": "Price book", tool: "Tool catalog", "ai-usage": "AI usage below", model: "Model prices", currency: "Currencies" } as const;
 
-export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, quoteId, quoteReference, quoteTenantId }: Props) {
+export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, quoteId, quoteReference, quoteTenantId, initialTab, baselineLabel }: Props) {
   const router = useRouter();
   const [cfg, setCfg] = React.useState<QuoteConfig>(initial);
   const [tenantId, setTenantId] = React.useState(quoteTenantId ?? "none");
@@ -124,7 +135,7 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
     setTenantId(id);
     const t = tenants.find((x) => x.id === id);
     if (!t) return;
-    setCfg((c) => ({ ...c, clientName: c.clientName || t.name, profile: { ...c.profile, workstations: Math.max(t.endpoints - t.servers, 0), servers: t.servers, users: t.users } }));
+    setCfg((c) => ({ ...c, clientName: c.clientName || t.name, profile: { ...c.profile, workstations: Math.max(t.endpoints - t.servers, 0), servers: t.servers, users: t.users, mix: t.mix } }));
   };
 
   const save = useMutation({
@@ -136,7 +147,7 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
   });
 
-  const endpoints = cfg.profile.workstations + cfg.profile.servers;
+  const endpoints = result.endpoints;
   const pricedCategories = CATEGORIES.filter((c) => c.priced);
 
   const summary = (
@@ -251,9 +262,11 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
   );
 
   return (
-    <Tabs defaultValue="build" className="gap-4">
-      <TabsList className="no-print">
+    <Tabs defaultValue={TABS.find((t) => t === initialTab) ?? "build"} className="gap-4">
+      <TabsList className="no-print flex-wrap">
         <TabsTrigger value="build">Build</TabsTrigger>
+        <TabsTrigger value="upgrades">Upgrades</TabsTrigger>
+        <TabsTrigger value="advisor">Advisor</TabsTrigger>
         <TabsTrigger value="compare">Compare</TabsTrigger>
         <TabsTrigger value="breakdown">Line items</TabsTrigger>
       </TabsList>
@@ -284,9 +297,32 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
                     </div>
                   )}
                 </div>
+                {cfg.profile.mix ? (
+                  <div className="flex flex-col gap-2 rounded-lg border bg-muted/20 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium">Endpoints by operating system</p>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => set("profile", { mix: null })}>Enter totals instead</Button>
+                    </div>
+                    <EndpointMixFields mix={cfg.profile.mix} onChange={(mix) => set("profile", { mix })} />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                    <span>Break the endpoints down by OS so tool suggestions check each product runs on every machine.</span>
+                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => set("profile", { mix: { ...EMPTY_MIX } })}>Count by OS</Button>
+                  </div>
+                )}
                 <div className="grid gap-3 sm:grid-cols-4">
-                  <NumberField label="Workstations & laptops" value={cfg.profile.workstations} onChange={(n) => set("profile", { workstations: n })} />
-                  <NumberField label="Servers" value={cfg.profile.servers} onChange={(n) => set("profile", { servers: n })} />
+                  {cfg.profile.mix ? (
+                    <>
+                      <div className="grid gap-1.5"><Label className="text-xs">Workstations & laptops</Label><p className="flex h-9 items-center text-sm tabular text-muted-foreground">{result.endpoints - (cfg.profile.mix.windowsServer + cfg.profile.mix.linuxServer)} (from the mix)</p></div>
+                      <div className="grid gap-1.5"><Label className="text-xs">Servers</Label><p className="flex h-9 items-center text-sm tabular text-muted-foreground">{cfg.profile.mix.windowsServer + cfg.profile.mix.linuxServer} (from the mix)</p></div>
+                    </>
+                  ) : (
+                    <>
+                      <NumberField label="Workstations & laptops" value={cfg.profile.workstations} onChange={(n) => set("profile", { workstations: n })} />
+                      <NumberField label="Servers" value={cfg.profile.servers} onChange={(n) => set("profile", { servers: n })} />
+                    </>
+                  )}
                   <NumberField label="Users / mailboxes" value={cfg.profile.users} onChange={(n) => set("profile", { users: n })} />
                   <NumberField label="Log volume" value={cfg.profile.logGbPerDay} onChange={(n) => set("profile", { logGbPerDay: n })} step={0.5} suffix="GB/day" />
                 </div>
@@ -359,6 +395,15 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
                         })}
                       </NativeSelect>
                       <p className="text-right text-sm tabular">{price ? (price.monthly == null ? <span className="text-xs text-warning-ink">price needed</span> : money(price.monthly, 0)) : "—"}</p>
+                      {choice === "byo" && (
+                        <div className="flex items-center gap-2 text-xs sm:col-start-2 sm:col-end-4">
+                          <span className="shrink-0 text-muted-foreground">Which tool?</span>
+                          <NativeSelect value={cfg.existing[c.key] ?? ""} onChange={(e) => setCfg((x) => ({ ...x, existing: e.target.value ? { ...x.existing, [c.key]: e.target.value } : Object.fromEntries(Object.entries(x.existing).filter(([k]) => k !== c.key)) }))} aria-label={`${c.label}: the client's tool`} className="h-8 text-xs">
+                            <option value="">Not named</option>
+                            {ctx.tools.filter((t) => t.category === c.key).map((t) => <option key={t.key} value={t.key}>{toolLabel(t)}</option>)}
+                          </NativeSelect>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -490,6 +535,35 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
                 <p className="text-[11px] text-muted-foreground sm:col-span-4 sm:self-end">The rate comes from Pricing setup → Currencies; adjust it here for this quote if needed. Term discounts apply to your services, not resold licences.</p>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="upgrades">
+            <UpgradeReview
+              ctx={ctx}
+              cfg={cfg}
+              money={money}
+              audience="staff"
+              baselineLabel={baselineLabel ?? (quoteReference ? `quote ${quoteReference}` : "the stack in Build")}
+              onApply={(config) => {
+                setCfg(config);
+                toast.success("Changes applied to the quote");
+              }}
+              onSetExisting={(category, key) => setCfg((x) => ({ ...x, existing: { ...x.existing, [category]: key } }))}
+            />
+          </TabsContent>
+
+          <TabsContent value="advisor">
+            <StackAdvisor
+              ctx={ctx}
+              cfg={cfg}
+              money={money}
+              audience="staff"
+              askAi={adviseStackAction}
+              onApply={(config) => {
+                setCfg(config);
+                toast.success("Suggested stack applied");
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-4">

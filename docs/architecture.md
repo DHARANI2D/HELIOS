@@ -52,6 +52,18 @@ Personal access tokens (`hpat_…`, hash stored, shown once) act as their owner:
 
 `app/manifest.ts` and the generated icons make HELIOS installable as a standalone desktop or mobile app (shortcuts to Cases, Investigations, Forensics and Reports). That replaces desas's Electron shell. The icons and manifest skip the auth redirect in `proxy.ts`.
 
+### Upgrade review and stack advisor (`lib/pricing`)
+
+- **`endpoint-mix.ts`:** endpoints by OS (Windows, macOS, Linux, servers of each, iOS, Android, unknown) and `platformFit`. The fit checks which of a client's machines a tool runs on; each category has a scope (EDR covers computers and servers, MDM covers computers and mobiles). When a quote has a mix, its workstation and server counts are the mix's totals, and per-device MDM licences count phones.
+- **`upgrades.ts`:** compares each layer's tool (the quote's, or the client's own, recorded in `existing`) with every alternative. It reports controls gained or lost, separating losses that another layer still provides, plus the change in platform fit, alerts and response actions, and the price difference. The result is classified as upgrade, cheaper, trade-off, equivalent or downgrade. `priceChanges` prices a set of changes on the whole quote: onboarding, discounts, essential gaps closed or opened.
+- **`advisor.ts`:** the rules. Layers are decided broadest first, so an EDR that includes antivirus makes the antivirus layer unnecessary. Each tool scores the controls it adds that the goal wants, weighed by platform reach. The goal then picks: best value is the cheapest tool within 75% of the best; lowest cost covers the essentials at the lowest price; strongest protection takes the highest score. A current tool that is nearly as good is kept. Every pick carries plain-language reasons.
+- **`advisor-agent.ts`:** the AI layer (agent `advisor`, configured on the AI Agents page). The model receives the candidates the rules priced and picks one per layer. Picks outside the candidate list are discarded for the rules' pick, prices are always recalculated, and runs are logged without a case. With no model, or once the website's daily budget is spent, the rules answer.
+- **`client-stack.ts`:** a client's current setup as a quote config, for `/pricing?tenant=<id>`. It uses the client's accepted quote if there is one, else their plan, sizes from the inventory (licensed endpoints beyond it count as unknown OS), and records onboarded tools as the client's own.
+
+### Public website (`app/(site)`, `lib/site.ts`)
+
+`proxy.ts` rewrites `/` to `/home` for visitors who aren't signed in; `/home` and `/estimate` are public. The pages read the company profile, the `site.public` setting, the catalog, plans and detection coverage. `lib/pricing/public.ts` strips costs, the resale ratio and client counts from the pricing context. It also resets the commercial terms in anything a visitor submits (discount, exchange rate, usage overrides, tax). Quote requests become `quotes` rows with `source = "website"` and the contact details. They notify every staff role with `pricing.view` and are audited.
+
 ### SLA (`lib/plans.ts`)
 
 A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Internal cases and clients without a plan have no SLA. An escalation before acknowledgement tightens the deadline.

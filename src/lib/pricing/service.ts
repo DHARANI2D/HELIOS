@@ -37,7 +37,8 @@ export async function aiUsageBaseline(now = new Date()): Promise<AiBaseline> {
     db.tenant.aggregate({ where: { status: "ACTIVE" }, _sum: { endpointsLicensed: true } }),
     db.endpoint.count({ where: { tenantId: { not: null } } }),
     db.aiRun.findMany({
-      where: { createdAt: { gte: since }, status: "succeeded", model: { not: null }, inputTokens: { gt: 0 } },
+      // Case agents only: stack-advisor runs aren't driven by alerts.
+      where: { createdAt: { gte: since }, status: "succeeded", model: { not: null }, inputTokens: { gt: 0 }, caseId: { not: null } },
       select: { caseId: true, inputTokens: true, outputTokens: true },
     }),
   ]);

@@ -28,6 +28,24 @@ export const thresholdsSchema = z
   .object({ malicious: z.number().int().min(2).max(500), suspicious: z.number().int().min(1).max(499) })
   .refine((t) => t.suspicious < t.malicious, { message: "The suspicious threshold must be below the malicious one" });
 
+// The public website: a home page about the service and a price estimator
+// for prospective clients, served at / to visitors who aren't signed in.
+export const siteSchema = z.object({
+  enabled: z.boolean(),
+  // Show the estimator and plan prices; off = the home page only.
+  estimator: z.boolean(),
+  // Let visitors ask the stack advisor; off = rules-only suggestions.
+  aiAdvisor: z.boolean(),
+  // AI suggestions per day from the website, across all visitors.
+  aiDailyLimit: z.number().int().min(0).max(5000),
+  // Visitors can send their estimate as a quote request.
+  leads: z.boolean(),
+  headline: text(140),
+  intro: text(600),
+});
+export type SiteSettings = z.infer<typeof siteSchema>;
+export const SITE_DEFAULTS: SiteSettings = { enabled: true, estimator: true, aiAdvisor: true, aiDailyLimit: 100, leads: true, headline: "", intro: "" };
+
 // A credential sealed with lib/secrets; only the last 4 characters are kept
 // in clear, to show which key is stored.
 const sealedSecret = z.object({ sealed: z.string(), last4: z.string() }).nullable().default(null);
@@ -41,6 +59,7 @@ const SETTINGS = {
   // A test environment holds test data only; every page says so.
   "platform.environment": z.enum(["production", "test"]).default("production"),
   "company.profile": companySchema.default(NO_COMPANY),
+  "site.public": siteSchema.default(SITE_DEFAULTS),
   // SIEM detectors switched off by a detection engineer (by name).
   "detection.disabledDetectors": z.array(z.string().max(80)).max(50).default([]),
   // Domains whose links are never analyzed or detonated, on top of the

@@ -3,10 +3,11 @@ import type { SecurityDomain, UserRole } from "@prisma/client";
 import { db } from "@/lib/db";
 
 // In-app notifications. Every collaboration event (mention, assignment,
-// escalation, share, AI triage finished, approval needed, SLA breach) fans
+// escalation, share, AI triage finished, approval needed, SLA breach, a
+// quote request from the website) fans
 // out through notify(); the bell in the top bar polls for them.
 
-export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla";
+export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla" | "lead";
 
 export interface NotifyInput {
   kind: NotificationKind;

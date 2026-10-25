@@ -4,6 +4,7 @@ import { hasFeature, type ServicePlan } from "@/lib/plans";
 import { CATEGORIES, toolLabel, toolUnitPrice, type ToolDefinition } from "@/lib/integrations/catalog";
 import { CONTROLS, type ProtectionControl } from "@/lib/endpoints/controls";
 import { PRICE_ITEM_INDEX, type PriceBook } from "@/lib/pricing/items";
+import { endpointMixSchema, mixMobile, mixServers, mixWorkstations } from "@/lib/pricing/endpoint-mix";
 
 // Build & Price: turns a client profile + chosen stack into a priced quote.
 // Pure and deterministic (no I/O): every price comes in through the
@@ -19,10 +20,16 @@ export const quoteConfigSchema = z.object({
     servers: z.number().int().min(0).max(100_000).default(0),
     users: z.number().int().min(0).max(1_000_000).default(0),
     logGbPerDay: z.number().min(0).max(100_000).default(0),
+    // Endpoints by OS. When given, workstations and servers are its totals,
+    // and tool suggestions check each product runs on these machines.
+    mix: endpointMixSchema.nullable().default(null),
   }),
   plan: z.string().max(64).default(""), // service plan key
   // Per category: a tool key, "byo" (client already licenses one), or "none".
   tools: z.record(z.string(), z.string()).default({}),
+  // Per category: the catalog tool the client runs today, if known. Names a
+  // "byo" line, counts toward coverage, and is the baseline for upgrades.
+  existing: z.record(z.string(), z.string()).default({}),
   ai: z.object({
     mode: z.enum(["none", "cloud", "local"]).default("none"),
     model: z.string().max(120).default(""),
@@ -50,6 +57,14 @@ export const quoteConfigSchema = z.object({
 });
 
 export type QuoteConfig = z.infer<typeof quoteConfigSchema>;
+
+// Parsed, with workstation and server counts taken from the endpoint mix
+// when there is one, so the two can't disagree.
+export function normalizeConfig(input: QuoteConfig): QuoteConfig {
+  const cfg = quoteConfigSchema.parse(input);
+  const mix = cfg.profile.mix;
+  return mix ? { ...cfg, profile: { ...cfg.profile, workstations: mixWorkstations(mix), servers: mixServers(mix) } } : cfg;
+}
 
 // AI usage measured from this platform's own history (src/lib/pricing/service.ts).
 export interface AiBaseline {
@@ -143,14 +158,19 @@ export interface QuoteResult {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function toolUnits(tool: ToolDefinition, cfg: QuoteConfig) {
-  const endpoints = cfg.profile.workstations + cfg.profile.servers;
+  const mix = cfg.profile.mix;
+  const servers = mix ? mixServers(mix) : cfg.profile.servers;
+  const endpoints = (mix ? mixWorkstations(mix) : cfg.profile.workstations) + servers;
   switch (tool.price.unit) {
-    case "endpoint":
-      return { qty: endpoints, label: `${endpoints} endpoints` };
+    case "endpoint": {
+      // Device management licenses phones and tablets too.
+      const mobile = tool.category === "mdm" && mix ? mixMobile(mix) : 0;
+      return mobile ? { qty: endpoints + mobile, label: `${endpoints + mobile} devices` } : { qty: endpoints, label: `${endpoints} endpoints` };
+    }
     case "user":
       return { qty: cfg.profile.users, label: `${cfg.profile.users} users` };
     case "server":
-      return { qty: cfg.profile.servers, label: `${cfg.profile.servers} servers` };
+      return { qty: servers, label: `${servers} servers` };
     case "gb":
       return { qty: Math.round(cfg.profile.logGbPerDay * 30), label: `${Math.round(cfg.profile.logGbPerDay * 30)} GB/month` };
     case "flat":
@@ -165,7 +185,7 @@ export function toolMonthlyPrice(tool: ToolDefinition, cfg: QuoteConfig) {
 }
 
 export function calculateQuote(input: QuoteConfig, ctx: PricingContext): QuoteResult {
-  const cfg = quoteConfigSchema.parse(input);
+  const cfg = normalizeConfig(input);
   const missing: MissingPrice[] = [];
   let costIncomplete = false;
   const need = (key: string) => {
@@ -225,6 +245,8 @@ export function calculateQuote(input: QuoteConfig, ctx: PricingContext): QuoteRe
 
   // --- tool licences, resold at your price; you buy at the resale ratio
   const selectedTools: ToolDefinition[] = [];
+  // The client's own tools that are named count toward coverage as well.
+  const ownTools: ToolDefinition[] = [];
   let toolsToOnboard = 0;
   let resold = false;
   for (const category of CATEGORIES.filter((c) => c.priced)) {
@@ -232,7 +254,9 @@ export function calculateQuote(input: QuoteConfig, ctx: PricingContext): QuoteRe
     if (!choice || choice === "none") continue;
     toolsToOnboard++;
     if (choice === "byo") {
-      lines.push({ key: `license.${category.key}`, kind: "license", label: `${category.label}: client's existing tool`, detail: "no licence resold", monthly: 0, oneTime: 0, costMonthly: 0, costOneTime: 0 });
+      const own = ctx.tools.find((t) => t.key === cfg.existing[category.key] && t.category === category.key);
+      if (own) ownTools.push(own);
+      lines.push({ key: `license.${category.key}`, kind: "license", label: `${category.label}: client's ${own ? toolLabel(own) : "existing tool"}`, detail: "no licence resold", monthly: 0, oneTime: 0, costMonthly: 0, costOneTime: 0 });
       continue;
     }
     const tool = ctx.tools.find((t) => t.key === choice);
@@ -364,7 +388,7 @@ export function calculateQuote(input: QuoteConfig, ctx: PricingContext): QuoteRe
 
   // --- protection coverage of the chosen stack
   const coverage = CONTROLS.map((c) => {
-    const by = selectedTools.filter((t) => t.controls.includes(c.key)).map(toolLabel);
+    const by = [...selectedTools.filter((t) => t.controls.includes(c.key)).map(toolLabel), ...ownTools.filter((t) => t.controls.includes(c.key)).map((t) => `${toolLabel(t)} (client's)`)];
     return { control: c.key, covered: by.length > 0, by, essential: c.essential };
   });
   const gaps = coverage.filter((c) => c.essential && !c.covered).map((c) => c.control);

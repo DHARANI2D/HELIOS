@@ -37,6 +37,11 @@ import * as meRoute from "@/app/api/v1/me/route";
 import * as casesRoute from "@/app/api/v1/cases/route";
 import * as caseRoute from "@/app/api/v1/cases/[id]/route";
 import * as commentsRoute from "@/app/api/v1/cases/[id]/comments/route";
+import { calculateQuote } from "@/lib/pricing/calculator";
+import { loadPricingContext } from "@/lib/pricing/service";
+import { clientStackConfig } from "@/lib/pricing/client-stack";
+import { createQuote } from "@/lib/pricing/quotes";
+import { reviewUpgrades } from "@/lib/pricing/upgrades";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -381,6 +386,46 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
 
     await revokeApiToken(asUser(analyst), writeRecord.id);
     expect((await meRoute.GET(call(writeToken, "/api/v1/me"))).status).toBe(401);
+  });
+
+  it("reviews a client's current setup and numbers quotes without collisions", async () => {
+    invalidateCatalog();
+    const plan = await db.servicePlan.create({ data: { key: "test-upgrades", name: "Test upgrades plan", coverage: "24x7", ackMinutes: {}, containMinutes: {}, features: {}, pricePerEndpoint: 9 } });
+    const tenant = await db.tenant.create({ data: { name: "Test · Upgrades", slug: "test-upgrades", planId: plan.id, endpointsLicensed: 10, usersLicensed: 12 } });
+    await db.integration.createMany({
+      data: [
+        { tenantId: tenant.id, vendor: "jamf_pro", category: "mdm", name: "Jamf" },
+        { tenantId: tenant.id, vendor: "entra_p1", category: "identity", name: "Entra" },
+      ],
+    });
+    await db.endpoint.createMany({
+      data: [
+        { tenantId: tenant.id, hostname: "up-ws-1", os: "Windows 11 Pro" },
+        { tenantId: tenant.id, hostname: "up-ws-2", os: "Windows 11 Pro" },
+        { tenantId: tenant.id, hostname: "up-mac-1", os: "macOS 15" },
+        { tenantId: tenant.id, hostname: "up-srv-1", os: "Windows Server 2022" },
+      ],
+    });
+    const ctx = await loadPricingContext();
+    const stack = await clientStackConfig(tenant.id, ctx);
+    expect(stack!.config.plan).toBe("test-upgrades");
+    expect(stack!.config.tools).toMatchObject({ mdm: "byo", identity: "byo" });
+    expect(stack!.config.existing).toMatchObject({ mdm: "jamf_pro", identity: "entra_p1" });
+    // 4 inventoried, 10 licensed: the other 6 are of unknown OS.
+    expect(stack!.config.profile.mix).toMatchObject({ windows: 2, macos: 1, windowsServer: 1, other: 6 });
+    expect(stack!.config.profile.users).toBe(12);
+    const mdm = reviewUpgrades(stack!.config, ctx).find((r) => r.category.key === "mdm")!;
+    expect(mdm.baseline?.key).toBe("jamf_pro");
+    expect(mdm.options.find((o) => o.tool.key === "intune_p1")!.fitGain).toBe(2);
+
+    const year = new Date().getUTCFullYear();
+    const totals = calculateQuote(stack!.config, ctx);
+    const data = { clientName: tenant.name, tenantId: tenant.id, config: JSON.parse(JSON.stringify(stack!.config)), totals: JSON.parse(JSON.stringify(totals)) };
+    const [a, b] = await Promise.all([createQuote(data), createQuote(data)]);
+    expect(new Set([a.reference, b.reference]).size).toBe(2);
+    await db.quote.delete({ where: { id: [a, b].sort((x, y) => x.reference.localeCompare(y.reference))[0].id } });
+    const c = await createQuote(data);
+    expect(c.reference).toBe(`Q-${year}-${String(Math.max(Number(a.reference.slice(-4)), Number(b.reference.slice(-4))) + 1).padStart(4, "0")}`);
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

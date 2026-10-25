@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Check, CircleCheck, Download, Pencil, X } from "lucide-react";
+import { ArrowLeft, Check, CircleCheck, Download, Inbox, Pencil, TrendingUp, X } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -9,6 +9,8 @@ import { formatMinutes } from "@/lib/plans";
 import { CONTROLS } from "@/lib/endpoints/controls";
 import { formatMoney, quoteConfigSchema, type QuoteResult } from "@/lib/pricing/calculator";
 import { formatDateTime } from "@/lib/format";
+import { describeMix } from "@/lib/pricing/endpoint-mix";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuoteStatusControl } from "@/components/pricing/quote-status";
@@ -37,17 +39,37 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
             <a href={`/pricing/quotes/${quote.id}/pdf`}><Download /> PDF</a>
           </Button>
           <Button variant="outline" size="sm" asChild>
+            <Link href={`/pricing?quote=${quote.id}&tab=upgrades`}><TrendingUp /> Review upgrades</Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
             <Link href={`/pricing?quote=${quote.id}`}><Pencil /> Edit</Link>
           </Button>
         </div>
       </div>
+
+      {quote.source === "website" && (
+        <Card className="no-print border-info/40">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base"><Inbox className="size-4" /> Website quote request <Badge variant="info">draft</Badge></CardTitle>
+            <CardDescription>A prospective client built this estimate on the public site. Review it, set any prices marked as needed, then mark it sent.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
+            <div><p className="text-xs text-muted-foreground">Contact</p><p className="font-medium">{quote.contactName ?? "—"}</p></div>
+            <div><p className="text-xs text-muted-foreground">Email</p>{quote.contactEmail ? <a className="font-medium hover:underline" href={`mailto:${quote.contactEmail}`}>{quote.contactEmail}</a> : "—"}</div>
+            <div><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium">{quote.contactPhone ?? "—"}</p></div>
+            {quote.notes && <p className="whitespace-pre-wrap text-muted-foreground sm:col-span-3">“{quote.notes}”</p>}
+            {r.missing?.length > 0 && <p className="text-xs text-warning-ink sm:col-span-3">Priced on request in the visitor&apos;s estimate: {r.missing.map((m) => m.label).join("; ")}.</p>}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="surface-glow">
         <CardHeader>
           <CardDescription className="font-mono">{quote.reference} · valid until {quote.validUntil ? formatDateTime(quote.validUntil).slice(0, 10) : "—"}</CardDescription>
           <CardTitle className="text-2xl">Managed security proposal for {quote.clientName}</CardTitle>
           <CardDescription>
-            {plan ? `${plan.name}${plan.tagline ? ` — ${plan.tagline}` : ""}. ` : ""}{r.endpoints.toLocaleString()} endpoints, {cfg.profile.users.toLocaleString()} users. Prepared by {quote.createdBy?.name ?? quote.createdBy?.email ?? "HELIOS"}.
+            {plan ? `${plan.name}${plan.tagline ? ` — ${plan.tagline}` : ""}. ` : ""}{r.endpoints.toLocaleString()} endpoints{cfg.profile.mix ? ` (${describeMix(cfg.profile.mix)})` : ""}, {cfg.profile.users.toLocaleString()} users.{" "}
+            {quote.source === "website" ? "Requested through the website estimator." : `Prepared by ${quote.createdBy?.name ?? quote.createdBy?.email ?? "HELIOS"}.`}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, Mail, Users } from "lucide-react";
+import { Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, Mail, MonitorSmartphone, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -7,7 +7,7 @@ import { getSetting } from "@/lib/settings";
 import { PLATFORM_SECRETS, platformSecretStatus, type PlatformSecret } from "@/lib/platform-secrets";
 import { domainWhitelist } from "@/lib/forensics/body";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CompanyForm, EnvironmentControl, ForensicsSettingsForm, SecretsPanel } from "@/components/settings/settings-forms";
+import { CompanyForm, EnvironmentControl, ForensicsSettingsForm, SecretsPanel, SiteForm } from "@/components/settings/settings-forms";
 
 const ELSEWHERE = [
   { href: "/ai", icon: Bot, title: "AI agents", text: "Providers (online and local models), agent profiles, autonomy and the kill switch" },
@@ -19,13 +19,14 @@ const ELSEWHERE = [
 
 export default async function SettingsPage() {
   const user = await pageGuard("settings.manage");
-  const [company, environment, testClients, secrets, thresholds, allowDomains] = await Promise.all([
+  const [company, environment, testClients, secrets, thresholds, allowDomains, site] = await Promise.all([
     getSetting("company.profile"),
     getSetting("platform.environment"),
     db.tenant.count({ where: { isTest: true } }),
     platformSecretStatus(),
     getSetting("forensics.thresholds"),
     getSetting("forensics.allowDomains"),
+    getSetting("site.public"),
   ]);
   const rows = (Object.keys(PLATFORM_SECRETS) as PlatformSecret[]).map((name) => ({ name, ...PLATFORM_SECRETS[name], status: secrets[name] }));
 
@@ -48,6 +49,16 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <CompanyForm initial={company} canEdit />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><MonitorSmartphone className="size-4" /> Public website</CardTitle>
+          <CardDescription>The home page and price estimator prospective clients see. Its name and contact details come from the company profile above.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SiteForm initial={site} canEdit />
         </CardContent>
       </Card>
 

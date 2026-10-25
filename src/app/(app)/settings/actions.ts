@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { logAction } from "@/lib/audit";
 import { requirePermission } from "@/lib/session";
-import { companySchema, getSetting, setSetting, thresholdsSchema } from "@/lib/settings";
+import { companySchema, getSetting, setSetting, siteSchema, thresholdsSchema } from "@/lib/settings";
 import { PLATFORM_SECRETS, storePlatformSecret, type PlatformSecret } from "@/lib/platform-secrets";
 
 function revalidate() {
@@ -19,6 +19,16 @@ export async function saveCompanyAction(input: z.input<typeof companySchema>) {
   await setSetting("company.profile", profile, user.id);
   await logAction({ actorId: user.id, action: "settings.company_changed", detail: { name: profile.name } });
   revalidate();
+}
+
+export async function saveSiteAction(input: z.input<typeof siteSchema>) {
+  const user = await requirePermission("settings.manage");
+  const site = siteSchema.parse(input);
+  await setSetting("site.public", site, user.id);
+  await logAction({ actorId: user.id, action: "settings.site_changed", detail: { enabled: site.enabled, estimator: site.estimator, aiAdvisor: site.aiAdvisor, aiDailyLimit: site.aiDailyLimit, leads: site.leads } });
+  revalidate();
+  revalidatePath("/home");
+  revalidatePath("/estimate");
 }
 
 // Only a platform admin moves the whole database between production and

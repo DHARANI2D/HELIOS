@@ -9,6 +9,8 @@ import { listCatalogTools } from "@/lib/integrations/tools";
 import { PRICE_ITEMS, ITEM_UNIT_LABEL } from "@/lib/pricing/items";
 import { defaultQuoteConfig, formatMoney, quoteConfigSchema, type QuoteResult } from "@/lib/pricing/calculator";
 import { loadModelPrices, loadPricingContext } from "@/lib/pricing/service";
+import { clientStackConfig } from "@/lib/pricing/client-stack";
+import { mixFromCounts, mixServers, mixWorkstations } from "@/lib/pricing/endpoint-mix";
 import { formatRelative } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,15 +29,18 @@ function one(v: string | string[] | undefined) {
 }
 
 // Client sizes for "size from an existing client": licensed counts, or the
-// inventory when it's larger; servers are inventory endpoints on a server OS.
+// inventory when it's larger, with the inventory's endpoint mix by OS.
 async function clientSizing(): Promise<ClientSizing[]> {
-  const [tenants, inventory, servers] = await Promise.all([
+  const [tenants, inventory] = await Promise.all([
     db.tenant.findMany({ where: { status: { not: "SUSPENDED" } }, select: { id: true, name: true, endpointsLicensed: true, usersLicensed: true }, orderBy: { name: "asc" } }),
-    db.endpoint.groupBy({ by: ["tenantId"], where: { tenantId: { not: null } }, _count: { _all: true } }),
-    db.endpoint.groupBy({ by: ["tenantId"], where: { tenantId: { not: null }, os: { contains: "server", mode: "insensitive" } }, _count: { _all: true } }),
+    db.endpoint.groupBy({ by: ["tenantId", "os"], where: { tenantId: { not: null } }, _count: { _all: true } }),
   ]);
-  const count = (rows: typeof inventory, id: string) => rows.find((r) => r.tenantId === id)?._count._all ?? 0;
-  return tenants.map((t) => ({ id: t.id, name: t.name, endpoints: Math.max(t.endpointsLicensed, count(inventory, t.id)), servers: count(servers, t.id), users: t.usersLicensed }));
+  return tenants.map((t) => {
+    const rows = inventory.filter((r) => r.tenantId === t.id).map((r) => ({ os: r.os, count: r._count._all }));
+    const mix = rows.length ? mixFromCounts(rows, t.endpointsLicensed) : null;
+    const servers = mix ? mixServers(mix) : 0;
+    return { id: t.id, name: t.name, endpoints: Math.max(t.endpointsLicensed, mix ? mixWorkstations(mix) + servers : 0), servers, users: t.usersLicensed, mix };
+  });
 }
 
 async function loadPricing(editId: string | undefined, setup: boolean) {
@@ -65,7 +70,10 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
   const canSeeMargin = can(user, "pricing.margin");
   const { now, ctx, quotes, tenants, editing, setupData } = await loadPricing(one(sp.quote), canManage || canSeeMargin);
   const parsed = editing ? quoteConfigSchema.safeParse(editing.config) : null;
-  const initial = parsed?.success ? parsed.data : defaultQuoteConfig(ctx);
+  // ?tenant= reviews a client's current setup; ?quote= edits a saved quote.
+  const clientId = editing ? undefined : one(sp.tenant);
+  const client = clientId ? await clientStackConfig(clientId, ctx) : null;
+  const initial = parsed?.success ? parsed.data : client?.config ?? defaultQuoteConfig(ctx);
 
   const rows: PriceRow[] = PRICE_ITEMS.map((i) => ({
     key: i.key,
@@ -84,7 +92,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
   return (
     <div className="flex flex-col gap-6">
       <Configurator
-        key={editing?.id ?? "new"}
+        key={editing?.id ?? (client ? `tenant-${clientId}` : "new")}
         ctx={ctx}
         canSeeMargin={canSeeMargin}
         canManage={canManage}
@@ -92,7 +100,9 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
         initial={initial}
         quoteId={editing?.id}
         quoteReference={editing?.reference}
-        quoteTenantId={editing?.tenantId}
+        quoteTenantId={editing?.tenantId ?? (client ? clientId : undefined)}
+        initialTab={one(sp.tab)}
+        baselineLabel={client?.label}
       />
 
       <Card className="no-print">
@@ -124,7 +134,11 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
                       <TableRow key={q.id}>
                         <TableCell>
                           <Link href={`/pricing/quotes/${q.id}`} className="text-sm font-medium hover:underline">{q.clientName}</Link>
-                          <p className="font-mono text-[11px] text-muted-foreground">{q.reference}{q.tenant ? ` · ${q.tenant.name}` : ""}</p>
+                          <p className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
+                            {q.reference}{q.tenant ? ` · ${q.tenant.name}` : ""}
+                            {q.source === "website" && <Badge variant="info" className="font-sans text-[10px]">website request</Badge>}
+                            {q.contactEmail && <span className="font-sans">{q.contactName ? `${q.contactName} · ` : ""}{q.contactEmail}</span>}
+                          </p>
                         </TableCell>
                         <TableCell><Badge variant={QUOTE_VARIANT[q.status]}>{q.status.toLowerCase()}</Badge></TableCell>
                         <TableCell className="text-right tabular-nums">{formatMoney(totals.monthlyNet, q.currency, totals.fxRate, { decimals: 0 })}</TableCell>

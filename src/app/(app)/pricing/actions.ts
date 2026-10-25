@@ -9,16 +9,14 @@ import { requirePermission } from "@/lib/session";
 import { calculateQuote, quoteConfigSchema, type QuoteConfig } from "@/lib/pricing/calculator";
 import { PRICE_ITEM_INDEX } from "@/lib/pricing/items";
 import { loadPricingContext } from "@/lib/pricing/service";
+import { createQuote } from "@/lib/pricing/quotes";
+import { runAdvisorAgent, type AiAdvice } from "@/lib/pricing/advisor-agent";
+import type { AdvisorGoal } from "@/lib/pricing/advisor";
+import { rateLimit } from "@/lib/rate-limit";
 import { invalidateCatalog } from "@/lib/integrations/tools";
 import { CATEGORIES } from "@/lib/integrations/catalog";
 import { CONTROLS } from "@/lib/endpoints/controls";
 import { PLAN_FEATURES, SEVERITIES } from "@/lib/plans";
-
-async function nextReference() {
-  const year = new Date().getUTCFullYear();
-  const count = await db.quote.count({ where: { reference: { startsWith: `Q-${year}-` } } });
-  return `Q-${year}-${String(count + 1).padStart(4, "0")}`;
-}
 
 function done(path = "/pricing") {
   revalidatePath(path);
@@ -43,10 +41,20 @@ export async function saveQuoteAction(config: QuoteConfig, options: { quoteId?: 
   };
   const quote = options.quoteId
     ? await db.quote.update({ where: { id: options.quoteId }, data })
-    : await db.quote.create({ data: { ...data, reference: await nextReference(), createdById: user.id, validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } });
+    : await createQuote({ ...data, createdById: user.id, validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) });
   await logAction({ actorId: user.id, action: options.quoteId ? "quote.updated" : "quote.created", detail: { quoteId: quote.id, reference: quote.reference, monthlyNet: totals.monthlyNet, year1Total: totals.year1Total } });
   done();
   return { id: quote.id, reference: quote.reference };
+}
+
+// The stack advisor for a quote being built: the model picks among the
+// candidates the rules priced; prices are recalculated in the browser.
+export async function adviseStackAction(config: QuoteConfig, goal: AdvisorGoal): Promise<AiAdvice> {
+  const user = await requirePermission("pricing.view");
+  const cfg = quoteConfigSchema.parse(config);
+  const g = z.enum(["balanced", "budget", "protection"]).parse(goal);
+  if (!rateLimit(`advice:user:${user.id}`, 20, 10 * 60 * 1000).ok) throw new Error("The advisor has been asked many times in a row; try again in a few minutes");
+  return runAdvisorAgent(cfg, await loadPricingContext(), g, { audience: "staff", trigger: "manual", requestedById: user.id });
 }
 
 export async function setQuoteStatusAction(quoteId: string, status: string) {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, Bell, Bot, CheckCheck, Clock, Eye, Share2, ShieldCheck, TrendingUp, UserPlus } from "lucide-react";
+import { AtSign, Bell, Bot, CheckCheck, Clock, Eye, Inbox, Share2, ShieldCheck, TrendingUp, UserPlus } from "lucide-react";
 
 import { getNotificationsAction, markNotificationsReadAction } from "@/app/(app)/shell-actions";
 import { formatRelative } from "@/lib/format";
@@ -19,6 +19,7 @@ const KIND_ICON: Record<string, typeof Bell> = {
   approval: ShieldCheck,
   ai: Bot,
   sla: Clock,
+  lead: Inbox,
 };
 
 export function NotificationBell() {

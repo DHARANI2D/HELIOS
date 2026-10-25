@@ -49,6 +49,8 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
   const [p, setP] = React.useState(profile);
   const dirty = JSON.stringify(p) !== JSON.stringify(profile);
   const isController = p.key === "containment";
+  // The stack advisor only ever suggests; on/off is the switch above.
+  const isAdvisor = p.key === "advisor";
 
   const save = useMutation({
     mutationFn: () =>
@@ -115,14 +117,16 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
             </div>
           </>
         )}
-        <div className="grid gap-1.5">
-          <Label className="text-xs">{isController ? "Containment autonomy" : "Autonomy"}</Label>
-          <NativeSelect value={p.autonomy} onChange={(e) => setP({ ...p, autonomy: e.target.value as AiAutonomy })} disabled={!canConfigure}>
-            {AUTONOMY_ORDER.filter((a) => isController || a === "OFF" || a === "SUGGEST").map((a) => (
-              <option key={a} value={a}>{AUTONOMY_LABEL[a]}</option>
-            ))}
-          </NativeSelect>
-        </div>
+        {!isAdvisor && (
+          <div className="grid gap-1.5">
+            <Label className="text-xs">{isController ? "Containment autonomy" : "Autonomy"}</Label>
+            <NativeSelect value={p.autonomy} onChange={(e) => setP({ ...p, autonomy: e.target.value as AiAutonomy })} disabled={!canConfigure}>
+              {AUTONOMY_ORDER.filter((a) => isController || a === "OFF" || a === "SUGGEST").map((a) => (
+                <option key={a} value={a}>{AUTONOMY_LABEL[a]}</option>
+              ))}
+            </NativeSelect>
+          </div>
+        )}
         {isController && (
           <div className="grid gap-1.5">
             <Label className="text-xs">Auto-contain only above confidence</Label>

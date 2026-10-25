@@ -3,17 +3,18 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { FlaskConical, KeyRound, Loader2, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { ExternalLink, FlaskConical, KeyRound, Loader2, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { saveCompanyAction, saveForensicsSettingsAction, savePlatformSecretAction, setEnvironmentAction } from "@/app/(app)/settings/actions";
-import type { CompanyProfile } from "@/lib/settings";
+import { saveCompanyAction, saveForensicsSettingsAction, savePlatformSecretAction, saveSiteAction, setEnvironmentAction } from "@/app/(app)/settings/actions";
+import type { CompanyProfile, SiteSettings } from "@/lib/settings";
 import type { SecretStatus } from "@/lib/platform-secrets";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 function useSave<T>(fn: (v: T) => Promise<unknown>, done: string) {
@@ -66,6 +67,59 @@ export function CompanyForm({ initial, canEdit }: { initial: CompanyProfile; can
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+const SITE_SWITCHES: Array<{ key: "enabled" | "estimator" | "aiAdvisor" | "leads"; label: string; hint: string }> = [
+  { key: "enabled", label: "Public website", hint: "The home page at / for visitors who aren't signed in. Off: they go straight to sign-in." },
+  { key: "estimator", label: "Price estimator and plan prices", hint: "Visitors price their own stack from your plans, price book and tool catalog. Costs and margins are never shown." },
+  { key: "aiAdvisor", label: "AI stack advisor for visitors", hint: "Runs on the Stack advisor agent's model (AI agents page). Off: suggestions come from the rules only." },
+  { key: "leads", label: "Quote requests", hint: "Visitors send their estimate; it arrives as a draft quote marked \"website\" and notifies your account managers." },
+];
+
+export function SiteForm({ initial, canEdit }: { initial: SiteSettings; canEdit: boolean }) {
+  const [d, setD] = React.useState(initial);
+  const save = useSave(() => saveSiteAction(d), "Website settings saved");
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {SITE_SWITCHES.map((s) => (
+          <label key={s.key} className={cn("flex items-start gap-3 rounded-lg border p-3", s.key !== "enabled" && !d.enabled && "opacity-60")}>
+            <Switch checked={d[s.key]} onCheckedChange={(v) => setD({ ...d, [s.key]: v })} disabled={!canEdit || (s.key !== "enabled" && !d.enabled)} className="mt-0.5" />
+            <span>
+              <span className="block text-sm font-medium">{s.label}</span>
+              <span className="block text-[11px] text-muted-foreground">{s.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+        <div className="grid content-start gap-1.5">
+          <Label htmlFor="site-headline">Headline</Label>
+          <Input id="site-headline" value={d.headline} maxLength={140} onChange={(e) => setD({ ...d, headline: e.target.value })} disabled={!canEdit} placeholder="Managed detection and response, with AI first response on every alert" />
+        </div>
+        <div className="grid content-start gap-1.5">
+          <Label htmlFor="site-ai-limit">AI answers per day</Label>
+          <Input id="site-ai-limit" type="number" min={0} max={5000} value={d.aiDailyLimit} onChange={(e) => setD({ ...d, aiDailyLimit: Math.max(0, Math.min(5000, Math.round(Number(e.target.value) || 0))) })} disabled={!canEdit || !d.aiAdvisor} />
+          <p className="text-[11px] text-muted-foreground">Across all visitors; after that, rules only</p>
+        </div>
+        <div className="grid content-start gap-1.5 sm:col-span-2">
+          <Label htmlFor="site-intro">Introduction</Label>
+          <Textarea id="site-intro" value={d.intro} maxLength={600} onChange={(e) => setD({ ...d, intro: e.target.value })} disabled={!canEdit} className="min-h-16" placeholder="Leave empty for the standard description of the service." />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {canEdit && (
+          <Button size="sm" onClick={() => save.mutate(undefined)} disabled={save.isPending}>
+            {save.isPending ? <Loader2 className="animate-spin" /> : <Save />}
+            Save website
+          </Button>
+        )}
+        <Button asChild size="sm" variant="ghost">
+          <a href="/home" target="_blank" rel="noopener"><ExternalLink /> Open the website</a>
+        </Button>
+      </div>
     </div>
   );
 }

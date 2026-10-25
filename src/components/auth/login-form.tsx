@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { ShieldHalf, Loader2 } from "lucide-react";
@@ -49,7 +50,7 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted/30 px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -96,6 +97,9 @@ export function LoginForm() {
           </form>
         </CardContent>
       </Card>
+      <Link href="/home" className="mt-4 text-xs text-muted-foreground hover:text-foreground hover:underline">
+        ← Back to the website
+      </Link>
     </div>
   );
 }

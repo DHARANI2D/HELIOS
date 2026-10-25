@@ -870,24 +870,30 @@ enum QuoteStatus {
 }
 
 model Quote {
-  id          String      @id @default(cuid())
-  reference   String      @unique // Q-2026-0001
-  clientName  String
-  tenantId    String?
-  status      QuoteStatus @default(DRAFT)
-  currency    String      @default("USD")
-  config      Json
-  totals      Json
-  notes       String?     @db.Text
-  validUntil  DateTime?
-  createdById String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id           String      @id @default(cuid())
+  reference    String      @unique // Q-2026-0001
+  clientName   String
+  tenantId     String?
+  status       QuoteStatus @default(DRAFT)
+  currency     String      @default("USD")
+  config       Json
+  totals       Json
+  notes        String?     @db.Text
+  validUntil   DateTime?
+  // app: built in Build & Price · website: requested from the public estimator
+  source       String      @default("app")
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  createdById  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   createdBy User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
+  @@index([source, createdAt])
   @@map("quotes")
 }
 

@@ -25,15 +25,17 @@ async function loadAiPage(visibility: ReturnType<typeof caseVisibility>) {
   const now = new Date();
   const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const runScope = { createdAt: { gte: since }, case: visibility };
+  // Stack-advisor runs (Build & Price, the public estimator) belong to no case.
+  const allRuns = { createdAt: { gte: since }, OR: [{ case: visibility }, { caseId: null, agentKey: "advisor" }] };
   const [settings, providers, runs, recent, feedback, executed, blocked, profilesUsage] = await Promise.all([
     aiSettings(),
     db.aiProvider.findMany({ orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }], include: { _count: { select: { agents: true } } } }),
-    db.aiRun.findMany({ where: runScope, select: { model: true, inputTokens: true, outputTokens: true, agentKey: true, status: true } }),
+    db.aiRun.findMany({ where: allRuns, select: { model: true, inputTokens: true, outputTokens: true, agentKey: true, status: true } }),
     db.aiRun.findMany({ where: { case: visibility }, orderBy: { createdAt: "desc" }, take: 30, include: { case: { select: { id: true, title: true, tenant: { select: { name: true } } } } } }),
     db.aiRun.groupBy({ by: ["feedback"], where: { ...runScope, feedback: { not: null } }, _count: { _all: true } }),
     db.responseAction.count({ where: { source: "ai", status: "EXECUTED", createdAt: { gte: since }, case: visibility } }),
     db.responseAction.count({ where: { source: "ai", status: "BLOCKED", createdAt: { gte: since }, case: visibility } }),
-    db.aiRun.groupBy({ by: ["agentKey"], where: runScope, _count: { _all: true } }),
+    db.aiRun.groupBy({ by: ["agentKey"], where: allRuns, _count: { _all: true } }),
   ]);
   const profiles = await Promise.all(
     AGENT_KEYS.map(async (key) => {
@@ -115,7 +117,7 @@ export default async function AiPage() {
           <CardTitle className="text-base">Agent types</CardTitle>
           <CardDescription>
             Choose which model runs each agent and how much it may do. Analysts dispatch the case-level agents from any case; the triage first responder also runs
-            automatically on new cases.
+            automatically on new cases. The stack advisor suggests tool stacks in Build &amp; Price and on the public estimator.
             {fallbacks > 0 && ` ${fallbacks} run${fallbacks === 1 ? "" : "s"} in the last 30 days fell back to the built-in engine after a model error.`}
           </CardDescription>
         </CardHeader>

@@ -19,7 +19,8 @@
 | **Threat intel, playbooks, ATT&CK, attack graph, audit log** | A shared indicator store with public threat feeds. Approval-gated playbooks with recommendations that give their reasons. Detection coverage against ATT&CK, with detectors you can switch off. An attack graph that links cases sharing hosts, accounts and indicators, and flags attack chains across tactics. A hash-chained audit trail. |
 | **Reports** | Volume, response times, SLA compliance, AI performance and analyst workload for any period or month, compared with the period before. Clients get their own. Every report, incident and quote downloads as a PDF. |
 | **Agent governance** | Govern the AI agents your clients run. Each agent asks `POST /api/governance/evaluate` before acting; constitution, reasoning-drift, DLP and policy checks decide; trust adapts; breaches revoke the agent and open a case. |
-| **Build & Price** | Configure a client's stack across every protection layer and compare vendors and plans. Estimate monthly, annual, one-time, maintenance (AMC) and 3-year costs, with cloud-vs-local AI, margins and multi-currency, then save versioned quotes. |
+| **Build & Price** | Configure a client's stack across every protection layer and compare vendors and plans. Estimate monthly, annual, one-time, maintenance (AMC) and 3-year costs, with cloud-vs-local AI, margins and multi-currency, then save versioned quotes. Endpoints can be counted by operating system. An **upgrade review** compares every tool in an existing setup (a saved quote, or a client's onboarded tools and inventory) with each alternative: what it adds or removes, whether it runs on the client's machines, and the price difference. A **stack advisor** suggests one tool per layer for a goal (best value, lowest cost, strongest protection); its rules are traceable, and an AI agent can choose among the candidates it priced. |
+| **Public website** | Visitors who aren't signed in see a home page about the service, built from your real catalog, plans and detection coverage, and a price estimator. The estimator has the same upgrade review and advisor, and a quote request that arrives as a draft quote. Costs and margins never leave the console; switch any part off under Settings → Public website. |
 | **Settings, API, app** | Company profile, environment (production or test), provider keys stored encrypted, forensics thresholds. A REST API with personal tokens for ticketing, SOAR and client portals. Installs as a desktop or mobile app. |
 
 ### Real data only
@@ -122,6 +123,7 @@ CI (`.github/workflows/ci.yml`) runs:
 | `POST /api/governance/evaluate` | Bearer agent token (shown once at identity issue) | A governed AI agent asks before acting |
 | `GET /api/threat-intel/blocklist` | — | Plain-text blocklist for firewalls to pull |
 | `GET /api/health` | — | Liveness and database check |
+| `/` (signed out), `/home`, `/estimate` | — | The public website and estimator. Its two Server Actions (AI suggestion, quote request) are rate-limited per visitor; AI answers share a daily budget |
 | `/api/v1/…` | Bearer personal access token (API Tokens page) | REST API: cases (list, read, update, comment), indicator lookup, service metrics. The token acts as its owner, read-only unless created with write |
 
 Response connectors receive `POST`s with an `x-helios-timestamp` header and an `x-helios-signature: sha256=<HMAC(secret, "<timestamp>.<body>")>` header.
@@ -135,3 +137,4 @@ Response connectors receive `POST`s with an `x-helios-timestamp` header and an `
 - **URL detonation:** connections are checked against private, loopback and link-local ranges at connect time. Through an egress proxy, every hop is vetted before it leaves, and internal-looking names are refused. JavaScript is never executed.
 - **Untrusted files:** archives, Office containers, images and event logs are parsed with bounded reads (member and pixel limits, chain-length guards, OCR timeouts); nothing in them is executed.
 - **Rendering:** model output is rendered as Markdown with raw HTML disabled.
+- **Public estimator:** visitors get your prices only (no costs, margins, resale ratio or client counts). The server resets discounts, exchange rates and usage overrides on everything a visitor sends, and quote requests carry a honeypot field, a consent check and per-visitor and daily limits.

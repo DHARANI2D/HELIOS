@@ -75,7 +75,7 @@ export interface DispatchOptions {
 }
 
 export async function runAgentOnCase(caseId: string, key: AgentKey, opts: DispatchOptions) {
-  if (key === "containment" || key === "investigation" || !AGENT_TYPES[key]?.dispatchable) throw new Error(`${key} can't be dispatched onto a case`);
+  if (key === "containment" || key === "investigation" || key === "advisor" || !AGENT_TYPES[key]?.dispatchable) throw new Error(`${key} can't be dispatched onto a case`);
   const { profile, provider } = await resolveAgent(key);
   if (!profile.enabled || profile.autonomy === "OFF") {
     await db.case.updateMany({ where: { id: caseId, aiStatus: "queued" }, data: { aiStatus: "skipped" } });

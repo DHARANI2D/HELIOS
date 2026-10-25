@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
-import { ArrowLeft, Bot, Clock, Laptop, Plug, ShieldAlert, Timer, Users } from "lucide-react";
+import { ArrowLeft, Bot, Clock, Laptop, Plug, ShieldAlert, Timer, TrendingUp, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -79,6 +79,12 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
               {tenant.contactName && `${plan?.tagline ? " · " : ""}Contact: ${tenant.contactName}${tenant.contactEmail ? ` <${tenant.contactEmail}>` : ""}`}
             </CardDescription>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {can(user, "pricing.view") && (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/pricing?tenant=${tenant.id}&tab=upgrades`}><TrendingUp /> Review upgrades &amp; price</Link>
+            </Button>
+          )}
           {can(user, "tenants.manage") && (
             <TenantFormButton
               tenantId={tenant.id}
@@ -97,6 +103,7 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
               }}
             />
           )}
+          </div>
         </CardHeader>
         {tenant.notes && !user.isClient && <CardContent className="text-sm whitespace-pre-wrap text-muted-foreground">{tenant.notes}</CardContent>}
       </Card>
