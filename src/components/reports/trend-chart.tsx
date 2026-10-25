@@ -15,6 +15,11 @@ interface Point {
 // carries the same numbers for screen readers and print.
 export function TrendChart({ points }: { points: Point[] }) {
   const t = useChartTokens();
+  // End labels only when the two line ends are apart; otherwise they'd
+  // print over each other (the legend still names both).
+  const last = points[points.length - 1];
+  const max = Math.max(1, ...points.flatMap((p) => [p.opened, p.closed]));
+  const labelEnds = !!last && Math.abs(last.opened - last.closed) / max > 0.08;
   const line = (name: string, color: string, values: number[]) => ({
     name,
     type: "line",
@@ -24,7 +29,7 @@ export function TrendChart({ points }: { points: Point[] }) {
     itemStyle: { color, borderColor: t.surface, borderWidth: 2 },
     lineStyle: { width: 2, color },
     emphasis: { focus: "series" },
-    endLabel: { show: true, formatter: name, color: t.inkSecondary, fontSize: 11, distance: 6 },
+    endLabel: { show: labelEnds, formatter: name, color: t.inkSecondary, fontSize: 11, distance: 6 },
   });
   const option = {
     ...baseOption(t),

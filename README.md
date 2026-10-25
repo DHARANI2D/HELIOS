@@ -14,16 +14,20 @@
 | **Cases & alerts** | One queue for every source, with: <ul><li>tier-1/2/3 escalation;</li><li>assignment, watchers, @mentions and internal or client-visible discussion;</li><li>SLA clocks from the client's plan;</li><li>notifications;</li><li>correlation of related alerts into one case.</li></ul> |
 | **AI first responder** | On every new case an AI agent triages, explains its verdict with cited evidence, and proposes containment. A grounding check rejects targets the evidence doesn't contain. A deterministic policy (kill switch, client consent, per-agent autonomy, allow-list, confidence bar, critical-endpoint guard, rate limit) decides what runs, what waits for approval, and what is only suggested. Agent types and models are chosen per agent: Claude online today, local or offline models (Ollama, LM Studio, vLLM) when you're ready. |
 | **Response actions** | Containment goes through the client's response connector: a signed webhook to your automation, a SOAR or the vendor's API. Without a connector, an action is left **to do by hand** and only counts once an analyst confirms they did it. Every action can be rolled back and is audited. |
-| **Investigations, forensics, threat intel, playbooks, ATT&CK coverage, audit log** | Log investigations with an agent pipeline. Upload Windows `.evtx` logs straight from Event Viewer, Sysmon, EDR and SIEM exports (JSON, CSV, Excel `.xlsx`), or a ZIP of them. Email and file forensics. A shared indicator store with public threat feeds. Approval-gated playbooks. Detection coverage against ATT&CK. A hash-chained audit trail. |
+| **Investigations** | Log investigations with an agent pipeline. Upload Windows `.evtx` logs straight from Event Viewer, Sysmon, EDR and SIEM exports (JSON, CSV, Excel `.xlsx`), or a ZIP of them, password-protected ones included. The report names the playbooks that fit. |
+| **Email & file forensics** | Headers, links, attachments and verdicts for `.eml` / `.msg` or any file. Opens password-protected archives (the analyst's password, or one quoted in the message), recovers VBA macro source, reads QR codes and the text in images, and detonates links, through an egress proxy if there is one. |
+| **Threat intel, playbooks, ATT&CK, attack graph, audit log** | A shared indicator store with public threat feeds. Approval-gated playbooks with recommendations that give their reasons. Detection coverage against ATT&CK, with detectors you can switch off. An attack graph that links cases sharing hosts, accounts and indicators, and flags attack chains across tactics. A hash-chained audit trail. |
+| **Reports** | Volume, response times, SLA compliance, AI performance and analyst workload for any period or month, compared with the period before. Clients get their own. Every report, incident and quote downloads as a PDF. |
 | **Agent governance** | Govern the AI agents your clients run. Each agent asks `POST /api/governance/evaluate` before acting; constitution, reasoning-drift, DLP and policy checks decide; trust adapts; breaches revoke the agent and open a case. |
 | **Build & Price** | Configure a client's stack across every protection layer and compare vendors and plans. Estimate monthly, annual, one-time, maintenance (AMC) and 3-year costs, with cloud-vs-local AI, margins and multi-currency, then save versioned quotes. |
+| **Settings, API, app** | Company profile, environment (production or test), provider keys stored encrypted, forensics thresholds. A REST API with personal tokens for ticketing, SOAR and client portals. Installs as a desktop or mobile app. |
 
 ### Real data only
 
 HELIOS ships no sample clients, no invented prices and no fake intelligence.
 - **Seeded:** only facts. These are vendors' published list prices (each with its source), Anthropic's published model prices, the MITRE ATT&CK reference set, the public threat-feed addresses (disabled until you enable them), starter playbooks and agent profiles.
 - **Yours to enter:** your plans, rates, SLAs and exchange rates. The overview shows admins a setup checklist, and a quote that needs a price nobody has set says so and can't be saved.
-- **Test data:** there's a separate, clearly labelled seed for testing (see below).
+- **Test data:** there's a separate, clearly labelled seed for testing, and a database can be marked as a test environment (see below).
 
 See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit together, and [`docs/porting-notes.md`](docs/porting-notes.md) for the history of the original modules.
 
@@ -49,7 +53,7 @@ npm run dev
 
 The seed creates the first admin, `admin@helios.local` by default. The password is `SEED_ADMIN_PASSWORD` if you set it; otherwise a random one is printed once.
 
-Sign in, then work through the **Get HELIOS ready** checklist on the overview:
+Sign in, fill in **Settings** (your company details, which go on quotes and reports), then work through the **Get HELIOS ready** checklist on the overview:
 1. Define service plans and fill in the price book (Build & Price → Pricing setup).
 2. Connect an AI provider (AI Agents).
 3. Invite your team (Team & Roles).
@@ -57,14 +61,15 @@ Sign in, then work through the **Get HELIOS ready** checklist on the overview:
 5. Onboard their tools (Tools & Integrations).
 6. Enable threat feeds (Threat Intelligence).
 
-None of the environment integrations is required:
+None of the integrations is required. Provider keys can be saved under **Settings** (stored encrypted, and preferred over the environment variable):
 
-| Variable | Without it |
+| Setting / variable | Without it |
 |---|---|
 | `ANTHROPIC_API_KEY` | AI agents use a provider configured in the app (including local models), or the built-in deterministic engine |
-| `VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY` | Reputation comes from enabled threat feeds and your own blocks only |
-| `SLACK_WEBHOOK_URL` | Chat steps use the client's Slack or Teams integration; with neither, they're left to do by hand |
-| `MXTOOLBOX_API_KEY` | Email forensics skips sender-domain diagnostics |
+| VirusTotal / AbuseIPDB key (`VIRUSTOTAL_API_KEY`, `ABUSEIPDB_API_KEY`) | Reputation comes from enabled threat feeds and your own blocks only |
+| SOC Slack webhook (`SLACK_WEBHOOK_URL`) | Chat steps use the client's Slack or Teams integration; with neither, they're left to do by hand |
+| MxToolbox key (`MXTOOLBOX_API_KEY`) | Email forensics skips sender-domain diagnostics |
+| `DETONATION_PROXY` (else `HTTPS_PROXY` / `HTTP_PROXY`) | Link detonation connects directly |
 
 ### Test data
 
@@ -78,7 +83,15 @@ This loads data for exercising the platform end to end:
 - vendor alerts and attack telemetry from the fixtures in `src/lib/__tests__/fixtures`, pushed through the real ingest, detection and AI first-response pipeline;
 - a governed test agent driven through the real governance gate.
 
-Everything is labelled "Test ·". The command refuses to run with `NODE_ENV=production`. Use a separate database if you don't want test data next to real clients.
+Everything is labelled "Test ·", and test clients are flagged: they're badged wherever they appear and left out of commercial figures. The command refuses to run with `NODE_ENV=production`. Use a separate database if you don't want test data next to real clients.
+
+To use a whole database as a **test environment**, keeping what it already holds as test data:
+
+```bash
+npm run db:test-env
+```
+
+Records that belong to no client move to a "Test · Earlier sample data" client, every client is marked test, a test platform admin (`admin@helios.test`) is added, the test data above is loaded, and every page shows a test-environment banner. Switch back to production under Settings.
 
 ## Scripts
 
@@ -93,6 +106,7 @@ Everything is labelled "Test ·". The command refuses to run with `NODE_ENV=prod
 | `npm run db:migrate` | Create / apply Prisma migrations (dev) |
 | `npm run db:seed` | First admin and reference facts (idempotent; never overwrites your prices) |
 | `npm run db:seed:test` | Labelled test clients, accounts and alerts (never in production) |
+| `npm run db:test-env` | Make this database a test environment, keeping its records as test data |
 | `npm run db:studio` | Open Prisma Studio |
 
 CI (`.github/workflows/ci.yml`) runs:
@@ -108,14 +122,16 @@ CI (`.github/workflows/ci.yml`) runs:
 | `POST /api/governance/evaluate` | Bearer agent token (shown once at identity issue) | A governed AI agent asks before acting |
 | `GET /api/threat-intel/blocklist` | — | Plain-text blocklist for firewalls to pull |
 | `GET /api/health` | — | Liveness and database check |
+| `/api/v1/…` | Bearer personal access token (API Tokens page) | REST API: cases (list, read, update, comment), indicator lookup, service metrics. The token acts as its owner, read-only unless created with write |
 
 Response connectors receive `POST`s with an `x-helios-timestamp` header and an `x-helios-signature: sha256=<HMAC(secret, "<timestamp>.<body>")>` header.
 
 ## Security notes
 
 - **Authorization:** every page and Server Action checks the session, the role's permission and the client scope. Out-of-scope records look like missing ones.
-- **Secrets:** integration secrets and AI provider keys are stored encrypted with AES-256-GCM. Ingest and agent tokens are stored only as SHA-256 hashes.
+- **Secrets:** integration secrets, AI provider keys and the provider keys under Settings are stored encrypted with AES-256-GCM. Ingest, agent and API tokens are stored only as SHA-256 hashes.
 - **AI containment:** it never acts on a target that isn't in the case evidence. Account actions and process kills always need a human. Clients can cap autonomy for their estate.
 - **Audit log:** appends serialize on a Postgres advisory lock, so the chain can't fork. Records referenced by audit entries can't be deleted.
-- **URL detonation:** connections are checked against private, loopback and link-local ranges at connect time. JavaScript is never executed.
+- **URL detonation:** connections are checked against private, loopback and link-local ranges at connect time. Through an egress proxy, every hop is vetted before it leaves, and internal-looking names are refused. JavaScript is never executed.
+- **Untrusted files:** archives, Office containers, images and event logs are parsed with bounded reads (member and pixel limits, chain-length guards, OCR timeouts); nothing in them is executed.
 - **Rendering:** model output is rendered as Markdown with raw HTML disabled.

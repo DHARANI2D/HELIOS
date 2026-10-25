@@ -27,6 +27,31 @@ The admin enters everything that is company policy. The code describes only the 
 
 `lib/setup.ts` drives the admin's first-run checklist.
 
+### Settings and secrets (`lib/settings.ts`, `lib/platform-secrets.ts`)
+
+Platform settings are rows in `platform_settings`, each validated by a Zod schema with a default:
+- **Environment:** `production` or `test`. A test environment shows a banner on every page. Test clients (`Tenant.isTest`) are badged wherever they're listed and left out of commercial figures in production.
+- **Company profile:** the MSSP's own details, printed on quotes and reports.
+- **Forensics:** verdict thresholds and trusted link domains.
+- **Detection tuning:** SIEM detectors switched off on the ATT&CK coverage page.
+- **Provider keys** (VirusTotal, AbuseIPDB, MxToolbox, the SOC's Slack webhook): sealed with AES-256-GCM, only the last four characters kept in clear. A stored key wins over its environment variable, and lookups cache for 30s.
+
+`npm run db:test-env` turns a whole database into a test environment (`prisma/seed-test.ts`). Records that belong to no client move to a labelled test client, every client is marked test, and a test admin and the usual test data are added.
+
+### REST API (`lib/api`, `app/api/v1`)
+
+Personal access tokens (`hpat_…`, hash stored, shown once) act as their owner: same role, client and queues, read-only unless created with write, optionally expiring, revocable. `lib/api/http.ts` authenticates, rate-limits (300 a minute per token) and turns errors into JSON. `lib/api/v1.ts` reuses the app's visibility rules and service functions, so out-of-scope cases read as not found and every change is audited.
+
+### Reports, PDFs and the attack graph
+
+- **Reports** (`lib/reports.ts`): volume, median time to acknowledge / contain / resolve, acknowledge-SLA compliance, mix by severity, source, domain and client, top techniques and malicious indicators, AI runs and analyst agreement, containment outcomes and analyst workload, each against the previous period. The pure part (`summarizeCases`, `caseTrend`, `slaOutcome`) is unit-tested.
+- **PDFs** (`lib/pdf`, `@react-pdf/renderer`): the service report, an incident report per case, and quotes. Clients' case reports leave out AI working notes, and quotes never carry cost or margin. Text is mapped to the PDF fonts' WinAnsi set.
+- **Attack graph** (`lib/cases/attack-graph.ts`): cases joined by the hosts, accounts, addresses, indicators and agents they share, using the related-case stoplist. An entity is an attack chain when its cases together reach more ATT&CK tactics than any one of them alone.
+
+### Installable app
+
+`app/manifest.ts` and the generated icons make HELIOS installable as a standalone desktop or mobile app (shortcuts to Cases, Investigations, Forensics and Reports). That replaces desas's Electron shell. The icons and manifest skip the auth redirect in `proxy.ts`.
+
 ### SLA (`lib/plans.ts`)
 
 A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Internal cases and clients without a plan have no SLA. An escalation before acknowledgement tightens the deadline.
@@ -102,7 +127,7 @@ Detectors are pure; the threat-intel detector matches against an intel snapshot 
 ### Investigations (`lib/investigations`)
 
 1. **Intake.** Uploads and pasted logs are auto-detected and normalized to the Universal Event Schema (`normalize.ts`), then stored as `SecurityEvent` rows tied to the case.
-   - ZIPs are expanded.
+   - ZIPs are expanded, including password-protected ones: `lib/archive/zip.ts` opens ZipCrypto and WinZip AES with the analyst's password and checks every member's CRC or HMAC.
    - Binary `.evtx` goes through `evtx.ts`, a dependency-free BinXML reader with template and name caches; damaged records are skipped and reported.
    - `.xlsx` goes through `xlsx.ts`. Each sheet with a time column is read like CSV, and other sheets are reported.
    - Windows events map by provider: Sysmon, Security auditing, Eventlog, Service Control Manager, PowerShell, Task Scheduler.
@@ -111,7 +136,7 @@ Detectors are pure; the threat-intel detector matches against an intel snapshot 
    - With `ANTHROPIC_API_KEY`, each stage is a Claude call with structured output (Zod schemas), grounded in the rule findings, graph and events. Refusal fallbacks route to Anthropic's recommended fallback model.
    - A stage whose model call fails falls back to the deterministic engine and records a note.
    - Mechanical QA checks are always merged into the QA result: every timeline timestamp must exist in the events, and no process may connect out before it was created.
-4. **Finish.** Findings become detections, flagged events become the timeline, and techniques and IOCs are attached. Playbooks then run.
+4. **Finish.** Findings become detections, flagged events become the timeline, and techniques and IOCs are attached. Flagged events get the worst severity of their findings as a hint, which the AI evidence window uses. The report names the playbooks that fit (`playbooks/recommend.ts`). Playbooks then run.
 
 ### Email & File Forensics (`lib/forensics`)
 
@@ -119,14 +144,15 @@ Detectors are pure; the threat-intel detector matches against an intel snapshot 
 2. **Headers.** SPF, DKIM, DMARC and TLS are read from Authentication-Results and Received headers. The checks also cover Reply-To and Return-Path mismatches, urgency, the bottom-up hop trace, and an optional `_dmarc` TXT lookup.
 3. **Body.** The analysis covers lure language, link extraction (Proofpoint / Safe Links unwrapped), suspicious TLDs, brand look-alikes, raw-IP links, and TOAD. HTML intelligence finds forms, password fields, external or hidden form posts, obfuscated JS, meta refresh and iframes.
 4. **Attachments.** Container structure is read straight from the bytes:
-   - **Archives:** ZIP central directory, including encrypted members.
-   - **Office:** OOXML macros, XLM sheets, remote templates and embedded OLE; OLE stream signatures.
+   - **Archives:** ZIP central directory, including encrypted members. Encrypted ones are opened with the analyst's password or one quoted in the message; a quoted password scores as gateway evasion (T1027.013).
+   - **Office:** OOXML macros, XLM sheets, remote templates and embedded OLE; OLE stream signatures. Macro source is recovered with a Compound File reader (`cfb.ts`) and an [MS-OVBA] reader (`vba.ts`), checked against oletools' olevba, and the rules run on the code itself.
+   - **Images:** sharp decodes, jsQR reads QR codes, and Tesseract (English data shipped in `node_modules`) reads printed text (`image.ts`). A QR code that opens a link scores as a phishing link; image text goes through the body checks; a message whose words are only in a picture is flagged.
    - **PDF and PE:** PDF actions; PE sections, entropy and suspicious APIs.
    - **Other:** masquerading, embedded or appended payloads, and script obfuscation.
 
    Signals are mapped to ATT&CK.
-5. **Detonation** (opt-in, up to 5 links). An HTTP-level fetch with an SSRF guard follows redirects and applies desas's three-pillar model to the landing page HTML: credential capture, off-domain target, stealth.
-6. **Verdict.** desas's point model and thresholds (malicious ≥ 71, suspicious ≥ 31) produce the verdict, then a threat classification, confidence, explanation and block recommendations are added.
+5. **Detonation** (opt-in, up to 5 links). An HTTP-level fetch with an SSRF guard follows redirects and applies desas's three-pillar model to the landing page HTML: credential capture, off-domain target, stealth. Behind an egress proxy (`DETONATION_PROXY`, else `HTTPS_PROXY` / `HTTP_PROXY`) each hop is vetted before it leaves. Names only the proxy can resolve are allowed unless they look internal, and the result lists them.
+6. **Verdict.** desas's point model and thresholds (malicious ≥ 71, suspicious ≥ 31 by default; adjustable under Settings) produce the verdict, then a threat classification, confidence, explanation and block recommendations are added.
 
 ### Agent Governance (`lib/governance`)
 
@@ -165,15 +191,17 @@ An empty trigger never matches.
 - `autoExecute` playbooks run immediately.
 - Playbooks with neither flag are offered as manual suggestions on the case.
 
+**Recommendations.** `recommend.ts` scores every enabled playbook against a case: an exact trigger match, shared techniques or tactics, the case source and detections, distinctive words, and whether the evidence has a target for each step. The case page shows the top picks with their reasons, and investigation reports name them.
+
 **Actions.** Playbook steps run through the same executor as every other response action (see *Response actions* above):
 - containment and tickets go through the client's response connector;
-- `NOTIFY_SLACK` goes through the client's Slack or Teams integration (or `SLACK_WEBHOOK_URL`);
+- `NOTIFY_SLACK` goes through the client's Slack or Teams integration (or the SOC webhook from Settings / `SLACK_WEBHOOK_URL`);
 - a step with nothing to carry it out is reported as one to do by hand, and the run is flagged on the case.
 
 ### MITRE ATT&CK (`lib/mitre`)
 
-- **Catalog.** `catalog.ts` holds 14 tactics and 131 techniques covering everything any module emits. They are seeded into the `mitre_*` tables and upserted lazily by the case writer.
-- **Coverage.** `coverage.ts` builds the "detectable" layer from each module's rule registry. The "observed" layer comes from `case_mitre_techniques`.
+- **Catalog.** `catalog.ts` holds 14 tactics and 133 techniques covering everything any module emits. They are seeded into the `mitre_*` tables and upserted lazily by the case writer.
+- **Coverage.** `coverage.ts` builds the "detectable" layer from each module's rule registry, leaving out detectors switched off on the coverage page. The "observed" layer comes from `case_mitre_techniques`.
 
 ### Audit log (`lib/audit.ts`)
 
@@ -188,3 +216,4 @@ An empty trigger never matches.
 - `SecurityEvent` is the one telemetry table for SIEM ingestion and investigation evidence. Tables are separated by `platform` / `batchId`; investigation events carry their `caseId`.
 - `Detection.fingerprint` is unique and nullable: SIEM detections set it, while other sources may leave it empty.
 - `PlaybookExecution.triggeredBy` is `auto`, `manual` or `retroactive`; failures record `error`.
+- `ApiToken` stores only `tokenHash` and a short `prefix`; `Tenant.isTest` marks test clients.
