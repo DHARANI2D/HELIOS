@@ -54,6 +54,8 @@ export function CaseVolumeChart({ days }: { days: Day[] }) {
         name: "Critical & high",
         type: "bar",
         stack: "cases",
+        // Series-level color too, so the legend swatch matches the bars.
+        itemStyle: { color: t.series[0] },
         barMaxWidth: 20,
         data: days.map((d) => ({ value: d.high, itemStyle: segment(t.series[0], d.other === 0) })),
       },
@@ -61,6 +63,7 @@ export function CaseVolumeChart({ days }: { days: Day[] }) {
         name: "Medium & below",
         type: "bar",
         stack: "cases",
+        itemStyle: { color: t.muted },
         barMaxWidth: 20,
         data: days.map((d) => ({ value: d.other, itemStyle: segment(t.muted, true) })),
       },
