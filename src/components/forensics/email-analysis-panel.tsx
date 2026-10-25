@@ -47,6 +47,17 @@ function AttachmentCard({ a, nested = false }: { a: AttachmentAnalysis; nested?:
       {a.archiveEntries && a.archiveEntries.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">Archive: {a.archiveEntries.map((e) => `${e.name}${e.encrypted ? " 🔒" : ""}`).join(", ")}</p>
       )}
+      {a.macros && a.macros.length > 0 && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer">Macro source ({a.macros.length} module{a.macros.length === 1 ? "" : "s"})</summary>
+          {a.macros.map((m) => (
+            <div key={m.name} className="mt-2">
+              <p className="font-medium">{m.name}</p>
+              <pre className="mt-1 max-h-72 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-[11px] whitespace-pre-wrap break-all">{m.code}</pre>
+            </div>
+          ))}
+        </details>
+      )}
       {a.image && (a.image.qr.length > 0 || a.image.text || a.image.error) && (
         <div className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
           <p className="text-muted-foreground">Image {a.image.width}×{a.image.height}</p>

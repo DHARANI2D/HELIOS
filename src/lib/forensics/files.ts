@@ -5,6 +5,7 @@ import { extractUrls } from "@/lib/forensics/urls";
 import { extractZip } from "@/lib/archive/zip";
 import { analyzeBody } from "@/lib/forensics/body";
 import type { ImageFindings } from "@/lib/forensics/image";
+import { extractVba, type VbaModule } from "@/lib/forensics/vba";
 
 // Port of desas's attachments.py + forensics.py + archives.py + pe_analyzer.py
 // without the Python native stack (olefile, oletools, pefile, pdfminer):
@@ -61,6 +62,8 @@ export interface AttachmentAnalysis {
   archiveEntries?: Array<{ name: string; size: number; encrypted: boolean }>;
   // Whether a password opened the encrypted members (never the password).
   archiveUnlocked?: boolean;
+  // Recovered VBA source, per module (trimmed for storage).
+  macros?: Array<{ name: string; code: string }>;
   // QR codes and OCR text, for image attachments.
   image?: { width: number; height: number; text: string; qr: string[]; error?: string };
   children?: AttachmentAnalysis[];
@@ -482,10 +485,7 @@ export function analyzeFile(filename: string, data: Uint8Array, contentType?: st
         }
       }
     }
-    if (signals.hasMacros) {
-      const vba = vbaSemantics(latin1(data));
-      applyVba(vba);
-    }
+    if (signals.hasMacros) macroSource(extractVba(data), data);
     if ([".xls", ".xlsb"].includes(extension)) checkXlm(latin1(data));
   }
 
@@ -505,7 +505,7 @@ export function analyzeFile(filename: string, data: Uint8Array, contentType?: st
         }
         const members = readZipMembers(data, (n) => n === macroBin.name);
         const bin = members[macroBin.name];
-        if (bin) applyVba(vbaSemantics(latin1(bin)), " (keyword scan of the compressed macro container)");
+        if (bin) macroSource(extractVba(bin), bin);
       }
       if (entries.some((e) => /^xl\/macrosheets\//i.test(e.name))) {
         signals.xlmMacro = true;
@@ -630,6 +630,20 @@ export function analyzeFile(filename: string, data: Uint8Array, contentType?: st
     urls: [...urls],
     ...result,
   };
+
+  // Analyze the recovered source; only if none could be recovered, fall back
+  // to scanning the container bytes (where compression can split keywords).
+  function macroSource(modules: VbaModule[], container: Uint8Array) {
+    if (!modules.length) {
+      applyVba(vbaSemantics(latin1(container)), " (keyword scan of the compressed macro container — source could not be recovered)");
+      return;
+    }
+    const code = modules.map((m) => m.code).join("\n");
+    reasons.push(`Macro source recovered: ${modules.length} module${modules.length === 1 ? "" : "s"} (${modules.map((m) => m.name).join(", ")})`);
+    applyVba(vbaSemantics(code));
+    extractUrls(code).forEach((u) => urls.add(u));
+    result.macros = modules.slice(0, 20).map((m) => ({ name: m.name, code: m.code.slice(0, 20_000) }));
+  }
 
   function applyVba(vba: ReturnType<typeof vbaSemantics>, note = "") {
     if (vba.autoExec) {
