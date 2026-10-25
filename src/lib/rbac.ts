@@ -44,6 +44,7 @@ export const PERMISSIONS = {
   "reports.view": "Read client-facing incident reports",
   "detections.tune": "Switch SIEM detectors on and off",
   "settings.manage": "Edit platform settings: company profile, provider keys, forensics thresholds",
+  "api.tokens": "Create personal API tokens for the REST API (acting with their own permissions)",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -107,6 +108,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "ai.dispatch",
     "ai.feedback",
     "reports.view",
+    "api.tokens",
   ],
   INCIDENT_RESPONDER: [
     ...SOC_BASE,
@@ -126,12 +128,13 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "ai.feedback",
     "endpoints.contain",
     "reports.view",
+    "api.tokens",
   ],
-  THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback"],
-  DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune"],
-  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view"],
+  THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback", "api.tokens"],
+  DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune", "api.tokens"],
+  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens"],
   SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view"],
-  CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view"],
+  CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens"],
   CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view"],
 };
 

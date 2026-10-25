@@ -72,9 +72,31 @@ model User {
   integrationAssignments IntegrationAssignment[]
   quotes                 Quote[]
   aiFeedback             AiRun[]                 @relation("AiRunFeedback")
+  apiTokens              ApiToken[]
 
   @@index([tenantId])
   @@map("users")
+}
+
+// Personal access tokens for the REST API (/api/v1). A token acts as its
+// user — same role, client and queues — narrowed to read or read-write.
+// Stored only as a SHA-256 hash.
+model ApiToken {
+  id         String    @id @default(cuid())
+  name       String
+  userId     String
+  tokenHash  String    @unique
+  prefix     String // first characters, to recognize it in lists
+  canWrite   Boolean   @default(false)
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("api_tokens")
 }
 
 model Account {

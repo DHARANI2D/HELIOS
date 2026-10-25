@@ -31,6 +31,11 @@ import { getSetting } from "@/lib/settings";
 import { platformSecret, platformSecretStatus, storePlatformSecret } from "@/lib/platform-secrets";
 import { adoptAsTestEnvironment } from "../../../prisma/seed-test";
 import { CaseReportPdf, loadCaseReport } from "@/lib/pdf/case-report";
+import { issueApiToken, revokeApiToken } from "@/lib/api/tokens";
+import * as meRoute from "@/app/api/v1/me/route";
+import * as casesRoute from "@/app/api/v1/cases/route";
+import * as caseRoute from "@/app/api/v1/cases/[id]/route";
+import * as commentsRoute from "@/app/api/v1/cases/[id]/comments/route";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -329,6 +334,52 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(await platformSecret("virustotal")).toBe("env-vt-key-0000");
     expect((await platformSecretStatus()).virustotal).toEqual({ source: "environment" });
     delete process.env.VIRUSTOTAL_API_KEY;
+  });
+
+  it("serves the REST API with per-user tokens", async () => {
+    const acme = await db.tenant.create({ data: { name: "API Acme", slug: "api-acme" } });
+    const other = await db.tenant.create({ data: { name: "API Other", slug: "api-other" } });
+    const analyst = await db.user.create({ data: { email: "api.analyst@test.local", name: "API Analyst", role: "ANALYST" } });
+    const clientAdmin = await db.user.create({ data: { email: "api.client@acme.test", name: "API Client", role: "CLIENT_ADMIN", tenantId: acme.id } });
+    const own = await createCase({ sourceType: "SIEM_ALERT", title: "API: acme alert", severity: "HIGH", tenantId: acme.id, deferPipelines: true });
+    const foreign = await createCase({ sourceType: "SIEM_ALERT", title: "API: other alert", severity: "LOW", tenantId: other.id, deferPipelines: true });
+
+    const asUser = (u: { id: string; role: "ANALYST" | "CLIENT_ADMIN"; tenantId: string | null }) => ({ id: u.id, role: u.role, tenantId: u.tenantId, tenantName: null, domains: [], isClient: u.role === "CLIENT_ADMIN", name: null, email: null });
+    const { token: readToken } = await issueApiToken(asUser(analyst), { name: "read", canWrite: false, expiresInDays: 30 });
+    const { token: writeToken, record: writeRecord } = await issueApiToken(asUser(analyst), { name: "write", canWrite: true, expiresInDays: null });
+    const { token: clientToken } = await issueApiToken(asUser(clientAdmin), { name: "portal", canWrite: true, expiresInDays: 90 });
+    expect((await db.apiToken.findUniqueOrThrow({ where: { id: writeRecord.id } })).tokenHash).not.toContain(writeToken);
+
+    const call = (token: string | null, path: string, init: RequestInit = {}) =>
+      new Request(`http://helios.test${path}`, { ...init, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), "content-type": "application/json" } });
+    const ctx = (id: string) => ({ params: Promise.resolve({ id }) }) as never;
+
+    expect((await meRoute.GET(call(null, "/api/v1/me"))).status).toBe(401);
+    expect((await meRoute.GET(call("hpat_forged", "/api/v1/me"))).status).toBe(401);
+    const me = await (await meRoute.GET(call(readToken, "/api/v1/me"))).json();
+    expect(me).toMatchObject({ user: { email: "api.analyst@test.local", role: "ANALYST" }, token: { canWrite: false } });
+
+    const list = await (await casesRoute.GET(call(readToken, "/api/v1/cases?status=all&limit=200"))).json();
+    expect(list.data.map((c: { id: string }) => c.id)).toEqual(expect.arrayContaining([own.id, foreign.id]));
+
+    expect((await caseRoute.PATCH(call(readToken, `/api/v1/cases/${own.id}`, { method: "PATCH", body: JSON.stringify({ status: "TRIAGING" }) }), ctx(own.id))).status).toBe(403);
+    const patched = await caseRoute.PATCH(call(writeToken, `/api/v1/cases/${own.id}`, { method: "PATCH", body: JSON.stringify({ status: "TRIAGING", note: "via API" }) }), ctx(own.id));
+    expect(patched.status).toBe(200);
+    expect((await patched.json()).status).toBe("TRIAGING");
+    expect(await db.auditLog.findFirst({ where: { caseId: own.id, action: "case.status_changed", actorId: analyst.id } })).not.toBeNull();
+    expect((await caseRoute.PATCH(call(writeToken, `/api/v1/cases/${own.id}`, { method: "PATCH", body: JSON.stringify({ bogus: 1 }) }), ctx(own.id))).status).toBe(400);
+
+    // A client token sees its own estate only, and its comments are always client-visible.
+    const clientList = await (await casesRoute.GET(call(clientToken, "/api/v1/cases?status=all"))).json();
+    expect(clientList.data.map((c: { id: string }) => c.id)).toEqual([own.id]);
+    expect((await caseRoute.GET(call(clientToken, `/api/v1/cases/${foreign.id}`), ctx(foreign.id))).status).toBe(404);
+    const comment = await commentsRoute.POST(call(clientToken, `/api/v1/cases/${own.id}/comments`, { method: "POST", body: JSON.stringify({ body: "Is this expected?" }) }), ctx(own.id));
+    expect(comment.status).toBe(201);
+    expect((await comment.json()).internal).toBe(false);
+    expect((await caseRoute.PATCH(call(clientToken, `/api/v1/cases/${own.id}`, { method: "PATCH", body: JSON.stringify({ status: "RESOLVED" }) }), ctx(own.id))).status).toBe(403);
+
+    await revokeApiToken(asUser(analyst), writeRecord.id);
+    expect((await meRoute.GET(call(writeToken, "/api/v1/me"))).status).toBe(401);
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {
