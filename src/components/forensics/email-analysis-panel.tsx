@@ -47,6 +47,19 @@ function AttachmentCard({ a, nested = false }: { a: AttachmentAnalysis; nested?:
       {a.archiveEntries && a.archiveEntries.length > 0 && (
         <p className="mt-1 text-xs text-muted-foreground">Archive: {a.archiveEntries.map((e) => `${e.name}${e.encrypted ? " 🔒" : ""}`).join(", ")}</p>
       )}
+      {a.image && (a.image.qr.length > 0 || a.image.text || a.image.error) && (
+        <div className="mt-2 rounded-md bg-muted/50 p-2 text-xs">
+          <p className="text-muted-foreground">Image {a.image.width}×{a.image.height}</p>
+          {a.image.qr.map((q) => <p key={q}>QR code: <span className="font-mono break-all">{q}</span></p>)}
+          {a.image.text && (
+            <details className="mt-1">
+              <summary className="cursor-pointer">Text read from the image ({a.image.text.length} characters)</summary>
+              <p className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{a.image.text}</p>
+            </details>
+          )}
+          {a.image.error && <p className="text-muted-foreground">{a.image.error}</p>}
+        </div>
+      )}
       {a.children?.map((c) => <div key={c.sha256 + c.filename} className="mt-2"><AttachmentCard a={c} nested /></div>)}
     </div>
   );

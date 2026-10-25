@@ -3,6 +3,8 @@ import { unzipSync } from "fflate";
 
 import { extractUrls } from "@/lib/forensics/urls";
 import { extractZip } from "@/lib/archive/zip";
+import { analyzeBody } from "@/lib/forensics/body";
+import type { ImageFindings } from "@/lib/forensics/image";
 
 // Port of desas's attachments.py + forensics.py + archives.py + pe_analyzer.py
 // without the Python native stack (olefile, oletools, pefile, pdfminer):
@@ -28,6 +30,8 @@ export interface ForensicSignals {
   executable: boolean;
   // Password-protected archive: gateways can't scan inside it.
   encryptedArchive: boolean;
+  // A QR code that opens a web link ("quishing").
+  qrLink: boolean;
   suspiciousCalls: string[];
 }
 
@@ -57,6 +61,8 @@ export interface AttachmentAnalysis {
   archiveEntries?: Array<{ name: string; size: number; encrypted: boolean }>;
   // Whether a password opened the encrypted members (never the password).
   archiveUnlocked?: boolean;
+  // QR codes and OCR text, for image attachments.
+  image?: { width: number; height: number; text: string; qr: string[]; error?: string };
   children?: AttachmentAnalysis[];
 }
 
@@ -294,6 +300,7 @@ const TECHNIQUE_FOR_SIGNAL: Partial<Record<keyof ForensicSignals, string>> = {
   xlmMacro: "T1059",
   executable: "T1204.002",
   encryptedArchive: "T1027.013",
+  qrLink: "T1566.002",
 };
 
 // Techniques the forensics module can emit (attachment signals plus the
@@ -308,6 +315,42 @@ export const FORENSICS_RULE_TECHNIQUES: Array<{ rule: string; techniques: string
 // desas forensics.infer_mitre_techniques.
 export function techniquesFor(signals: ForensicSignals): string[] {
   return [...new Set((Object.keys(TECHNIQUE_FOR_SIGNAL) as Array<keyof ForensicSignals>).filter((k) => signals[k] === true).map((k) => TECHNIQUE_FOR_SIGNAL[k]!))].sort();
+}
+
+// Folds what an image holds into its attachment analysis: a QR code that
+// opens a link scores like a phishing link (the gateway never saw it as
+// text), and printed text goes through the same content checks as a body.
+export function applyImageFindings(a: AttachmentAnalysis, img: ImageFindings, whitelist?: string[]): AttachmentAnalysis {
+  const reasons = [...a.reasons];
+  const urls = new Set(a.urls);
+  const signals = { ...a.signals };
+  let score = a.score;
+  for (const payload of img.qr) {
+    if (/^https?:\/\//i.test(payload)) {
+      signals.qrLink = true;
+      score += 25;
+      urls.add(payload);
+      reasons.push(`QR code opens ${payload}`);
+    } else {
+      reasons.push(`QR code holds: ${payload.slice(0, 80)}`);
+    }
+  }
+  if (img.text.length >= 20) {
+    const body = analyzeBody(img.text, undefined, whitelist);
+    score += Math.min(40, body.score);
+    reasons.push(...body.reasons.map((r) => `Text in image: ${r}`));
+    body.urls.forEach((u) => urls.add(u));
+  }
+  return {
+    ...a,
+    score,
+    risk: riskFor(score),
+    reasons: [...new Set(reasons)],
+    urls: [...urls],
+    signals,
+    techniques: techniquesFor(signals),
+    image: { width: img.width, height: img.height, text: img.text.slice(0, 2000), qr: img.qr, error: img.error },
+  };
 }
 
 export function riskFor(score: number): AttachmentAnalysis["risk"] {
@@ -330,7 +373,7 @@ export function analyzeFile(filename: string, data: Uint8Array, contentType?: st
   const signals: ForensicSignals = {
     hasMacros: false, autoExec: false, obfuscation: false, envFingerprinting: false, stagingLogic: false,
     hasJs: false, hasLaunch: false, embeddedFiles: false, doubleExtension: false, polyglot: false,
-    appendedData: false, oleAnomaly: false, xlmMacro: false, highEntropy: false, executable: false, encryptedArchive: false, suspiciousCalls: [],
+    appendedData: false, oleAnomaly: false, xlmMacro: false, highEntropy: false, executable: false, encryptedArchive: false, qrLink: false, suspiciousCalls: [],
   };
   const lowerName = filename.toLowerCase();
   const extension = ext(lowerName);

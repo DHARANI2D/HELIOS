@@ -6,7 +6,8 @@ import { createCase, type NewDetection, type NewIndicator, type NewTimelineEntry
 import { analyzeHeaders, type HeaderAnalysis } from "@/lib/forensics/headers";
 import { parseMessage } from "@/lib/forensics/message";
 import { analyzeBody, domainWhitelist, type BodyAnalysis } from "@/lib/forensics/body";
-import { analyzeFile, riskFor, type AttachmentAnalysis } from "@/lib/forensics/files";
+import { analyzeFile, applyImageFindings, riskFor, type AttachmentAnalysis } from "@/lib/forensics/files";
+import { inspectImage, isRasterImage } from "@/lib/forensics/image";
 import { detonateUrl, type DetonationResult } from "@/lib/forensics/sandbox";
 import { aggregateVerdict, type ScoreComponent, type VerdictResult } from "@/lib/forensics/scoring";
 import { hostOf, registrableDomain } from "@/lib/forensics/urls";
@@ -25,6 +26,8 @@ import { getSetting } from "@/lib/settings";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_DETONATIONS = 5;
+// Images read for QR codes and text per submission (OCR takes a second or two each).
+const MAX_IMAGES = 6;
 
 export interface EmailSummary {
   format: "eml" | "msg";
@@ -175,6 +178,23 @@ export async function analyzeSubmission(input: AnalyzeInput) {
     );
   } else {
     attachments = [analyzeFile(input.filename, input.bytes, undefined, 0, { passwords: input.archivePasswords })];
+  }
+
+  // Images, inline or attached: QR codes and printed text.
+  const sources = message ? message.attachments.slice(0, MAX_ATTACHMENTS).map((a) => a.content) : [input.bytes];
+  let imageText = 0;
+  let images = 0;
+  for (let i = 0; i < attachments.length && images < MAX_IMAGES; i++) {
+    if (!sources[i] || !isRasterImage(sources[i])) continue;
+    images++;
+    const found = await inspectImage(sources[i]);
+    imageText += found.text.length;
+    attachments[i] = applyImageFindings(attachments[i], found, whitelist);
+  }
+  // A message whose words are all in a picture is hiding them from filters.
+  if (body && message && message.text.trim().length < 40 && imageText >= 60) {
+    body.score += 15;
+    body.reasons.push("The message's text is in an image, out of reach of text-based filters");
   }
 
   const allFiles = flattenAttachments(attachments);

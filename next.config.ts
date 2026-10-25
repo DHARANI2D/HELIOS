@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Tesseract starts its OCR worker from a file in its own package and reads
+  // its language data from beside it; bundling would break both paths.
+  serverExternalPackages: ["tesseract.js", "@tesseract.js-data/eng"],
   experimental: {
     // forbidden() renders app/forbidden.tsx with a 403 for pages a role
     // can't open (lib/session pageGuard).
