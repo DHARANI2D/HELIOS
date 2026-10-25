@@ -5,6 +5,7 @@ import { CATEGORIES, toolLabel, toolUnitPrice, type ToolDefinition } from "@/lib
 import { CONTROLS, type ProtectionControl } from "@/lib/endpoints/controls";
 import { PRICE_ITEM_INDEX, type PriceBook } from "@/lib/pricing/items";
 import { endpointMixSchema, mixMobile, mixServers, mixWorkstations } from "@/lib/pricing/endpoint-mix";
+import { EMPTY_CONTEXT, EMPTY_ESTATE, contextSchema, estateSchema } from "@/lib/assets/estate";
 
 // Build & Price: turns a client profile + chosen stack into a priced quote.
 // Pure and deterministic (no I/O): every price comes in through the
@@ -23,7 +24,12 @@ export const quoteConfigSchema = z.object({
     // Endpoints by OS. When given, workstations and servers are its totals,
     // and tool suggestions check each product runs on these machines.
     mix: endpointMixSchema.nullable().default(null),
+    // Everything beyond computers, servers and phones: cloud, network,
+    // identities, IoT/OT and applications (lib/assets/estate.ts).
+    estate: estateSchema.default(EMPTY_ESTATE),
   }),
+  // What kind of organization it is; sets which asset groups come first.
+  context: contextSchema.default(EMPTY_CONTEXT),
   plan: z.string().max(64).default(""), // service plan key
   // Per category: a tool key, "byo" (client already licenses one), or "none".
   tools: z.record(z.string(), z.string()).default({}),
@@ -159,13 +165,17 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function toolUnits(tool: ToolDefinition, cfg: QuoteConfig) {
   const mix = cfg.profile.mix;
+  const e = cfg.profile.estate ?? EMPTY_ESTATE;
+  const per = (qty: number, one: string, many = `${one}s`) => ({ qty, label: `${qty} ${qty === 1 ? one : many}` });
   const servers = mix ? mixServers(mix) : cfg.profile.servers;
   const endpoints = (mix ? mixWorkstations(mix) : cfg.profile.workstations) + servers;
   switch (tool.price.unit) {
     case "endpoint": {
-      // Device management licenses phones and tablets too.
-      const mobile = tool.category === "mdm" && mix ? mixMobile(mix) : 0;
-      return mobile ? { qty: endpoints + mobile, label: `${endpoints + mobile} devices` } : { qty: endpoints, label: `${endpoints} endpoints` };
+      // Device management licenses phones and tablets too; mobile threat
+      // defense licenses only them.
+      const mobile = mix ? mixMobile(mix) : 0;
+      if (tool.category === "mtd") return per(mobile, "phone or tablet", "phones and tablets");
+      return tool.category === "mdm" && mobile ? { qty: endpoints + mobile, label: `${endpoints + mobile} devices` } : { qty: endpoints, label: `${endpoints} endpoints` };
     }
     case "user":
       return { qty: cfg.profile.users, label: `${cfg.profile.users} users` };
@@ -175,7 +185,34 @@ function toolUnits(tool: ToolDefinition, cfg: QuoteConfig) {
       return { qty: Math.round(cfg.profile.logGbPerDay * 30), label: `${Math.round(cfg.profile.logGbPerDay * 30)} GB/month` };
     case "flat":
       return { qty: 1, label: "flat" };
+    case "workload":
+      return per(e.cloudWorkloads, "cloud workload");
+    case "account":
+      return per(e.cloudAccounts, "cloud account");
+    case "device":
+      return per(e.networkDevices, "network device");
+    case "asset":
+      return per(e.iotDevices + e.otDevices, "IoT/OT device");
+    case "app":
+      return per(e.internetApps, "internet-facing app");
+    case "developer":
+      return per(e.developers, "developer");
+    case "admin":
+      return per(e.privilegedAccounts, "privileged account");
   }
+}
+
+// The tools that make up a stack, layer by layer: the ones the quote
+// licenses and the client's own ones that are named.
+export function stackTools(cfg: QuoteConfig, ctx: Pick<PricingContext, "tools">): Array<{ category: string; tool: ToolDefinition; own: boolean }> {
+  const out: Array<{ category: string; tool: ToolDefinition; own: boolean }> = [];
+  for (const category of CATEGORIES.filter((c) => c.priced)) {
+    const choice = cfg.tools[category.key] ?? "none";
+    const key = choice === "byo" ? cfg.existing[category.key] : choice;
+    const tool = key && key !== "none" ? ctx.tools.find((t) => t.key === key && t.category === category.key) : undefined;
+    if (tool) out.push({ category: category.key, tool, own: choice === "byo" });
+  }
+  return out;
 }
 
 export function toolMonthlyPrice(tool: ToolDefinition, cfg: QuoteConfig) {
@@ -236,6 +273,20 @@ export function calculateQuote(input: QuoteConfig, ctx: PricingContext): QuoteRe
     const p = need("svc.identity");
     lines.push({ key: "service.identity", kind: "service", label: "Identity & email monitoring", detail: `${cfg.profile.users} users × ${p.toFixed(2)}`, monthly: round2(cfg.profile.users * p), oneTime: 0, costMonthly: round2(cfg.profile.users * costOf("svc.identity")), costOneTime: 0 });
   }
+  // Monitoring the rest of the attack surface, priced per asset.
+  const estate = cfg.profile.estate;
+  const perAsset = (count: number, key: string, item: string, label: string, unit: string) => {
+    if (count <= 0) return;
+    const p = need(item);
+    lines.push({ key, kind: "service", label, detail: `${count} ${unit} × ${p.toFixed(2)}`, monthly: round2(count * p), oneTime: 0, costMonthly: round2(count * costOf(item)), costOneTime: 0 });
+  };
+  perAsset(estate.cloudAccounts, "service.cloud.accounts", "svc.cloud.account", "Cloud account monitoring", "accounts");
+  perAsset(estate.cloudWorkloads, "service.cloud.workloads", "svc.cloud.workload", "Cloud workload monitoring", "workloads");
+  perAsset(estate.saasApps, "service.saas", "svc.saas", "SaaS platform monitoring", "platforms");
+  perAsset(estate.networkDevices, "service.network", "svc.network", "Network & security device monitoring", "devices");
+  perAsset(estate.iotDevices, "service.iot", "svc.iot", "IoT device monitoring", "devices");
+  perAsset(estate.otDevices, "service.ot", "svc.ot", "OT / medical device monitoring", "devices");
+  perAsset(estate.internetApps, "service.apps", "svc.app", "Internet-facing application monitoring", "apps");
   if (cfg.services.compliance && !(plan && hasFeature(plan, "compliance"))) {
     lines.push({ key: "service.compliance", kind: "service", label: "Compliance evidence packs", detail: "monthly", monthly: need("svc.compliance"), oneTime: 0, costMonthly: costOf("svc.compliance"), costOneTime: 0 });
   }

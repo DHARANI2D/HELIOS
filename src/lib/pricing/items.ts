@@ -4,7 +4,7 @@
 // any it needs, and a quote can't be saved until they're filled in
 // (Build & Price → Price book). Values live in the price_items table.
 
-export type ItemUnit = "endpoint" | "server" | "user" | "hour" | "engagement" | "session" | "month" | "one-time" | "percent" | "ratio";
+export type ItemUnit = "endpoint" | "server" | "user" | "account" | "workload" | "device" | "app" | "hour" | "engagement" | "session" | "month" | "one-time" | "percent" | "ratio";
 
 export type PriceGroup = "Managed service" | "Onboarding" | "Professional services" | "AI" | "Commercial terms";
 
@@ -23,6 +23,13 @@ export const PRICE_GROUPS: PriceGroup[] = ["Managed service", "Onboarding", "Pro
 export const PRICE_ITEMS: PriceItemDef[] = [
   { key: "svc.server", group: "Managed service", label: "Server monitoring surcharge", unit: "server", note: "Per server per month, on top of the plan; 0 if you don't charge one", hasCost: true },
   { key: "svc.identity", group: "Managed service", label: "Identity & email monitoring", unit: "user", note: "Per user per month; 0 if it's part of the plan", hasCost: true },
+  { key: "svc.cloud.account", group: "Managed service", label: "Cloud account monitoring", unit: "account", note: "Per AWS account, Azure subscription or Google Cloud project per month", hasCost: true },
+  { key: "svc.cloud.workload", group: "Managed service", label: "Cloud workload monitoring", unit: "workload", note: "Per VM, Kubernetes node or container workload per month", hasCost: true },
+  { key: "svc.saas", group: "Managed service", label: "SaaS platform monitoring", unit: "app", note: "Per SaaS platform (Microsoft 365, Google Workspace, Salesforce…) per month", hasCost: true },
+  { key: "svc.network", group: "Managed service", label: "Network & security device monitoring", unit: "device", note: "Per firewall, VPN gateway, switch or access point per month", hasCost: true },
+  { key: "svc.iot", group: "Managed service", label: "IoT device monitoring", unit: "device", note: "Per camera, printer or smart device per month", hasCost: true },
+  { key: "svc.ot", group: "Managed service", label: "OT / medical device monitoring", unit: "device", note: "Per PLC, HMI, medical or building-management device per month", hasCost: true },
+  { key: "svc.app", group: "Managed service", label: "Internet-facing application monitoring", unit: "app", note: "Per website, portal or API per month", hasCost: true },
   { key: "svc.compliance", group: "Managed service", label: "Compliance evidence packs", unit: "month", note: "Add-on for plans that don't include it", hasCost: true },
   { key: "svc.dedicated", group: "Managed service", label: "Named lead analyst", unit: "month", note: "Add-on for plans that don't include it", hasCost: true },
   { key: "svc.support.premium", group: "Managed service", label: "Premium support", unit: "percent", note: "Share of the managed-service fee", hasCost: false },
@@ -54,6 +61,10 @@ export const ITEM_UNIT_LABEL: Record<ItemUnit, string> = {
   endpoint: "per endpoint",
   server: "per server",
   user: "per user",
+  account: "per account",
+  workload: "per workload",
+  device: "per device",
+  app: "per app",
   hour: "per hour",
   engagement: "per engagement",
   session: "per session",

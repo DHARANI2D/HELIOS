@@ -7,6 +7,8 @@ import { formatMoney, normalizeConfig, toolMonthlyPrice, type PricingContext, ty
 import { ADVISOR_GOALS, adviseStack, type Advice, type AdvisorGoal } from "@/lib/pricing/advisor";
 import { describeMix, mixMobile } from "@/lib/pricing/endpoint-mix";
 import { choiceLabel, controlShort, stackTool } from "@/lib/pricing/upgrades";
+import { surfaceCoverage } from "@/lib/assets/coverage";
+import { COMPANY_TYPES, ENVIRONMENTS, INDUSTRIES, MATURITY } from "@/lib/assets/estate";
 
 // The AI stack advisor. The rules (advisor.ts) score and price every catalog
 // tool for the client first; the model then picks one per layer from those
@@ -56,6 +58,7 @@ function rulesSummary(advice: Advice, money: (n: number) => string) {
 }
 
 function renderFacts(cfg: QuoteConfig, ctx: PricingContext, advice: Advice, money: (n: number) => string) {
+  const surface = surfaceCoverage(advice.config, ctx);
   const mix = cfg.profile.mix;
   const plan = ctx.plans.find((p) => p.key === cfg.plan);
   const lines = [
@@ -66,6 +69,9 @@ function renderFacts(cfg: QuoteConfig, ctx: PricingContext, advice: Advice, mone
     `Logs: ${cfg.profile.logGbPerDay} GB/day`,
     `Service plan: ${plan ? `${plan.name} (${plan.coverage})` : "not chosen"}`,
     `Goal: ${ADVISOR_GOALS[advice.goal].label}: ${ADVISOR_GOALS[advice.goal].description}`,
+    `Organization: ${[cfg.context.companyType && COMPANY_TYPES[cfg.context.companyType], INDUSTRIES[cfg.context.industry], cfg.context.environment && ENVIRONMENTS[cfg.context.environment], cfg.context.maturity && MATURITY[cfg.context.maturity]].filter(Boolean).join("; ")}`,
+    "Attack surface (asset group, priority, what they have, open gaps after the rules' picks):",
+    ...surface.classes.map((c) => `- ${c.info.label} [${c.priority}${c.reasons.length ? `: ${c.reasons.join("; ")}` : ""}]: ${c.describe}; gaps: ${c.gaps.map(controlShort).join(", ") || "none"}`),
     `Prices are per month in ${cfg.commercial.currency}.`,
     "</client>",
     "<layers>",
@@ -101,6 +107,7 @@ const SYSTEM = (audience: AdvisorAudience) =>
 - Choose for every layer exactly one of: a candidate key listed under that layer, "keep" (the current choice), or "none".
 - Base the choice on the facts given and your general knowledge of these products. Never choose a tool that doesn't run on devices the client has when a candidate that does exists.
 - Don't pay twice for the same control: skip a layer whose controls the other picks already provide.
+- Cover the client's whole attack surface in priority order (P1 groups first); the managed service already provides central log collection (SIEM) and automated response (SOAR).
 - Respect the goal. Prefer keeping the current tool when an alternative is only marginally better: switching costs a migration.
 - Mention prices only exactly as given, and never invent products, prices or features.`,
   ].join("\n\n");

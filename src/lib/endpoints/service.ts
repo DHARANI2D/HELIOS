@@ -6,6 +6,7 @@ import { getCatalogTool } from "@/lib/integrations/tools";
 import { dispatchAction } from "@/lib/integrations/dispatch";
 import { CONTROL_KEYS, parseProtections, type ControlStatus, type EndpointProtections, type ProtectionControl } from "@/lib/endpoints/controls";
 import type { InventoryRecord } from "@/lib/integrations/mappers";
+import { isDeviceControl } from "@/lib/assets/capabilities";
 
 // The endpoint inventory builds itself: every host seen in telemetry gets a
 // row, a tool that reports through its integration marks the protection
@@ -44,7 +45,8 @@ export async function touchEndpoints(
 
   for (const [hostname, info] of hosts) {
     const existing = await findEndpoint(tenantId, hostname);
-    const protections = tool?.controls.length ? withControls(existing?.protections ?? null, tool.controls, integration!.name) : undefined;
+    const deviceControls = (tool?.controls ?? []).filter(isDeviceControl);
+    const protections = deviceControls.length ? withControls(existing?.protections ?? null, deviceControls, integration!.name) : undefined;
     if (existing) {
       await db.endpoint.update({
         where: { id: existing.id },

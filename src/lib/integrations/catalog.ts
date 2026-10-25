@@ -1,6 +1,6 @@
 import type { PlaybookActionType, UserRole } from "@prisma/client";
 
-import type { ProtectionControl } from "@/lib/endpoints/controls";
+import type { Capability } from "@/lib/assets/capabilities";
 import type { TelemetrySource } from "@/lib/siem/types";
 
 // The taxonomy of security tools HELIOS can onboard. The tools themselves
@@ -20,6 +20,14 @@ export type CategoryKey =
   | "siem"
   | "backup"
   | "awareness"
+  | "mtd"
+  | "cloud"
+  | "ndr"
+  | "pam"
+  | "ot"
+  | "webapp"
+  | "code"
+  | "netmgmt"
   | "ticketing"
   | "chatops"
   | "automation";
@@ -50,12 +58,20 @@ export const CATEGORIES: ToolCategory[] = [
   { key: "siem", label: "SIEM & log management", description: "Central log retention and correlation", telemetry: "endpoint", defaultRoles: SOC, priced: true },
   { key: "backup", label: "Backup & ransomware recovery", description: "Immutable backups and restore", telemetry: "endpoint", defaultRoles: ["SOC_MANAGER", "INCIDENT_RESPONDER"], priced: true },
   { key: "awareness", label: "Security awareness training", description: "Phishing simulation and training for staff", telemetry: "auth", defaultRoles: ["SOC_MANAGER"], priced: true },
+  { key: "mtd", label: "Mobile threat defense", description: "Malicious apps, phishing and network attacks on phones and tablets", telemetry: "endpoint", defaultRoles: SOC, priced: true },
+  { key: "cloud", label: "Cloud security (CSPM / CWPP)", description: "Posture, permissions and workload protection across AWS, Azure, Google Cloud and SaaS", telemetry: "cloud", defaultRoles: SOC, priced: true },
+  { key: "ndr", label: "Network detection & IDS", description: "Intrusion detection and traffic analysis inside the network", telemetry: "network", defaultRoles: ["SOC_MANAGER", "ANALYST", "THREAT_HUNTER", "DETECTION_ENGINEER", "INCIDENT_RESPONDER"], priced: true },
+  { key: "pam", label: "Privileged access (PAM)", description: "Vaulted admin credentials, just-in-time elevation and session recording", telemetry: "auth", defaultRoles: ["SOC_MANAGER", "INCIDENT_RESPONDER", "DETECTION_ENGINEER"], priced: true },
+  { key: "ot", label: "IoT / OT security", description: "Passive discovery and monitoring of industrial, medical and IoT devices", telemetry: "network", defaultRoles: ["SOC_MANAGER", "INCIDENT_RESPONDER", "THREAT_HUNTER"], priced: true },
+  { key: "netmgmt", label: "Network device management", description: "Configuration backup, change tracking and firmware for firewalls, VPNs, switches and access points", telemetry: "network", defaultRoles: ["SOC_MANAGER", "DETECTION_ENGINEER", "INCIDENT_RESPONDER"], priced: true },
+  { key: "webapp", label: "Web application & API protection", description: "WAF and API protection for internet-facing apps, portals and APIs", telemetry: "cloud", defaultRoles: ["SOC_MANAGER", "DETECTION_ENGINEER", "ANALYST"], priced: true },
+  { key: "code", label: "Code & secrets security", description: "Code, dependency and secrets scanning in repositories and CI/CD pipelines", telemetry: "cloud", defaultRoles: ["SOC_MANAGER", "DETECTION_ENGINEER", "THREAT_HUNTER"], priced: true },
   { key: "ticketing", label: "Ticketing & ITSM", description: "Cases sync to the client's service desk", telemetry: "cloud", defaultRoles: ["SOC_MANAGER", "ANALYST", "INCIDENT_RESPONDER"], priced: false },
   { key: "chatops", label: "Chat & paging", description: "Alert routing to Slack, Teams and on-call", telemetry: "cloud", defaultRoles: SOC, priced: false },
   { key: "automation", label: "Automation / SOAR", description: "Signed webhooks that carry out response actions anywhere", telemetry: "cloud", defaultRoles: ["SOC_MANAGER", "DETECTION_ENGINEER", "INCIDENT_RESPONDER"], priced: false },
 ];
 
-export type PriceUnit = "endpoint" | "user" | "server" | "gb" | "flat";
+export type PriceUnit = "endpoint" | "user" | "server" | "gb" | "flat" | "workload" | "account" | "device" | "asset" | "app" | "developer" | "admin";
 
 export const UNIT_LABEL: Record<PriceUnit, string> = {
   endpoint: "per endpoint / month",
@@ -63,6 +79,13 @@ export const UNIT_LABEL: Record<PriceUnit, string> = {
   server: "per server / month",
   gb: "per GB ingested",
   flat: "per month",
+  workload: "per cloud workload / month",
+  account: "per cloud account / month",
+  device: "per network device / month",
+  asset: "per IoT/OT device / month",
+  app: "per app or domain / month",
+  developer: "per developer / month",
+  admin: "per privileged account / month",
 };
 
 // How a pushed payload is mapped (src/lib/integrations/mappers.ts).
@@ -74,7 +97,9 @@ export interface ToolDefinition {
   vendor: string;
   category: CategoryKey;
   description: string;
-  controls: ProtectionControl[];
+  // Security capabilities it provides (device controls and the wider
+  // attack surface; lib/assets/capabilities.ts).
+  controls: Capability[];
   // Response actions this tool can carry out once its response connector is set.
   actions: PlaybookActionType[];
   ingest: IngestFormat | null;
@@ -109,7 +134,7 @@ export interface CatalogToolRow {
 }
 
 const INGEST_FORMATS = new Set<IngestFormat>(["crowdstrike", "defender", "sentinelone", "wazuh", "entra", "okta", "generic"]);
-const PRICE_UNITS = new Set<PriceUnit>(["endpoint", "user", "server", "gb", "flat"]);
+const PRICE_UNITS = new Set<PriceUnit>(Object.keys(UNIT_LABEL) as PriceUnit[]);
 
 export function toolFromRow(row: CatalogToolRow): ToolDefinition {
   return {
@@ -118,7 +143,7 @@ export function toolFromRow(row: CatalogToolRow): ToolDefinition {
     vendor: row.vendor,
     category: (getCategory(row.category)?.key ?? "automation") as CategoryKey,
     description: row.description,
-    controls: row.controls as ProtectionControl[],
+    controls: row.controls as Capability[],
     actions: row.actions,
     ingest: row.ingest && INGEST_FORMATS.has(row.ingest as IngestFormat) ? (row.ingest as IngestFormat) : null,
     platforms: row.platforms,

@@ -18,7 +18,7 @@ import {
   type CustomToolInput,
 } from "@/app/(app)/pricing/actions";
 import { CATEGORIES, UNIT_LABEL, toolLabel, type PriceUnit, type ToolDefinition } from "@/lib/integrations/catalog";
-import { CONTROLS } from "@/lib/endpoints/controls";
+import { CAPABILITIES } from "@/lib/assets/capabilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -139,10 +139,10 @@ function AddToolDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
           <div className="grid gap-1.5 sm:col-span-2">
             <Label className="text-xs">Protection it provides</Label>
             <div className="flex flex-wrap gap-1.5">
-              {CONTROLS.map((c) => {
+              {CAPABILITIES.map((c) => {
                 const on = d.controls.includes(c.key);
                 return (
-                  <button key={c.key} type="button" onClick={() => setD({ ...d, controls: on ? d.controls.filter((x) => x !== c.key) : [...d.controls, c.key] })} className={`rounded-full border px-2.5 py-0.5 text-xs ${on ? "border-primary bg-primary text-primary-foreground" : "hover:bg-accent"}`} aria-pressed={on}>
+                  <button key={c.key} type="button" title={c.label} onClick={() => setD({ ...d, controls: on ? d.controls.filter((x) => x !== c.key) : [...d.controls, c.key] })} className={`rounded-full border px-2.5 py-0.5 text-xs ${on ? "border-primary bg-primary text-primary-foreground" : "hover:bg-accent"}`} aria-pressed={on}>
                     {c.short}
                   </button>
                 );

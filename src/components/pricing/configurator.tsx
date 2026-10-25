@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { adviseStackAction, saveQuoteAction } from "@/app/(app)/pricing/actions";
 import { CATEGORIES, UNIT_LABEL, toolLabel } from "@/lib/integrations/catalog";
 import { CONTROLS } from "@/lib/endpoints/controls";
+import { capabilityName, capabilityShort } from "@/lib/assets/capabilities";
 import { PLAN_FEATURES, PLAN_FEATURE_LABEL, formatMinutes, hasFeature } from "@/lib/plans";
 import { calculateQuote, comparePlans, formatMoney, toolMonthlyPrice, type PricingContext, type QuoteConfig, type QuoteResult } from "@/lib/pricing/calculator";
 import { EMPTY_MIX, type EndpointMix } from "@/lib/pricing/endpoint-mix";
@@ -680,7 +681,7 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
                             <td className="px-2 py-2 text-right tabular">{p.monthly == null ? "—" : money(p.monthly, 0)}</td>
                             <td className="px-2 py-2">
                               <div className="flex flex-wrap gap-1">
-                                {t.controls.length ? t.controls.map((c) => <Badge key={c} variant="outline" className="font-mono text-[10px] uppercase">{CONTROLS.find((x) => x.key === c)?.short}</Badge>) : <span className="text-xs text-muted-foreground">—</span>}
+                                {t.controls.length ? t.controls.map((c) => <Badge key={c} variant="outline" className="font-mono text-[10px] uppercase" title={capabilityName(c)}>{capabilityShort(c)}</Badge>) : <span className="text-xs text-muted-foreground">—</span>}
                               </div>
                             </td>
                             <td className="px-2 py-2 text-xs text-muted-foreground">{t.platforms.join(", ")}</td>

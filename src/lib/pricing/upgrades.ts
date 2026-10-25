@@ -1,6 +1,9 @@
 import { CATEGORIES, getCategory, toolLabel, type ToolCategory, type ToolDefinition } from "@/lib/integrations/catalog";
-import { CONTROLS, type ProtectionControl } from "@/lib/endpoints/controls";
+import { ESSENTIAL_CONTROLS } from "@/lib/endpoints/controls";
+import { capabilityName, capabilityShort, type Capability } from "@/lib/assets/capabilities";
+import { assetPriorities, capabilityValue, presentClasses } from "@/lib/assets/surface";
 import { calculateQuote, normalizeConfig, toolMonthlyPrice, type PricingContext, type QuoteConfig, type QuoteResult } from "@/lib/pricing/calculator";
+import type { ProtectionControl } from "@/lib/endpoints/controls";
 import { platformFit, type PlatformFit } from "@/lib/pricing/endpoint-mix";
 
 // Upgrade review: for each layer of an existing stack (a saved quote, a
@@ -9,9 +12,15 @@ import { platformFit, type PlatformFit } from "@/lib/pricing/endpoint-mix";
 // client's machines, and what it costs in comparison. Pure; prices come from
 // the same calculator as quotes.
 
-const ESSENTIAL = new Set(CONTROLS.filter((c) => c.essential).map((c) => c.key));
-export const controlWeight = (c: ProtectionControl) => (ESSENTIAL.has(c) ? 3 : 1);
-const weigh = (cs: ProtectionControl[]) => cs.reduce((s, c) => s + controlWeight(c), 0);
+// How much a capability matters to this client: the priority of the asset
+// groups it protects that the client has (lib/assets/surface.ts). Before
+// anything is counted, essential device controls weigh most.
+export function capabilityWeigher(cfg: QuoteConfig): (c: Capability) => number {
+  const present = presentClasses(cfg.profile);
+  if (!present.length) return (c) => ((ESSENTIAL_CONTROLS as string[]).includes(c) ? 3 : 1);
+  const priorities = assetPriorities(cfg.context);
+  return (c) => capabilityValue(c, present, priorities);
+}
 
 export type OptionKind = "upgrade" | "cheaper" | "trade-off" | "equivalent" | "downgrade";
 const KIND_ORDER: OptionKind[] = ["upgrade", "cheaper", "trade-off", "equivalent", "downgrade"];
@@ -19,10 +28,10 @@ const KIND_ORDER: OptionKind[] = ["upgrade", "cheaper", "trade-off", "equivalent
 export interface UpgradeOption {
   tool: ToolDefinition;
   kind: OptionKind;
-  gains: ProtectionControl[]; // controls this tool has and the baseline tool doesn't
-  newToStack: ProtectionControl[]; // of those, the ones no other layer provides
-  loses: ProtectionControl[];
-  lostFromStack: ProtectionControl[]; // of those, the ones no other layer provides
+  gains: Capability[]; // capabilities this tool has and the baseline tool doesn't
+  newToStack: Capability[]; // of those, the ones no other layer provides
+  loses: Capability[];
+  lostFromStack: Capability[]; // of those, the ones no other layer provides
   fit: PlatformFit | null;
   fitGain: number; // endpoints newly supported; negative = left out
   alertsGain: -1 | 0 | 1; // alerts into HELIOS gained or lost
@@ -55,15 +64,15 @@ export function stackTool(cfg: QuoteConfig, ctx: PricingContext, category: strin
 }
 
 // Controls the rest of the stack provides, layer by layer.
-export function stackControls(cfg: QuoteConfig, ctx: PricingContext, except?: string): Set<ProtectionControl> {
-  const out = new Set<ProtectionControl>();
+export function stackControls(cfg: QuoteConfig, ctx: PricingContext, except?: string): Set<Capability> {
+  const out = new Set<Capability>();
   for (const c of CATEGORIES.filter((x) => x.priced && x.key !== except)) {
     for (const k of stackTool(cfg, ctx, c.key).tool?.controls ?? []) out.add(k);
   }
   return out;
 }
 
-function classify(gains: ProtectionControl[], lost: ProtectionControl[], fitGain: number, alertsGain: number, actionsGain: number, priceDelta: number | null): OptionKind {
+function classify(gains: Capability[], lost: Capability[], fitGain: number, alertsGain: number, actionsGain: number, priceDelta: number | null): OptionKind {
   const better = gains.length > 0 || fitGain > 0 || alertsGain > 0 || actionsGain > 0;
   const worse = lost.length > 0 || fitGain < 0 || alertsGain < 0;
   if (better && !worse) return "upgrade";
@@ -72,7 +81,8 @@ function classify(gains: ProtectionControl[], lost: ProtectionControl[], fitGain
   return priceDelta != null && priceDelta < 0 ? "cheaper" : "equivalent";
 }
 
-export function compareTool(tool: ToolDefinition, baseline: ToolDefinition | null, others: Set<ProtectionControl>, cfg: QuoteConfig): UpgradeOption {
+export function compareTool(tool: ToolDefinition, baseline: ToolDefinition | null, others: Set<Capability>, cfg: QuoteConfig, weight: (c: Capability) => number = capabilityWeigher(cfg)): UpgradeOption {
+  const weigh = (cs: Capability[]) => cs.reduce((s, c) => s + weight(c), 0);
   const base = baseline?.controls ?? [];
   const gains = tool.controls.filter((c) => !base.includes(c));
   const loses = base.filter((c) => !tool.controls.includes(c));
@@ -86,8 +96,9 @@ export function compareTool(tool: ToolDefinition, baseline: ToolDefinition | nul
   const monthly = toolMonthlyPrice(tool, cfg).monthly;
   const baseMonthly = baseline ? toolMonthlyPrice(baseline, cfg).monthly : 0;
   const priceDelta = monthly == null || baseMonthly == null ? null : Math.round((monthly - baseMonthly) * 100) / 100;
-  // Protection gained: new controls weigh by importance and by how much of
-  // the estate the tool reaches; alerts and actions make the SOC faster.
+  // Protection gained: new capabilities weigh by how much they matter to
+  // this client and by how much of the estate the tool reaches; alerts and
+  // actions make the SOC faster.
   const reach = fit?.ratio ?? 1;
   const baseReach = baseFit?.ratio ?? 1;
   const score =
@@ -115,12 +126,13 @@ export function compareTool(tool: ToolDefinition, baseline: ToolDefinition | nul
 
 export function reviewUpgrades(input: QuoteConfig, ctx: PricingContext): CategoryReview[] {
   const cfg = normalizeConfig(input);
+  const weight = capabilityWeigher(cfg);
   return CATEGORIES.filter((c) => c.priced).map((category) => {
     const { tool: baseline, source } = stackTool(cfg, ctx, category.key);
     const others = stackControls(cfg, ctx, category.key);
     const options = ctx.tools
       .filter((t) => t.category === category.key && t.key !== baseline?.key)
-      .map((t) => compareTool(t, baseline, others, cfg))
+      .map((t) => compareTool(t, baseline, others, cfg, weight))
       .sort(
         (a, b) =>
           KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) ||
@@ -186,8 +198,8 @@ export function priceChanges(input: QuoteConfig, ctx: PricingContext, changes: R
   return { config, before, after, delta: quoteDelta(before, after) };
 }
 
-export const controlShort = (c: ProtectionControl) => CONTROLS.find((x) => x.key === c)?.short ?? c;
-export const controlName = (c: ProtectionControl) => CONTROLS.find((x) => x.key === c)?.label ?? c;
+export const controlShort = (c: string) => capabilityShort(c);
+export const controlName = (c: string) => capabilityName(c);
 export function choiceLabel(ctx: Pick<PricingContext, "tools">, choice: string, own?: string, audience: "staff" | "public" = "staff") {
   const whose = audience === "public" ? "Your" : "Client's";
   if (choice === "none") return "Not included";

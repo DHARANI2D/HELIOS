@@ -93,7 +93,7 @@ describe("upgrade review", () => {
     expect(edr.baselineMonthly).toBe(Math.round(54 * 15.42 * 100) / 100);
     const p2 = edr.options.find((o) => o.tool.key === "defender_endpoint_p2")!;
     expect(p2.kind).toBe("upgrade");
-    expect(p2.gains.sort()).toEqual(["app_control", "vuln_scan"]);
+    expect(p2.gains.sort()).toEqual(["app_control", "mtd", "vuln_scan"]);
     expect(p2.loses).toEqual([]);
     // 50 users × $5.20 vs 54 endpoints × $15.42
     expect(p2.priceDelta).toBeCloseTo(50 * 5.2 - 54 * 15.42, 2);
@@ -149,7 +149,9 @@ describe("stack advisor", () => {
     expect(pick("epp").choice).toBe("none");
     expect(pick("epp").reasons[0]).toMatch(/^Not needed/);
     expect(pick("mdm").choice).toBe("intune_p1");
-    expect(pick("siem").choice).toBe("helios_siem");
+    // The managed service is the SIEM; no separate one is suggested.
+    expect(pick("siem").choice).toBe("none");
+    expect(pick("siem").reasons[0]).toMatch(/Managed service \(HELIOS\)/);
     expect(a.delta.monthly).toBeGreaterThan(0);
   });
 
@@ -178,7 +180,9 @@ describe("stack advisor", () => {
     // Lowest cost does switch when the saving is real, priced like for like.
     const cheap = adviseStack(cfg, ctx, "budget").picks.find((p) => p.category === "edr")!;
     expect(cheap.change).toBe("switch");
-    expect(cheap.choice).toBe("defender_business");
+    // The cheapest tool that covers the most P1 requirements (it adds
+    // application control and vulnerability scanning).
+    expect(cheap.choice).toBe("defender_endpoint_p2");
     expect(cheap.reasons.at(-1)).toMatch(/less than the client's SentinelOne Singularity Complete at catalog price/);
   });
 

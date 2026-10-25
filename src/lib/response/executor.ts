@@ -1,9 +1,12 @@
 import type { Case, PlaybookActionType, Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { ACTION_LABEL } from "@/lib/response/labels";
 import { renderTemplate } from "@/lib/playbooks/trigger";
 import { dispatchAction } from "@/lib/integrations/dispatch";
 import { dispatchChatMessage } from "@/lib/integrations/chat";
+
+export { ACTION_LABEL };
 
 // The one place a response action actually happens, whether a playbook, an
 // AI agent (after the policy gate) or an analyst asked for it. Effects on
@@ -53,22 +56,6 @@ export const ROLLBACK_OF: Partial<Record<PlaybookActionType, PlaybookActionType>
   REVOKE_AGENT: "RESTORE_AGENT",
 };
 
-export const ACTION_LABEL: Record<PlaybookActionType, string> = {
-  ISOLATE_HOST: "Isolate host",
-  RELEASE_HOST: "Release host",
-  BLOCK_IP: "Block IP",
-  UNBLOCK_IP: "Unblock IP",
-  NOTIFY_SLACK: "Notify channel",
-  CREATE_TICKET: "Create ticket",
-  KILL_PROCESS: "Kill process",
-  COLLECT_LOGS: "Collect logs",
-  REVOKE_AGENT: "Revoke AI agent",
-  RESTORE_AGENT: "Restore AI agent",
-  DISABLE_USER: "Disable account",
-  ENABLE_USER: "Re-enable account",
-  QUARANTINE_FILE: "Quarantine file",
-  BLOCK_SENDER: "Block sender",
-};
 
 export async function buildActionContext(kase: Case): Promise<ActionContext> {
   const metadata = (kase.metadata ?? {}) as Record<string, unknown>;

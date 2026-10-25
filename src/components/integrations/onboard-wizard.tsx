@@ -9,6 +9,7 @@ import type { UserRole } from "@prisma/client";
 
 import { onboardIntegrationAction } from "@/app/(app)/integrations/actions";
 import { ROLES } from "@/lib/rbac";
+import { capabilityName, capabilityShort } from "@/lib/assets/capabilities";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -177,7 +178,7 @@ export function OnboardWizard({ categories, tools, tenants, defaultTenantId, isC
               {t.ingest && <Badge variant="soft"><Plug /> alerts</Badge>}
               {t.actions.length > 0 && <Badge variant="soft"><Zap /> {t.actions.length} response action{t.actions.length === 1 ? "" : "s"}</Badge>}
               {t.controls.slice(0, 4).map((c) => (
-                <Badge key={c} variant="outline" className="font-mono text-[10px] uppercase">{c.replace("_", " ")}</Badge>
+                <Badge key={c} variant="outline" className="font-mono text-[10px] uppercase" title={capabilityName(c)}>{capabilityShort(c)}</Badge>
               ))}
             </div>
           </button>

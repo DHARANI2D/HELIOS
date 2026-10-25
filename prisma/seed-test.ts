@@ -50,6 +50,13 @@ const TEST_PLANS = [
 const TEST_PRICES: Record<string, { price: number; cost?: number }> = {
   "svc.server": { price: 8, cost: 4 },
   "svc.identity": { price: 1, cost: 0.5 },
+  "svc.cloud.account": { price: 50, cost: 20 },
+  "svc.cloud.workload": { price: 4, cost: 1.5 },
+  "svc.saas": { price: 75, cost: 30 },
+  "svc.network": { price: 6, cost: 2.5 },
+  "svc.iot": { price: 1.5, cost: 0.5 },
+  "svc.ot": { price: 5, cost: 2 },
+  "svc.app": { price: 40, cost: 15 },
   "svc.compliance": { price: 400, cost: 200 },
   "svc.dedicated": { price: 2500, cost: 1800 },
   "svc.support.premium": { price: 8 },

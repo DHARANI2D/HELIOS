@@ -14,8 +14,8 @@ import { runAdvisorAgent, type AiAdvice } from "@/lib/pricing/advisor-agent";
 import type { AdvisorGoal } from "@/lib/pricing/advisor";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateCatalog } from "@/lib/integrations/tools";
-import { CATEGORIES } from "@/lib/integrations/catalog";
-import { CONTROLS } from "@/lib/endpoints/controls";
+import { CATEGORIES, UNIT_LABEL, type PriceUnit } from "@/lib/integrations/catalog";
+import { CAPABILITY_KEYS } from "@/lib/assets/capabilities";
 import { PLAN_FEATURES, SEVERITIES } from "@/lib/plans";
 
 function done(path = "/pricing") {
@@ -154,13 +154,13 @@ const toolSchema = z.object({
   vendor: z.string().trim().min(1).max(60),
   category: z.enum(CATEGORIES.map((c) => c.key) as [string, ...string[]]),
   description: z.string().trim().min(3).max(400),
-  controls: z.array(z.enum(CONTROLS.map((c) => c.key) as [string, ...string[]])).max(20),
+  controls: z.array(z.enum(CAPABILITY_KEYS as [string, ...string[]])).max(30),
   actions: z.array(z.enum(ACTION_TYPES)).max(20),
   ingest: z.enum(["crowdstrike", "defender", "sentinelone", "wazuh", "entra", "okta", "generic"]).nullable(),
   platforms: z.array(z.string().trim().min(1).max(40)).max(12),
   deployment: z.enum(["cloud", "self-hosted", "hybrid"]),
   offlineCapable: z.boolean(),
-  priceUnit: z.enum(["endpoint", "user", "server", "gb", "flat"]),
+  priceUnit: z.enum(Object.keys(UNIT_LABEL) as [PriceUnit, ...PriceUnit[]]),
   customPrice: money,
 });
 export type CustomToolInput = z.infer<typeof toolSchema>;

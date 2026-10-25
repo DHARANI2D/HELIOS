@@ -83,10 +83,14 @@ const CATEGORY_SCOPE: Partial<Record<CategoryKey, EndpointKind[]>> = {
   backup: ["workstation", "server"],
   dlp: ["workstation"],
   mdm: ["workstation", "mobile"],
+  mtd: ["mobile"],
   network: ["workstation", "mobile"],
 };
 
 const OS_PLATFORMS = new Set(["Windows", "macOS", "Linux", "iOS", "Android"]);
+// Platforms that are someone else's service: a tool that only runs there
+// protects the service's data, not the client's devices.
+const SAAS_PLATFORMS = new Set(["Microsoft 365", "Google Workspace", "Salesforce", "GitHub", "GitLab", "Bitbucket", "Azure DevOps", "Exchange"]);
 
 export interface PlatformFit {
   relevant: number; // endpoints of a known OS the tool has to cover
@@ -105,10 +109,11 @@ export function platformFit(tool: Pick<ToolDefinition, "category" | "platforms">
   const relevant = types.reduce((s, t) => s + mix[t.key], 0);
   const unknown = scope.includes("workstation") ? mix.other : 0;
   const agentless = !tool.platforms.some((p) => OS_PLATFORMS.has(p));
-  if (agentless) return { relevant, supported: relevant, unsupported: [], unknown, agentless, ratio: 1 };
+  const saasOnly = agentless && tool.platforms.length > 0 && tool.platforms.every((p) => SAAS_PLATFORMS.has(p));
+  if (agentless && !saasOnly) return { relevant, supported: relevant, unsupported: [], unknown, agentless, ratio: 1 };
   const unsupported = types.filter((t) => !tool.platforms.includes(t.platform!)).map((t) => ({ type: t.key, label: t.label, count: mix[t.key] }));
   const supported = relevant - unsupported.reduce((s, u) => s + u.count, 0);
-  return { relevant, supported, unsupported, unknown, agentless, ratio: relevant ? supported / relevant : 1 };
+  return { relevant, supported, unsupported, unknown, agentless: false, ratio: relevant ? supported / relevant : 1 };
 }
 
 export function describeMix(mix: EndpointMix) {
