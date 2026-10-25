@@ -92,7 +92,51 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
    5. finally the built-in deterministic engine.
 
    Providers are `anthropic.ts` (structured outputs, server-side refusal fallback) and `openai-compatible.ts` (Ollama, LM Studio, vLLM; JSON-schema output, validated, one retry).
-5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure.
+5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, kill switch, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
+
+### Client rulebooks (`lib/rulebook`)
+
+Each client signs a versioned rulebook (`org_policies`, one ACTIVE version, hashed). The rules can only restrict what the plan and the client's consent allow.
+
+- **Shape** (`schema.ts`, shared with the editor):
+  - crown-jewel and never-isolate assets, matched by hostname pattern, IP, asset group, type or criticality;
+  - VIP, break-glass and service accounts;
+  - per action: automatic from a severity, needs approval, suggest only, or never;
+  - blast radius (automatic actions per hour, hosts isolated at once) and the two-person rule;
+  - business hours, maintenance windows and change freezes in the client's time zone;
+  - an approver chain with timeouts;
+  - AI data handling (residency, allowed providers, PII masking, user choice);
+  - CERT-In obligations and a review interval.
+- **Evaluation** (`evaluate.ts`): pure; returns every rule that restricts an action. *Hard* rules bind people too: never-isolate assets, protected accounts, actions the client forbids, and the two-person rule. The executor re-checks them against the latest active version at the moment of acting, for AI, analysts, playbooks and direct isolation alike.
+- **Approvals**: a two-person action counts distinct approvers. `escalation.ts` walks pending approvals along the client's chain on a background job: app users are notified, Slack or Teams get a post, and for email and phone the SOC is asked to make contact. When the chain runs out, the action holds or becomes a suggestion, as the rulebook says.
+- **Allowlist** (`policy_allowlist`): every entry has an owner, a reason and an expiry. Allowlisted hosts, IPs and accounts open no SIEM cases, and AI containment against them is only suggested.
+- **Lifecycle** (`service.ts`, `/rulebook`):
+  - drafts start from industry templates;
+  - the dry run (`dry-run.ts`) replays the last 30 days of AI proposals and probes each action;
+  - versions show diffs;
+  - the client admin signs, or staff activate on the client's recorded instruction;
+  - YAML import and export.
+
+### AI per client (`lib/ai/gateway.ts`)
+
+For a client, `resolveAgent(key, { tenantId, userId, severity })` resolves the model in this order: the user's choice (where the client allows it), the client's choice for that agent, the agent profile, the platform default, the environment key, then the built-in engine. Each candidate must pass the client's rulebook: on-premises only, region-locked, or an allowed list. A client's own provider (`ai_providers.tenantId`, bring your own key) is never used for anyone else.
+
+- **Record:** the resolution, including what was skipped and why, is stored on every `AiRun` with its `tenantId`.
+- **Masking:** with masking on, `redact.ts` turns hosts, accounts, emails and IPs into tokens before a cloud model sees the evidence, and restores them in the answer. Grounding then runs on the restored values.
+- **Budget:** each client has a monthly budget (`tenant_ai_policies`). The SOC manager is alerted at 80%. At 100%, low- and medium-severity cases use the built-in engine. Runs on the client's own key aren't counted.
+- **Evaluation cap:** a model the client or a user picked that has no passing `model_capabilities` score for that agent only suggests.
+
+### Shadow mode (`lib/shadow`)
+
+Each client has an autonomy ladder per action type (`autonomy_levels`): L0 observe, L1 suggest, L2 approve, L3 act and notify, L4 act. New clients start at L0.
+
+- **L0:** proposals are recorded as `SHADOW`, with the outcome they would have had. With every action at L0, the AI's analysis stays hidden on the case until it closes.
+- **Closing:** a case can only be closed with a disposition (true positive, benign true positive, false positive) and a reason. `scoreClosedCase` then scores each AI proposal against what analysts did, recording matched decisions, containments analysts wouldn't have done (and whether the asset was critical), and misses. It also scores the AI's verdict.
+- **Review:** the hourly review demotes after a bad week, or straight to L1 after a critical mistake. It proposes promotions on a clean 30-day record, which the client admin approves.
+
+### Background jobs (`src/instrumentation.ts`, `lib/jobs/scheduler.ts`)
+
+Timers in the server process: approval escalation every minute and the ladder review hourly. Both jobs can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them.
 
 ### Response actions (`lib/response`)
 
