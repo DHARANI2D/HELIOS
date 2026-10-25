@@ -8,7 +8,7 @@ import { OUTCOME_RANK, type Outcome, type RuleHit } from "@/lib/rulebook/evaluat
 // model proposes, this policy disposes. Each layer sets a ceiling and the
 // most restrictive one wins, in a fixed order of precedence:
 //   grounding → kill switch → plan → client consent → client rulebook →
-//   agent profile → rate limit.
+//   agent profile → the model's evaluation → rate limit.
 // Every decision carries the reason shown to analysts and written to the
 // audit chain, and a trace naming every rule that restricted it.
 
@@ -28,13 +28,15 @@ export interface PolicyInput {
   tenantCap: AiAutonomy;
   // The client's active rulebook and what it says about this action.
   rulebook?: { version: number; hash: string; hits: RuleHit[] } | null;
+  // A model the client picked that hasn't passed its evaluation.
+  modelCap?: { autonomy: AiAutonomy; reason: string } | null;
   // For host actions: the endpoint's business criticality.
   endpointCriticality?: string | null;
   autoActionsLastHour: number;
   maxAutoActionsPerHour: number;
 }
 
-export type PolicyLayer = "grounding" | "kill_switch" | "plan" | "consent" | "rulebook" | "agent" | "rate_limit";
+export type PolicyLayer = "grounding" | "kill_switch" | "plan" | "consent" | "rulebook" | "agent" | "model" | "rate_limit";
 
 export interface TraceEntry {
   layer: PolicyLayer;
@@ -64,7 +66,7 @@ function capOutcome(cap: AiAutonomy): Outcome {
 
 export function decideResponse(input: PolicyInput): PolicyDecision {
   const planCap = input.planCap ?? "AUTO_CONTAIN";
-  const effectiveAutonomy = minAutonomy(minAutonomy(input.autonomy, input.tenantCap), planCap);
+  const effectiveAutonomy = minAutonomy(minAutonomy(minAutonomy(input.autonomy, input.tenantCap), planCap), input.modelCap?.autonomy ?? "AUTO_CONTAIN");
   const pct = (n: number) => `${Math.round(n * 100)}%`;
   const entries: TraceEntry[] = [];
   const add = (layer: PolicyLayer, rule: string, outcome: Outcome, reason: string) => entries.push({ layer, rule, outcome, reason });
@@ -86,6 +88,11 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
   if (!input.allowedActions.includes(input.actionType)) add("agent", "agent.allowedActions", "PENDING_APPROVAL", "Action isn't on the pre-approved list");
   if (input.confidence < input.minConfidence) add("agent", "agent.minConfidence", "PENDING_APPROVAL", `Confidence ${pct(input.confidence)} is below the ${pct(input.minConfidence)} bar`);
   if (input.actionType === "ISOLATE_HOST" && input.endpointCriticality === "critical") add("agent", "agent.criticalEndpoint", "PENDING_APPROVAL", "Business-critical endpoint — isolation needs approval");
+
+  if (input.modelCap) {
+    const cap = capOutcome(input.modelCap.autonomy);
+    if (cap !== "EXECUTED") add("model", "model.evaluation", cap, input.modelCap.reason);
+  }
 
   if (input.autoActionsLastHour >= input.maxAutoActionsPerHour) add("rate_limit", "platform.maxAutoActionsPerHour", "PENDING_APPROVAL", `Auto-containment limit reached (${input.maxAutoActionsPerHour}/hour for this client)`);
 

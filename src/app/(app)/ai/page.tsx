@@ -29,7 +29,7 @@ async function loadAiPage(visibility: ReturnType<typeof caseVisibility>) {
   const allRuns = { createdAt: { gte: since }, OR: [{ case: visibility }, { caseId: null, agentKey: "advisor" }] };
   const [settings, providers, runs, recent, feedback, executed, blocked, profilesUsage] = await Promise.all([
     aiSettings(),
-    db.aiProvider.findMany({ orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }], include: { _count: { select: { agents: true } } } }),
+    db.aiProvider.findMany({ where: { tenantId: null }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }], include: { _count: { select: { agents: true } } } }),
     db.aiRun.findMany({ where: allRuns, select: { model: true, inputTokens: true, outputTokens: true, agentKey: true, status: true } }),
     db.aiRun.findMany({ where: { case: visibility }, orderBy: { createdAt: "desc" }, take: 30, include: { case: { select: { id: true, title: true, tenant: { select: { name: true } } } } } }),
     db.aiRun.groupBy({ by: ["feedback"], where: { ...runScope, feedback: { not: null } }, _count: { _all: true } }),
@@ -188,6 +188,10 @@ export default async function AiPage() {
                         <TableCell className="text-xs">
                           {r.engine}
                           {r.model && <p className="font-mono text-[11px] text-muted-foreground">{r.model}</p>}
+                          {(() => {
+                            const why = (r.resolution as { reason?: string; redacted?: boolean } | null) ?? null;
+                            return why?.reason ? <p className="line-clamp-2 max-w-56 text-[11px] text-muted-foreground" title={why.reason}>{why.redacted ? "Masked · " : ""}{why.reason}</p> : null;
+                          })()}
                         </TableCell>
                         <TableCell>
                           <Badge variant={r.status === "failed" ? "destructive" : r.status === "fallback" ? "warning" : "success"}>{r.status}</Badge>

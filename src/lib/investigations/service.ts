@@ -27,7 +27,8 @@ import {
   type TriageResult,
 } from "@/lib/investigations/heuristics";
 import { buildEvidence, qaAgent, rcaAgent, reportAgent, triageAgent } from "@/lib/investigations/agents";
-import { resolveProvider } from "@/lib/ai/resolve";
+import { resolveAgent, resolveProvider } from "@/lib/ai/resolve";
+import { withRedaction } from "@/lib/ai/gateway";
 import type { LlmProvider } from "@/lib/ai/provider";
 import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
 
@@ -259,8 +260,15 @@ export interface StartInvestigationInput {
   archivePasswords?: string[];
 }
 
-async function pipelineEngine() {
-  const provider = await resolveProvider("investigation");
+// For a client, its rulebook decides which models may read its logs.
+async function pipelineProvider(tenantId: string | null | undefined, severity?: CaseSeverity | null) {
+  if (!tenantId) return { provider: await resolveProvider("investigation"), redact: false, resolution: null };
+  const r = await resolveAgent("investigation", { tenantId, severity });
+  return { provider: r.provider, redact: r.redact, resolution: r.resolution };
+}
+
+async function pipelineEngine(tenantId?: string | null) {
+  const { provider } = await pipelineProvider(tenantId);
   const engine: PipelineEngine = !provider ? "heuristic" : provider.kind === "anthropic" ? "claude" : "local";
   return { engine, engineName: provider?.name, model: provider?.model };
 }
@@ -276,7 +284,7 @@ export async function startInvestigation(input: StartInvestigationInput) {
   }
   if (events.length > MAX_EVENTS) throw new Error(`Too many events (${events.length}); the limit is ${MAX_EVENTS}`);
 
-  const { engine, engineName, model } = await pipelineEngine();
+  const { engine, engineName, model } = await pipelineEngine(input.tenantId);
   const metadata: InvestigationMetadata = {
     pipeline: {
       status: "queued",
@@ -460,12 +468,18 @@ function indicatorsFrom(events: UesEvent[]): NewIndicator[] {
 export async function runInvestigationPipeline(caseId: string) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId } });
   const meta = kase.metadata as unknown as InvestigationMetadata;
-  const provider = meta.pipeline.engine === "heuristic" ? null : await resolveProvider("investigation");
+  const chosen = meta.pipeline.engine === "heuristic" ? { provider: null, redact: false, resolution: null } : await pipelineProvider(kase.tenantId, kase.severity);
+  let provider = chosen.provider;
   const useModel = !!provider;
 
   try {
     const rows = await db.securityEvent.findMany({ where: { caseId }, orderBy: { timestamp: "asc" } });
     const events = rows.map(fromRow);
+    // The client's rulebook may require hosts, accounts and addresses masked.
+    if (provider && chosen.redact) {
+      const pick = (f: (e: (typeof events)[number]) => string | undefined) => [...new Set(events.map(f).filter((v): v is string => !!v))];
+      provider = withRedaction(provider, { hosts: pick((e) => e.hostName), users: pick((e) => e.userName), ips: [...pick((e) => e.hostIp), ...pick((e) => e.dstIp)] }).provider;
+    }
     const graph = buildEntityGraph(events);
     const intel = await loadIntelSnapshot(events.map((e) => ({ type: "IP" as const, value: e.dstIp })));
     const findings = runForensicRules(events, intel);
@@ -605,7 +619,8 @@ export async function runInvestigationPipeline(caseId: string) {
 
 // Reset pipeline state for a re-run (after a failure or a stalled run).
 export async function resetPipeline(caseId: string) {
-  const { engine, engineName, model } = await pipelineEngine();
+  const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { tenantId: true } });
+  const { engine, engineName, model } = await pipelineEngine(kase.tenantId);
   await writeMeta(caseId, (m) => {
     m.pipeline = {
       status: "queued",

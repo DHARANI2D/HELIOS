@@ -1,4 +1,4 @@
-import type { AiAgentProfile, AiProvider } from "@prisma/client";
+import type { AiAgentProfile, AiProvider, CaseSeverity } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { unseal } from "@/lib/secrets";
@@ -10,8 +10,12 @@ import { openAiCompatibleProvider } from "@/lib/ai/openai-compatible";
 // Which model runs which agent. Order of precedence:
 //   HELIOS_AI_ENGINE=builtin (or INVESTIGATIONS_ENGINE=heuristic for the
 //   investigation swarm)  → deterministic engine everywhere
+//   for a client: the user's choice (if the client allows it) → the
+//   client's default for the agent → then as below, each only if the
+//   client's rulebook allows that provider (lib/ai/gateway)
 //   the agent profile's provider → the platform default provider →
 //   an ANTHROPIC_API_KEY in the environment → deterministic engine.
+// Client-owned providers are never used for anyone else.
 
 export type AgentProfileView = Pick<
   AiAgentProfile,
@@ -64,19 +68,41 @@ export async function resolveProvider(key: AgentKey, profile?: AgentProfileView)
   const p = profile ?? (await loadProfile(key));
 
   const row = p.providerId
-    ? await db.aiProvider.findFirst({ where: { id: p.providerId, enabled: true } })
-    : await db.aiProvider.findFirst({ where: { isDefault: true, enabled: true } });
+    ? await db.aiProvider.findFirst({ where: { id: p.providerId, enabled: true, tenantId: null } })
+    : await db.aiProvider.findFirst({ where: { isDefault: true, enabled: true, tenantId: null } });
   if (row) return providerFromRow(row, p.model);
 
   if (envClaudeAvailable() || (key === "investigation" && process.env.INVESTIGATIONS_ENGINE === "claude")) {
-    const model = p.model?.startsWith("claude-") ? p.model : process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
-    return anthropicProvider({ name: "Claude (environment key)", model });
+    return envClaude(p);
   }
   return null;
 }
 
-export async function resolveAgent(key: AgentKey) {
-  const profile = await loadProfile(key);
-  const provider = profile.enabled ? await resolveProvider(key, profile) : null;
-  return { profile, provider };
+function envClaude(p: AgentProfileView) {
+  const model = p.model?.startsWith("claude-") ? p.model : process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
+  return anthropicProvider({ name: "Claude (environment key)", model });
 }
+
+// ---------------------------------------------------------------- per client
+
+// Who an agent runs for. With a client, its rulebook and AI policy decide
+// which model may run (lib/ai/gateway); without one, the platform settings.
+export interface AgentScope {
+  tenantId?: string | null;
+  userId?: string | null;
+  severity?: CaseSeverity | null;
+}
+
+export async function resolveAgent(key: AgentKey, scope: AgentScope = {}) {
+  const profile = await loadProfile(key);
+  if (!profile.enabled) return { profile, provider: null, resolution: null, redact: false, autonomyCap: null };
+  if (!scope.tenantId) {
+    const provider = await resolveProvider(key, profile);
+    return { profile, provider, resolution: null, redact: false, autonomyCap: null };
+  }
+  const { resolveForClient } = await import("@/lib/ai/gateway");
+  const r = await resolveForClient(key, profile, { ...scope, tenantId: scope.tenantId });
+  return { profile, provider: r.provider, resolution: r.resolution, redact: r.redact, autonomyCap: r.autonomyCap };
+}
+
+export { envClaude, forcedBuiltin };

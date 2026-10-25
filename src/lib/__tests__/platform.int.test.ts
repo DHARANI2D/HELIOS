@@ -17,6 +17,8 @@ import { createCase } from "@/lib/cases/writer";
 import { completeManualAction, decideResponseAction, performResponseAction, recordResponseAction, requestAnalystAction } from "@/lib/response/service";
 import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook } from "@/lib/rulebook/service";
 import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
+import { resolveForClient } from "@/lib/ai/gateway";
+import { loadProfile } from "@/lib/ai/resolve";
 import { onboardIntegration } from "@/lib/integrations/service";
 import { signPayload } from "@/lib/integrations/dispatch";
 import { invalidateCatalog } from "@/lib/integrations/tools";
@@ -356,6 +358,50 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     const allowed = await ingestTelemetry(scan("10.9.9.9"), { tenantId: tenant.id });
     expect(allowed).toMatchObject({ casesCreated: 0, casesUpdated: 0 });
     expect(allowed.allowlisted).toBeGreaterThan(0);
+  });
+
+  it("chooses each client's AI model by its rules, key, evaluation and budget", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · AI choice", slug: "test-ai-choice" } });
+    const author = { id: adminId, name: "Test Admin" };
+    const cloud = await db.aiProvider.create({ data: { name: "Test cloud", kind: "anthropic", model: "claude-sonnet-5-5", isDefault: true, region: "us" } });
+    const local = await db.aiProvider.create({ data: { name: "Test local", kind: "openai_compatible", baseUrl: "http://127.0.0.1:9/v1", model: "llama-test", isLocal: true } });
+    const profile = await loadProfile("triage");
+
+    // No rulebook: the platform default.
+    expect((await resolveForClient("triage", profile, { tenantId: tenant.id })).resolution).toMatchObject({ source: "platform", providerId: cloud.id, redacted: false });
+
+    // On-premises only: the cloud default is skipped, the local server runs it.
+    await saveDraft(tenant.id, { body: { dataHandling: { residency: "onprem", redactPii: true } }, reason: "Residency" }, author);
+    await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
+    await db.tenantAiPolicy.create({ data: { tenantId: tenant.id, defaults: { triage: local.id } } });
+    const onprem = await resolveForClient("triage", profile, { tenantId: tenant.id });
+    expect(onprem.resolution).toMatchObject({ source: "client", providerId: local.id, isLocal: true, redacted: false });
+    // A client-picked model that hasn't passed evaluation only suggests.
+    expect(onprem.autonomyCap).toBe("SUGGEST");
+    await db.modelCapability.create({ data: { model: "llama-test", agentKey: "triage", score: 0.93, passed: true, cases: 60 } });
+    expect((await resolveForClient("triage", profile, { tenantId: tenant.id })).autonomyCap).toBeNull();
+
+    // The client's own key, region-locked; masked for the cloud; never used for others.
+    await saveDraft(tenant.id, { body: { dataHandling: { residency: "region", regions: ["india"], redactPii: true } }, reason: "Region" }, author);
+    await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
+    const own = await db.aiProvider.create({ data: { name: "Test · AI choice · Own Claude", kind: "anthropic", model: "claude-haiku-5-5", region: "india", tenantId: tenant.id } });
+    await db.tenantAiPolicy.update({ where: { tenantId: tenant.id }, data: { defaults: { triage: own.id } } });
+    const byo = await resolveForClient("triage", profile, { tenantId: tenant.id });
+    expect(byo.resolution).toMatchObject({ source: "client", providerId: own.id, clientKey: true, redacted: true });
+    const other = await db.tenant.create({ data: { name: "Test · Other", slug: "test-other" } });
+    await db.tenantAiPolicy.create({ data: { tenantId: other.id, defaults: { triage: own.id } } });
+    expect((await resolveForClient("triage", profile, { tenantId: other.id })).resolution).toMatchObject({ providerId: cloud.id });
+
+    // Over budget: low-severity work moves to the built-in engine; client-key runs aren't counted.
+    await db.tenantAiPolicy.update({ where: { tenantId: tenant.id }, data: { defaults: {}, monthlyBudgetUsd: 0.01 } });
+    await saveDraft(tenant.id, { body: {}, reason: "Any provider" }, author);
+    await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
+    await db.aiModelPrice.upsert({ where: { model: "claude-sonnet-5-5" }, update: {}, create: { model: "claude-sonnet-5-5", provider: "anthropic", inputPer: 3, outputPer: 15, source: "test" } });
+    await db.aiRun.create({ data: { tenantId: tenant.id, agentKey: "triage", trigger: "auto", engine: "Test cloud", model: "claude-sonnet-5-5", status: "succeeded", inputTokens: 100_000, outputTokens: 10_000 } });
+    expect((await resolveForClient("triage", profile, { tenantId: tenant.id, severity: "LOW" })).resolution.source).toBe("builtin");
+    expect((await resolveForClient("triage", profile, { tenantId: tenant.id, severity: "CRITICAL" })).resolution.source).toBe("platform");
+    expect((await db.tenantAiPolicy.findUniqueOrThrow({ where: { tenantId: tenant.id } })).budgetReachedMonth).not.toBeNull();
+    await db.aiProvider.deleteMany({ where: { id: { in: [cloud.id, local.id] } } });
   });
 
   it("imports a threat feed, matches it in detection, and drops delisted entries", async () => {

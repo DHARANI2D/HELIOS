@@ -171,6 +171,8 @@ model Tenant {
   quotes       Quote[]
   policies     OrgPolicy[]
   allowlist    PolicyAllowlistEntry[]
+  aiProviders  AiProvider[]
+  aiPolicy     TenantAiPolicy?
 
   @@map("tenants")
 }
@@ -741,6 +743,41 @@ enum AiAutonomy {
   AUTO_CONTAIN // executes allowed containment above the confidence bar
 }
 
+// A client's AI choices (lib/ai/gateway): a provider per agent type, a
+// monthly budget, and when budget alerts went out. What may run at all
+// (residency, allowed providers, masking, user choice) is in the client's
+// signed rulebook.
+model TenantAiPolicy {
+  tenantId           String   @id
+  defaults           Json? // { [agentKey]: providerId }
+  monthlyBudgetUsd   Float?
+  budgetAlertMonth   String? // "2026-10" once the 80% alert went out
+  budgetReachedMonth String? // once spend reached the budget
+  updatedById        String?
+  updatedAt          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_ai_policies")
+}
+
+// How well a model does each agent's job on the evaluation set
+// (lib/ai/evals). A client-picked model without a passing score is capped at
+// suggestions.
+model ModelCapability {
+  id          String   @id @default(cuid())
+  model       String
+  agentKey    String
+  score       Float
+  passed      Boolean
+  cases       Int
+  details     Json?
+  evaluatedAt DateTime @default(now())
+
+  @@unique([model, agentKey])
+  @@map("model_capabilities")
+}
+
 model AiProvider {
   id               String    @id @default(cuid())
   name             String    @unique
@@ -751,6 +788,11 @@ model AiProvider {
   isLocal          Boolean   @default(false)
   enabled          Boolean   @default(true)
   isDefault        Boolean   @default(false)
+  // Set for a client's own provider (bring your own key): used only for
+  // that client. Null = a platform provider.
+  tenantId         String?
+  // Where inference runs, for region-locked clients ("india", "eu"…).
+  region           String?
   lastCheckedAt    DateTime?
   lastCheckOk      Boolean?
   lastCheckMessage String?
@@ -758,7 +800,9 @@ model AiProvider {
   updatedAt        DateTime  @updatedAt
 
   agents AiAgentProfile[]
+  tenant Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  @@index([tenantId])
   @@map("ai_providers")
 }
 
@@ -785,6 +829,9 @@ model AiAgentProfile {
 model AiRun {
   id            String   @id @default(cuid())
   caseId        String?
+  // The client the run was for, and why this model ran it (lib/ai/gateway).
+  tenantId      String?
+  resolution    Json?
   agentKey      String
   trigger       String // auto | manual
   engine        String // provider name, or "built-in"
@@ -810,6 +857,7 @@ model AiRun {
 
   @@index([caseId, createdAt])
   @@index([createdAt])
+  @@index([tenantId, createdAt])
   @@map("ai_runs")
 }
 

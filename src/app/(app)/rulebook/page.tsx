@@ -6,12 +6,13 @@ import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { selectedTenantId } from "@/lib/access";
-import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
+import { AGENT_TYPES, AUTONOMY_LABEL } from "@/lib/ai/catalog";
+import { clientAiSpend, previewClientModels, whyNot } from "@/lib/ai/gateway";
 import { assetTypeLabel, endpointClass } from "@/lib/assets/inventory";
 import { industryFromText } from "@/lib/assets/estate";
 import { formatRelative } from "@/lib/format";
 import { diffRulebooks } from "@/lib/rulebook/diff";
-import { EMPTY_RULEBOOK } from "@/lib/rulebook/schema";
+import { AI_RESIDENCY, EMPTY_RULEBOOK } from "@/lib/rulebook/schema";
 import { buildTemplate, templateFor } from "@/lib/rulebook/templates";
 import { parseStored, rulebookReminders, rulebookState } from "@/lib/rulebook/service";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TestBadge } from "@/components/shared/test-badge";
 import { RulebookEditor } from "@/components/rulebook/rulebook-editor";
 import { RulebookSummary } from "@/components/rulebook/rulebook-summary";
+import { ClientAiPanel } from "@/components/rulebook/client-ai-panel";
 import { AllowlistPanel, CodePanel, DraftControls, DryRunPanel, SignPanel } from "@/components/rulebook/rulebook-panels";
 
 const STATUS_LABEL = { DRAFT: "Draft", AWAITING_SIGNATURE: "Awaiting signature", ACTIVE: "In force", SUPERSEDED: "Superseded" } as const;
@@ -81,13 +83,18 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
   if (!tenant) notFound();
 
   const since = daysAgo(30);
-  const [state, allowlist, endpoints, accounts, providers, reminders] = await Promise.all([
+  const [state, allowlist, endpoints, accounts, providers, reminders, aiPreview, aiPolicy, aiSpend, aiProviders, me] = await Promise.all([
     rulebookState(tenant.id),
     db.policyAllowlistEntry.findMany({ where: { tenantId: tenant.id }, orderBy: { createdAt: "desc" } }),
     db.endpoint.findMany({ where: { tenantId: tenant.id }, orderBy: { hostname: "asc" }, select: { hostname: true, os: true, assetClass: true, assetType: true, criticality: true }, take: 1000 }),
     db.securityEvent.findMany({ where: { tenantId: tenant.id, userName: { not: null }, timestamp: { gte: since } }, distinct: ["userName"], select: { userName: true }, take: 300 }),
-    db.aiProvider.findMany({ where: { enabled: true }, orderBy: { name: "asc" }, select: { id: true, name: true, isLocal: true } }),
+    db.aiProvider.findMany({ where: { enabled: true, OR: [{ tenantId: null }, { tenantId }] }, orderBy: { name: "asc" }, select: { id: true, name: true, isLocal: true } }),
     rulebookReminders(tenant.id),
+    previewClientModels(tenant.id, user.id),
+    db.tenantAiPolicy.findUnique({ where: { tenantId: tenant.id } }),
+    clientAiSpend(tenant.id),
+    db.aiProvider.findMany({ where: { enabled: true, OR: [{ tenantId: null }, { tenantId: tenant.id }] }, orderBy: [{ tenantId: "desc" }, { name: "asc" }] }),
+    db.user.findUnique({ where: { id: user.id }, select: { preferences: true } }),
   ]);
 
   const canEdit = can(user, "rulebook.edit");
@@ -97,6 +104,11 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
   const template = templateFor(industryFromText(tenant.industry));
   const editing = draft ?? active ?? buildTemplate(template);
   const now = new Date();
+  const rules = active?.dataHandling ?? null;
+  const rulesText = rules
+    ? `${AI_RESIDENCY[rules.residency]}${rules.residency === "region" ? ` (${rules.regions.join(", ") || "no region named"})` : ""}; ${rules.allowedProviders.length ? `${rules.allowedProviders.length} allowed provider${rules.allowedProviders.length === 1 ? "" : "s"} plus the client's own` : "any provider HELIOS offers"}; personal data ${rules.redactPii ? "masked for cloud models" : "not masked"}; users ${rules.allowUserChoice ? "may" : "may not"} choose their own model.`
+    : "No rulebook in force: any provider HELIOS offers, without masking.";
+  const prefs = me?.preferences && typeof me.preferences === "object" ? ((me.preferences as { aiModels?: Record<string, string> }).aiModels ?? {}) : {};
   const versions = state.versions.map((v, i) => {
     const previous = state.versions.slice(i + 1).find((p) => p.status === "ACTIVE" || p.status === "SUPERSEDED");
     return { ...v, diff: diffRulebooks(previous ? parseStored(previous) : null, parseStored(v)) };
@@ -152,6 +164,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
           <TabsTrigger value="dry">Dry run</TabsTrigger>
           <TabsTrigger value="allow">Allowlist ({allowlist.length})</TabsTrigger>
           <TabsTrigger value="versions">Versions ({state.versions.length})</TabsTrigger>
+          <TabsTrigger value="ai">AI models</TabsTrigger>
           <TabsTrigger value="code">Policy as code</TabsTrigger>
         </TabsList>
         <TabsContent value="rules">
@@ -219,6 +232,30 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
               ))}
             </ul>
           )}
+        </TabsContent>
+        <TabsContent value="ai">
+          <ClientAiPanel
+            tenantId={tenant.id}
+            canEdit={user.isClient ? canEdit : can(user, "ai.configure")}
+            rulesText={rulesText}
+            agents={aiPreview.map((a) => ({ key: a.key, name: AGENT_TYPES[a.key].name, resolution: a.resolution }))}
+            providers={aiProviders.map((p) => ({
+              id: p.id,
+              name: p.name,
+              kind: p.kind,
+              model: p.model,
+              isLocal: p.isLocal,
+              region: p.region,
+              own: p.tenantId === tenant.id,
+              lastCheckOk: p.lastCheckOk,
+              lastCheckMessage: p.lastCheckMessage,
+              blocked: whyNot({ source: "client", id: p.id, name: p.name, model: p.model, isLocal: p.isLocal, region: p.region, tenantId: p.tenantId }, tenant.id, rules),
+            }))}
+            defaults={(aiPolicy?.defaults as Record<string, string> | null) ?? {}}
+            budget={aiPolicy?.monthlyBudgetUsd ?? null}
+            spend={aiSpend}
+            mine={rules?.allowUserChoice && can(user, "ai.dispatch") ? prefs : null}
+          />
         </TabsContent>
         <TabsContent value="code">
           <CodePanel tenantId={tenant.id} book={draft ?? active ?? editing} canEdit={canEdit} />

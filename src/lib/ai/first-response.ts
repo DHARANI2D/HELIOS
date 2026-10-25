@@ -10,6 +10,7 @@ import { AGENT_TYPES, type AgentKey } from "@/lib/ai/catalog";
 import { aiCostOf } from "@/lib/pricing/service";
 import { gatherEvidence } from "@/lib/ai/evidence";
 import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
+import { withRedaction } from "@/lib/ai/gateway";
 import { runReportAgent, runTriageAgent } from "@/lib/ai/agents";
 import { SEVERITY_FROM_AI, groundTriage, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
 import { decideResponse } from "@/lib/response/policy";
@@ -77,15 +78,21 @@ export interface DispatchOptions {
 
 export async function runAgentOnCase(caseId: string, key: AgentKey, opts: DispatchOptions) {
   if (key === "containment" || key === "investigation" || key === "advisor" || !AGENT_TYPES[key]?.dispatchable) throw new Error(`${key} can't be dispatched onto a case`);
-  const { profile, provider } = await resolveAgent(key);
+  const scope = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { tenantId: true, severity: true } });
+  const resolved = await resolveAgent(key, { tenantId: scope.tenantId, userId: opts.requestedBy?.id, severity: scope.severity });
+  const { profile, resolution } = resolved;
+  let provider = resolved.provider;
   if (!profile.enabled || profile.autonomy === "OFF") {
     await db.case.updateMany({ where: { id: caseId, aiStatus: "queued" }, data: { aiStatus: "skipped" } });
     throw new Error(`${profile.name} is turned off`);
   }
   await db.case.update({ where: { id: caseId }, data: { aiStatus: "running" } });
 
+  const runScope = { tenantId: scope.tenantId, resolution: resolution ? JSON.parse(JSON.stringify(resolution)) : undefined };
   try {
     const evidence = await gatherEvidence(caseId);
+    // The client's rulebook may require personal data masked for cloud models.
+    if (provider && resolved.redact) provider = withRedaction(provider, { hosts: evidence.entities.hosts, users: evidence.entities.users, emails: evidence.entities.emails, ips: evidence.entities.ips }).provider;
 
     if (key === "report") {
       const [latest, actions] = await Promise.all([
@@ -103,7 +110,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
       );
       const run = await db.aiRun.create({
         data: {
-          caseId, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
+          caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
           output: { markdown: outcome.output }, error: outcome.error, durationMs: outcome.durationMs,
           inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens, requestedById: opts.requestedBy?.id,
         },
@@ -119,18 +126,21 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
     const { output, report } = groundTriage(outcome.output, evidence);
     const run = await db.aiRun.create({
       data: {
-        caseId, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
+        caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
         confidence: output.confidence, output: JSON.parse(JSON.stringify(output)), grounding: JSON.parse(JSON.stringify(report)),
         error: outcome.error, durationMs: outcome.durationMs, inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens,
         requestedById: opts.requestedBy?.id,
       },
     });
-    const statuses = await applyTriage(caseId, run.id, output, report, profile.name, outcome.engine, opts);
+    // A client-picked model that hasn't passed its evaluation only suggests;
+    // the built-in engine (after a fallback) isn't capped by it.
+    const modelCap = resolved.autonomyCap && outcome.engine !== "built-in" ? { autonomy: resolved.autonomyCap, reason: resolution?.capReason ?? "Model not evaluated" } : null;
+    const statuses = await applyTriage(caseId, run.id, output, report, profile.name, outcome.engine, opts, modelCap);
     await finishRun(caseId, key, run.id, outcome.engine, outcome.model, outcome.status, opts, { verdict: output.verdict, confidence: output.confidence, actions: statuses, grounding: report.notes });
     return run;
   } catch (err) {
     await db.case.update({ where: { id: caseId }, data: { aiStatus: "failed" } });
-    await db.aiRun.create({ data: { caseId, agentKey: key, trigger: opts.trigger, engine: provider?.name ?? "built-in", model: provider?.model, status: "failed", error: err instanceof Error ? err.message : String(err), requestedById: opts.requestedBy?.id } });
+    await db.aiRun.create({ data: { caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: provider?.name ?? "built-in", model: provider?.model, status: "failed", error: err instanceof Error ? err.message : String(err), requestedById: opts.requestedBy?.id } });
     throw err;
   }
 }
@@ -162,6 +172,7 @@ async function applyTriage(
   agentName: string,
   engine: string,
   opts: DispatchOptions,
+  modelCap: { autonomy: "SUGGEST"; reason: string } | null = null,
 ) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { tenant: { select: { aiAutonomyCap: true, plan: { select: { defaultAutonomyCap: true } } } } } });
   const [settings, controller] = await Promise.all([aiSettings(), loadProfile("containment")]);
@@ -191,6 +202,7 @@ async function applyTriage(
       planCap: kase.tenant?.plan?.defaultAutonomyCap,
       tenantCap: kase.tenant?.aiAutonomyCap ?? "AUTO_CONTAIN",
       rulebook,
+      modelCap,
       endpointCriticality: endpoint?.criticality,
       autoActionsLastHour,
       maxAutoActionsPerHour: settings.maxAutoActionsPerHour,

@@ -70,9 +70,10 @@ export async function saveProviderAction(input: z.input<typeof providerSchema>) 
     // A blank key on edit keeps the stored one.
     ...(p.apiKey ? { apiKeyCipher: seal(p.apiKey) } : {}),
   };
+  if (p.id && !(await db.aiProvider.count({ where: { id: p.id, tenantId: null } }))) throw new Error("Not found");
   const saved = p.id ? await db.aiProvider.update({ where: { id: p.id }, data }) : await db.aiProvider.create({ data });
   if (p.isDefault) {
-    await db.aiProvider.updateMany({ where: { id: { not: saved.id } }, data: { isDefault: false } });
+    await db.aiProvider.updateMany({ where: { id: { not: saved.id }, tenantId: null }, data: { isDefault: false } });
     await db.aiProvider.update({ where: { id: saved.id }, data: { isDefault: true } });
   }
   await logAction({ actorId: user.id, action: p.id ? "ai.provider_updated" : "ai.provider_added", detail: { providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, isLocal: saved.isLocal, keyChanged: !!p.apiKey } });
@@ -89,8 +90,9 @@ export async function setProviderEnabledAction(id: string, enabled: boolean) {
 
 export async function setDefaultProviderAction(id: string | null) {
   const user = await requirePermission("ai.configure");
-  await db.aiProvider.updateMany({ data: { isDefault: false } });
-  if (id) await db.aiProvider.update({ where: { id }, data: { isDefault: true, enabled: true } });
+  await db.aiProvider.updateMany({ where: { tenantId: null }, data: { isDefault: false } });
+  // Only a platform provider can be the default for everyone.
+  if (id) await db.aiProvider.update({ where: { id, tenantId: null }, data: { isDefault: true, enabled: true } });
   await logAction({ actorId: user.id, action: "ai.default_provider_set", detail: { providerId: id } });
   revalidate();
 }
@@ -135,7 +137,7 @@ const profileSchema = z.object({
 export async function saveAgentProfileAction(input: z.input<typeof profileSchema>) {
   const user = await requirePermission("ai.configure");
   const p = profileSchema.parse(input);
-  if (p.providerId) await db.aiProvider.findUniqueOrThrow({ where: { id: p.providerId } });
+  if (p.providerId) await db.aiProvider.findFirstOrThrow({ where: { id: p.providerId, tenantId: null } });
   const data = {
     name: AGENT_TYPES[p.key].name,
     description: AGENT_TYPES[p.key].description,

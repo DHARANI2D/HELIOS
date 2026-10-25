@@ -42,6 +42,7 @@ const LAYER_LABEL: Record<string, string> = {
   consent: "Client consent",
   rulebook: "Client rulebook",
   agent: "Agent profile",
+  model: "Model evaluation",
   rate_limit: "Rate limit",
 }
 
