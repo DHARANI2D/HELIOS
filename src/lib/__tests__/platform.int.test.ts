@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { UserRole } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction, verifyAuditChain } from "@/lib/audit";
@@ -344,7 +345,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     const own = await createCase({ sourceType: "SIEM_ALERT", title: "API: acme alert", severity: "HIGH", tenantId: acme.id, deferPipelines: true });
     const foreign = await createCase({ sourceType: "SIEM_ALERT", title: "API: other alert", severity: "LOW", tenantId: other.id, deferPipelines: true });
 
-    const asUser = (u: { id: string; role: "ANALYST" | "CLIENT_ADMIN"; tenantId: string | null }) => ({ id: u.id, role: u.role, tenantId: u.tenantId, tenantName: null, domains: [], isClient: u.role === "CLIENT_ADMIN", name: null, email: null });
+    const asUser = (u: { id: string; role: UserRole; tenantId: string | null }) => ({ id: u.id, role: u.role, tenantId: u.tenantId, tenantName: null, domains: [], isClient: u.role === "CLIENT_ADMIN", name: null, email: null });
     const { token: readToken } = await issueApiToken(asUser(analyst), { name: "read", canWrite: false, expiresInDays: 30 });
     const { token: writeToken, record: writeRecord } = await issueApiToken(asUser(analyst), { name: "write", canWrite: true, expiresInDays: null });
     const { token: clientToken } = await issueApiToken(asUser(clientAdmin), { name: "portal", canWrite: true, expiresInDays: 90 });
