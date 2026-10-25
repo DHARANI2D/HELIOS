@@ -8,7 +8,7 @@ import { levelCap } from "@/lib/shadow/ladder";
 // Deterministic and side-effect free so it can be tested exhaustively: the
 // model proposes, this policy disposes. Each layer sets a ceiling and the
 // most restrictive one wins, in a fixed order of precedence:
-//   grounding → kill switch → plan → client consent → client rulebook →
+//   grounding → kill switch → circuit breaker → plan → client consent → client rulebook →
 //   autonomy ladder → agent profile → the model's evaluation → rate limit.
 // Every decision carries the reason shown to analysts and written to the
 // audit chain, and a trace naming every rule that restricted it.
@@ -19,6 +19,9 @@ export interface PolicyInput {
   grounded: boolean;
   confidence: number;
   killSwitch: boolean;
+  // The client's circuit breaker: automatic containment paused after
+  // repeated connector failures (lib/connectors/safety).
+  paused?: { reason: string } | null;
   // The containment controller profile.
   autonomy: AiAutonomy;
   allowedActions: PlaybookActionType[];
@@ -39,7 +42,7 @@ export interface PolicyInput {
   maxAutoActionsPerHour: number;
 }
 
-export type PolicyLayer = "grounding" | "kill_switch" | "plan" | "consent" | "rulebook" | "ladder" | "agent" | "model" | "rate_limit";
+export type PolicyLayer = "grounding" | "kill_switch" | "circuit_breaker" | "plan" | "consent" | "rulebook" | "ladder" | "agent" | "model" | "rate_limit";
 
 export interface TraceEntry {
   layer: PolicyLayer;
@@ -76,6 +79,7 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
 
   if (!input.grounded) add("grounding", "grounding", "BLOCKED", "Target doesn't appear in this case's evidence — the agent may have hallucinated it");
   if (input.killSwitch) add("kill_switch", "killSwitch", "SUGGESTED", "AI kill switch is on — recommendations only");
+  if (input.paused) add("circuit_breaker", "tenant.automationPaused", "PENDING_APPROVAL", `Automatic containment is paused for this client (${input.paused.reason}); a person decides`);
 
   const plan = capOutcome(planCap);
   if (plan !== "EXECUTED") add("plan", "plan.autonomyCap", plan, plan === "SUGGESTED" ? "The client's plan allows suggestions only" : "The client's plan requires approval for containment");

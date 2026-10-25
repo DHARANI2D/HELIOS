@@ -67,3 +67,11 @@ export async function decidePromotionAction(tenantId: string, actionType: string
   await decidePromotion(tenantId, action.parse(actionType) as PlaybookActionType, approve, { ...who(user), isClient: user.isClient }, String(note ?? "").slice(0, 1000));
   done();
 }
+
+// Lift the circuit breaker once the connector problem is understood.
+export async function resumeAutomationAction(tenantId: string) {
+  const user = await actor(tenantId, "manage");
+  const { resumeAutomation } = await import("@/lib/connectors/safety");
+  await resumeAutomation(tenantId, who(user));
+  done();
+}

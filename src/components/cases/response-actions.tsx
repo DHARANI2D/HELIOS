@@ -6,8 +6,8 @@ import { useMutation } from "@tanstack/react-query";
 import { Bot, Check, CheckCheck, Hand, Loader2, Plus, Undo2, UserRound, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { completeManualActionAction, decideResponseActionAction, requestResponseAction, rollbackResponseActionAction } from "@/app/(app)/cases/actions";
-import { formatRelative } from "@/lib/format";
+import { completeManualActionAction, decideResponseActionAction, extendResponseActionAction, requestResponseAction, rollbackResponseActionAction } from "@/app/(app)/cases/actions";
+import { formatDateTime, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,11 +33,14 @@ export interface ResponseActionView {
   approvedBy: string[];
   policyVersion: number | null;
   trace: Array<{ layer: string; reason: string }>;
+  // A time-boxed action rolls itself back at this time.
+  expiresAt: string | null;
 }
 
 const LAYER_LABEL: Record<string, string> = {
   grounding: "Evidence",
   kill_switch: "Kill switch",
+  circuit_breaker: "Circuit breaker",
   plan: "Plan",
   consent: "Client consent",
   rulebook: "Client rulebook",
@@ -57,6 +60,7 @@ const STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "ou
   SUGGESTED: "soft",
   ROLLED_BACK: "secondary",
   SHADOW: "outline",
+  IN_PROGRESS: "soft",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -69,6 +73,7 @@ const STATUS_LABEL: Record<string, string> = {
   SUGGESTED: "Suggested",
   ROLLED_BACK: "Rolled back",
   SHADOW: "Shadow mode",
+  IN_PROGRESS: "Waiting for the vendor",
 };
 
 interface Props {
@@ -101,6 +106,11 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
       refresh(
         r.status === "REJECTED" ? "Rejected" : r.status === "EXECUTED" ? "Approved and executed" : r.status === "PENDING_APPROVAL" ? "Approved — it needs a second person" : r.status === "BLOCKED" ? "Blocked by the client's rulebook" : `Status: ${r.status.toLowerCase()}`,
       ),
+    onError,
+  });
+  const extend = useMutation({
+    mutationFn: ({ id, hours }: { id: string; hours: number }) => extendResponseActionAction(id, hours),
+    onSuccess: (r) => refresh(r.expiresAt ? `Kept until ${new Date(r.expiresAt).toLocaleString()}` : "Kept until someone lifts it"),
     onError,
   });
   const rollback = useMutation({
@@ -204,6 +214,17 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
                 <Button size="sm" variant="outline" className="h-7" onClick={() => decide.mutate({ id: a.id, decision: "rejected" })} disabled={decide.isPending}>
                   <X /> {a.status === "SUGGESTED" ? "Dismiss" : "Reject"}
                 </Button>
+              </div>
+            )}
+            {a.status === "EXECUTED" && a.expiresAt && (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span>Time box: rolls back at {formatDateTime(new Date(a.expiresAt))} unless kept</span>
+                {canApprove && (
+                  <>
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => extend.mutate({ id: a.id, hours: 24 })} disabled={extend.isPending}>Keep 24 h more</Button>
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => extend.mutate({ id: a.id, hours: 0 })} disabled={extend.isPending}>Keep until lifted</Button>
+                  </>
+                )}
               </div>
             )}
             {canApprove && a.status === "EXECUTED" && a.rollbackable && (

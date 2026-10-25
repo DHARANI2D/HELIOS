@@ -10,7 +10,7 @@ import { tenantOptions } from "@/lib/tenants";
 import { CATEGORIES } from "@/lib/integrations/catalog";
 import { listCatalogTools } from "@/lib/integrations/tools";
 import { visibleIntegrationsWhere } from "@/lib/integrations/service";
-import type { IntegrationConfig } from "@/lib/integrations/dispatch";
+import { readSecrets, type IntegrationConfig } from "@/lib/integrations/dispatch";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { StatTile } from "@/components/dashboard/stat-tile";
@@ -21,6 +21,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { EmptyState } from "@/components/shared/empty-state";
 import { OnboardWizard } from "@/components/integrations/onboard-wizard";
 import { IntegrationControls } from "@/components/integrations/integration-controls";
+import { NativeConnectorButton } from "@/components/integrations/native-connector";
+import { connectorForTool, connectorInfo } from "@/lib/connectors/registry";
 
 const STATUS_VARIANT: Record<IntegrationStatus, "success" | "warning" | "outline" | "destructive"> = {
   CONNECTED: "success",
@@ -169,6 +171,24 @@ export default async function IntegrationsPage() {
                         </TableCell>
                         {canManage && (
                           <TableCell>
+                            {(() => {
+                              const native = connectorForTool(i.vendor);
+                              if (!native || i.category === "chatops") return null;
+                              const secrets = readSecrets(i.secretCipher).connector ?? {};
+                              return (
+                                <NativeConnectorButton
+                                  integrationId={i.id}
+                                  name={i.name}
+                                  info={connectorInfo(native)}
+                                  on={config.connector === native.key}
+                                  mode={config.connectorMode === "live" ? "live" : "dry_run"}
+                                  values={config.connectorConfig ?? {}}
+                                  secretsSet={Object.keys(secrets).filter((k) => !!secrets[k])}
+                                  credentialExpiresAt={config.credentialExpiresAt ?? ""}
+                                  canManage={canManage}
+                                />
+                              );
+                            })()}
                             <IntegrationControls
                               id={i.id}
                               name={i.name}

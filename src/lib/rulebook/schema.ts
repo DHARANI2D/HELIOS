@@ -174,6 +174,14 @@ export const rulebookSchema = z.object({
       reportRecipients: z.array(z.email()).max(20).default([]),
     })
     .default({ regulatedEntity: false, certInContact: { name: "", email: "", phone: "" }, reportRecipients: [] }),
+  // Containment that undoes itself unless someone keeps it: 0 = until a
+  // person lifts it.
+  timeBoxes: z
+    .object({
+      blockIpHours: z.number().int().min(0).max(24 * 365).default(72),
+      disableUserHours: z.number().int().min(0).max(24 * 365).default(0),
+    })
+    .default({ blockIpHours: 72, disableUserHours: 0 }),
   reviewEveryDays: z.number().int().min(7).max(365).default(90),
 });
 export type Rulebook = z.infer<typeof rulebookSchema>;

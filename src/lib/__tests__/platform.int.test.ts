@@ -21,6 +21,7 @@ import { resolveForClient } from "@/lib/ai/gateway";
 import { loadProfile } from "@/lib/ai/resolve";
 import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
 import { setCaseStatus } from "@/lib/cases/service";
+import { circuitBreakerFor, rollBackExpired, verifyInProgress } from "@/lib/connectors/safety";
 import { onboardIntegration } from "@/lib/integrations/service";
 import { signPayload } from "@/lib/integrations/dispatch";
 import { invalidateCatalog } from "@/lib/integrations/tools";
@@ -441,6 +442,77 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await reviewLadders();
     expect((await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).level).toBe(1);
     expect(await db.auditLog.count({ where: { action: "autonomy.demoted" } })).toBe(1);
+  });
+
+  it("contains through a native connector only once the vendor confirms it", async () => {
+    // A stand-in Falcon API: the host goes normal → containment_pending → contained.
+    const statuses = ["normal", "containment_pending", "contained"];
+    let failContain = false;
+    const falcon = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        const url = req.url ?? "";
+        const send = (status: number, data: unknown) => res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(data));
+        if (url.startsWith("/oauth2/token")) return send(201, { access_token: "t", expires_in: 1799 });
+        if (url.startsWith("/devices/queries/devices/v1")) return send(200, { resources: ["aid1"] });
+        if (url.startsWith("/devices/entities/devices/v2")) return send(200, { resources: [{ device_id: "aid1", hostname: "TEST-CS-01", status: statuses.length > 1 ? statuses.shift() : statuses[0] }] });
+        if (url.startsWith("/devices/entities/devices-actions/v2")) return failContain ? send(500, { errors: [{ message: "boom" }] }) : send(202, { resources: [{ id: "aid1" }] });
+        send(404, {});
+      });
+    });
+    await new Promise<void>((resolve) => falcon.listen(0, "127.0.0.1", resolve));
+    const falconUrl = `http://127.0.0.1:${(falcon.address() as AddressInfo).port}`;
+    try {
+      const tenant = await db.tenant.create({ data: { name: "Test · Native", slug: "test-native" } });
+      const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "crowdstrike_falcon_enterprise", secrets: { connector: { clientSecret: "s" } } }, adminId);
+      await db.integration.update({ where: { id: integration.id }, data: { config: { connector: "crowdstrike_falcon", connectorMode: "live", connectorConfig: { baseUrl: falconUrl, clientId: "id" } } } });
+      const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Native containment", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+
+      const action = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: "TEST-CS-01", source: "analyst", status: "PENDING_APPROVAL" });
+      const requested = await performResponseAction(action.id, { id: adminId, name: "Test Admin" });
+      expect(requested.status).toBe("IN_PROGRESS");
+      expect(await db.endpoint.count({ where: { hostname: "TEST-CS-01", isolated: true } })).toBe(0);
+      expect((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).status).not.toBe("CONTAINED");
+
+      expect(await verifyInProgress()).toBe(1);
+      expect((await db.responseAction.findUniqueOrThrow({ where: { id: action.id } })).status).toBe("EXECUTED");
+      expect(await db.endpoint.count({ where: { hostname: "TEST-CS-01", isolated: true } })).toBe(1);
+      expect((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).status).toBe("CONTAINED");
+
+      // Dry run checks the target and changes nothing.
+      await db.integration.update({ where: { id: integration.id }, data: { config: { connector: "crowdstrike_falcon", connectorMode: "dry_run", connectorConfig: { baseUrl: falconUrl, clientId: "id" } } } });
+      statuses.splice(0, statuses.length, "normal");
+      const dry = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: "TEST-CS-02", source: "analyst", status: "PENDING_APPROVAL" });
+      const dryDone = await performResponseAction(dry.id, { id: adminId, name: "Test Admin" });
+      expect(dryDone.status).toBe("MANUAL_REQUIRED");
+      expect((dryDone.result as { summary: string }).summary).toMatch(/Dry run/);
+
+      // Repeated connector failures trip the circuit breaker.
+      await db.integration.update({ where: { id: integration.id }, data: { config: { connector: "crowdstrike_falcon", connectorMode: "live", connectorConfig: { baseUrl: falconUrl, clientId: "id" } } } });
+      failContain = true;
+      for (const host of ["TEST-CS-03", "TEST-CS-04", "TEST-CS-05"]) {
+        const a = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: host, source: "ai", status: "PENDING_APPROVAL" });
+        expect((await performResponseAction(a.id, { name: "AI (auto-contain)" })).status).toBe("FAILED");
+      }
+      const paused = await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } });
+      expect(paused.automationPausedAt).not.toBeNull();
+      expect(await circuitBreakerFor(tenant.id)).toMatchObject({ reason: expect.stringMatching(/3 connector failures/) });
+      expect((await db.integration.findUniqueOrThrow({ where: { id: integration.id } })).status).toBe("DEGRADED");
+
+      // A time-boxed IP block rolls itself back when its time is up.
+      await saveDraft(tenant.id, { body: { timeBoxes: { blockIpHours: 1 } }, reason: "Time boxes" }, { id: adminId, name: "Test Admin" });
+      await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved by email today");
+      await onboardIntegration({ tenantId: tenant.id, vendor: "response_webhook", config: { responseWebhookUrl: `${stubUrl}/actions` } }, adminId);
+      const block = await recordResponseAction({ caseId: kase.id, actionType: "BLOCK_IP", target: "203.0.113.88", source: "analyst", status: "PENDING_APPROVAL" });
+      expect((await performResponseAction(block.id, { id: adminId, name: "Test Admin" })).status).toBe("EXECUTED");
+      const boxed = await db.responseAction.findUniqueOrThrow({ where: { id: block.id } });
+      expect(boxed.expiresAt).not.toBeNull();
+      await rollBackExpired(new Date(Date.now() + 2 * 3_600_000));
+      expect((await db.responseAction.findUniqueOrThrow({ where: { id: block.id } })).status).toBe("ROLLED_BACK");
+    } finally {
+      falcon.close();
+    }
   });
 
   it("imports a threat feed, matches it in detection, and drops delisted entries", async () => {

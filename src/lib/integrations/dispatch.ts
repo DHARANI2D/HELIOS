@@ -5,8 +5,10 @@ import { db } from "@/lib/db";
 import { unseal } from "@/lib/secrets";
 import { getCatalogTool } from "@/lib/integrations/tools";
 
-// Response connectors: an onboarded tool with a responseWebhookUrl carries out
-// the containment actions its catalog entry supports. HELIOS POSTs a signed
+// Response connectors: a native connector (lib/connectors) calls the vendor's
+// API directly and is preferred when one is set up. Otherwise an onboarded
+// tool with a responseWebhookUrl carries out the containment actions its
+// catalog entry supports. HELIOS POSTs a signed
 // JSON request; the receiving automation (the vendor's API through n8n /
 // Tines / a script, or a SOAR) does the work and answers 2xx. Without a
 // connector the action is left for an analyst to carry out by hand
@@ -15,7 +17,14 @@ import { getCatalogTool } from "@/lib/integrations/tools";
 export interface DispatchResult {
   dispatched: boolean;
   integration?: string;
+  integrationId?: string;
   ok?: boolean;
+  // A native connector asked the vendor and is waiting to see it confirmed.
+  pending?: boolean;
+  // The connector is in dry-run mode: it checked the target and did nothing.
+  dryRun?: boolean;
+  native?: string;
+  ref?: Record<string, string>;
   message: string;
 }
 
@@ -23,6 +32,13 @@ export interface IntegrationConfig {
   responseWebhookUrl?: string;
   telemetrySource?: string;
   notes?: string;
+  // A native connector (lib/connectors): which one, its non-secret settings,
+  // whether it acts or only reports what it would do, and when the client's
+  // credential expires.
+  connector?: string;
+  connectorConfig?: Record<string, string>;
+  connectorMode?: "live" | "dry_run";
+  credentialExpiresAt?: string;
 }
 
 export interface IntegrationSecrets {
@@ -31,6 +47,8 @@ export interface IntegrationSecrets {
   // Incoming webhook for chat tools (Slack, Teams); it embeds a credential.
   chatWebhookUrl?: string;
   apiKey?: string;
+  // A native connector's secret settings (client secret, API token).
+  connector?: Record<string, string>;
 }
 
 export function readSecrets(cipher: string | null): IntegrationSecrets {
@@ -65,7 +83,20 @@ export async function dispatchAction(input: {
   target: string;
   caseRef: { id: string; title: string; severity: string } | null;
   requestId?: string;
+  comment?: string;
 }): Promise<DispatchResult> {
+  const { findNativeConnector, runNative } = await import("@/lib/connectors/run");
+  const native = await findNativeConnector(input.tenantId, input.actionType);
+  if (native) {
+    return runNative(native.integration, native.connector, {
+      action: input.actionType,
+      target: input.target,
+      idempotencyKey: input.requestId ?? `${input.caseRef?.id ?? "direct"}:${input.actionType}:${input.target}`,
+      comment: input.comment ?? (input.caseRef ? `HELIOS case "${input.caseRef.title}" (${input.caseRef.severity.toLowerCase()})` : "HELIOS response action"),
+      dryRun: native.dryRun,
+    });
+  }
+
   const connector = await findConnector(input.tenantId, input.actionType);
   if (!connector) return { dispatched: false, message: "no response connector configured" };
 

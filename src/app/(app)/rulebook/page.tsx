@@ -25,7 +25,7 @@ import { TestBadge } from "@/components/shared/test-badge";
 import { RulebookEditor } from "@/components/rulebook/rulebook-editor";
 import { RulebookSummary } from "@/components/rulebook/rulebook-summary";
 import { ClientAiPanel } from "@/components/rulebook/client-ai-panel";
-import { LadderPanel } from "@/components/rulebook/ladder-panel";
+import { LadderPanel, ResumeAutomationButton } from "@/components/rulebook/ladder-panel";
 import { AllowlistPanel, CodePanel, DraftControls, DryRunPanel, SignPanel } from "@/components/rulebook/rulebook-panels";
 
 const STATUS_LABEL = { DRAFT: "Draft", AWAITING_SIGNATURE: "Awaiting signature", ACTIVE: "In force", SUPERSEDED: "Superseded" } as const;
@@ -82,7 +82,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
   const tenantId = user.isClient ? user.tenantId : (requested ?? (await selectedTenantId(user)));
   if (!tenantId) return <ClientList />;
 
-  const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, industry: true, isTest: true, aiAutonomyCap: true, plan: { select: { name: true, defaultAutonomyCap: true } } } });
+  const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { id: true, name: true, industry: true, isTest: true, aiAutonomyCap: true, automationPausedAt: true, automationPauseReason: true, plan: { select: { name: true, defaultAutonomyCap: true } } } });
   if (!tenant) notFound();
 
   const since = daysAgo(30);
@@ -175,6 +175,12 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
             )}
             {state.draft && <Badge variant={STATUS_VARIANT[state.draft.status]}>v{state.draft.version} {STATUS_LABEL[state.draft.status].toLowerCase()}</Badge>}
           </div>
+          {tenant.automationPausedAt && (
+            <div className="flex flex-col gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-2 text-xs">
+              <p className="flex items-center gap-1.5 font-medium"><AlertTriangle className="size-3.5 text-destructive" /> Automatic containment is paused ({tenant.automationPauseReason}) since {formatRelative(tenant.automationPausedAt, now)}: every AI action waits for a person.</p>
+              {!user.isClient && can(user, "ai.configure") && <ResumeAutomationButton tenantId={tenant.id} />}
+            </div>
+          )}
           {(reminders.reviewOverdue || reminders.expiring.length > 0) && (
             <div className="flex flex-col gap-1 rounded-md border border-warning/50 bg-warning/5 p-2 text-xs">
               {reminders.reviewOverdue && <p className="flex items-center gap-1.5"><AlertTriangle className="size-3.5 text-warning" /> Review overdue since {reminders.reviewDue?.toISOString().slice(0, 10)}: confirm the rules still fit, then sign a new version.</p>}

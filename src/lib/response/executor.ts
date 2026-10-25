@@ -3,7 +3,7 @@ import type { Case, PlaybookActionType, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { ACTION_LABEL } from "@/lib/response/labels";
 import { renderTemplate } from "@/lib/playbooks/trigger";
-import { dispatchAction } from "@/lib/integrations/dispatch";
+import { dispatchAction, type DispatchResult } from "@/lib/integrations/dispatch";
 import { dispatchChatMessage } from "@/lib/integrations/chat";
 import { humanRulebookGate } from "@/lib/rulebook/service";
 
@@ -21,7 +21,8 @@ export interface ActionResult {
   action: string;
   actionType: string;
   // manual: not carried out — needs a person (no connector for this action)
-  status: "succeeded" | "failed" | "manual";
+  // pending: a native connector asked the vendor; not confirmed yet
+  status: "succeeded" | "failed" | "manual" | "pending";
   summary: string;
   skipped?: boolean; // no-op (nothing to act on) — never counts as containment
   blocked?: boolean; // refused by the client's rulebook — nothing was done
@@ -41,6 +42,8 @@ export interface ActionRequest {
   params: Record<string, string | undefined>;
   // How many people approved it (the two-person rule counts them).
   approvals?: number;
+  // The response action's id: the idempotency key a connector sends.
+  requestId?: string;
 }
 
 export const CONTAINMENT_ACTIONS = new Set<PlaybookActionType>([
@@ -100,20 +103,29 @@ export function paramsOf(parameters: Prisma.JsonValue | null | undefined): Recor
 
 // `done` describes the effect once it has happened ("Isolated FIN-07");
 // `todo` the same step as an instruction ("Isolate FIN-07").
+// What a connector's answer means for the action. Only a confirmed state
+// succeeds; a request the vendor hasn't confirmed yet is pending (the
+// verification job follows it up); a dry run did nothing.
+function fromDispatch(base: Pick<ActionResult, "action" | "actionType">, d: DispatchResult, target: string, text: { done: string; todo: string }, output: Record<string, unknown>): ActionResult {
+  const out = { ...output, connector: d, ...(d.pending && d.native ? { pending: [{ integrationId: d.integrationId, native: d.native, ref: d.ref, target }] } : {}) };
+  if (!d.dispatched) return { ...base, status: "manual", summary: `${text.todo} — no response connector for this action; carry it out in the tool's console, then mark it done`, output: out };
+  if (d.dryRun) return { ...base, status: "manual", summary: `${text.todo} — ${d.message}. Carry it out by hand, or switch the connector to live`, output: out };
+  if (!d.ok) return { ...base, status: "failed", summary: `${text.todo} failed — ${d.message}`, output: out };
+  if (d.pending) return { ...base, status: "pending", summary: `${text.todo}: requested — ${d.message}`, output: out };
+  return { ...base, status: "succeeded", summary: `${text.done} — ${d.message}`, output: out };
+}
+
 async function viaConnector(
   base: Pick<ActionResult, "action" | "actionType">,
   kase: Case,
+  req: ActionRequest,
   actionType: PlaybookActionType,
   target: string,
   text: { done: string; todo: string },
   output: Record<string, unknown>,
 ): Promise<ActionResult> {
-  const d = await dispatchAction({ tenantId: kase.tenantId, actionType, target, caseRef: { id: kase.id, title: kase.title, severity: kase.severity } });
-  if (!d.dispatched) {
-    return { ...base, status: "manual", summary: `${text.todo} — no response connector for this action; carry it out in the tool's console, then mark it done`, output: { ...output, connector: d } };
-  }
-  if (!d.ok) return { ...base, status: "failed", summary: `${text.todo} failed — ${d.message}`, output: { ...output, connector: d } };
-  return { ...base, status: "succeeded", summary: `${text.done} — ${d.message}`, output: { ...output, connector: d } };
+  const d = await dispatchAction({ tenantId: kase.tenantId, actionType, target, caseRef: { id: kase.id, title: kase.title, severity: kase.severity }, requestId: req.requestId });
+  return fromDispatch(base, d, target, text, output);
 }
 
 export async function setEndpointIsolation(kase: Pick<Case, "tenantId">, host: string, isolated: boolean, by: string) {
@@ -167,13 +179,18 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       // pull (Threat Intelligence → blocklist); the connector, if any, pushes
       // the block to the client's firewall directly.
       for (const ip of ips) await setIndicatorBlocked("IP", ip, block);
-      const results = await Promise.all(ips.map((ip) => dispatchAction({ tenantId: kase.tenantId, actionType: req.actionType, target: ip, caseRef: { id: kase.id, title: kase.title, severity: kase.severity } })));
-      const failed = results.find((r) => r.dispatched && !r.ok);
+      const results = await Promise.all(ips.map((ip) => dispatchAction({ tenantId: kase.tenantId, actionType: req.actionType, target: ip, caseRef: { id: kase.id, title: kase.title, severity: kase.severity }, requestId: req.requestId ? `${req.requestId}:${ip}` : undefined })));
       const listed = `${block ? "Added" : "Removed"} ${ips.join(", ")} ${block ? "to" : "from"} the HELIOS blocklist feed`;
+      if (ips.length === 1) return fromDispatch(base, results[0], ips[0], { done: listed, todo: `${listed}; ${block ? "block" : "unblock"} ${ips[0]} on the client's firewall` }, { ips, connectors: results });
+      const failed = results.find((r) => r.dispatched && !r.ok);
       if (results.every((r) => !r.dispatched)) {
         return { ...base, status: "manual", summary: `${listed}; no firewall connector — ${block ? "block" : "unblock"} it on the client's firewall (or confirm it pulls the feed), then mark it done`, output: { ips, connectors: results } };
       }
       if (failed) return { ...base, status: "failed", summary: `${listed}, but the firewall connector failed — ${failed.message}`, output: { ips, connectors: results } };
+      const waiting = results.filter((r) => r.pending && r.native);
+      if (waiting.length) {
+        return { ...base, status: "pending", summary: `${listed}; waiting for the connector to confirm`, output: { ips, connectors: results, pending: waiting.map((r, i) => ({ integrationId: r.integrationId, native: r.native, ref: r.ref, target: ips[i] })) } };
+      }
       return { ...base, status: "succeeded", summary: `${listed} and ${results.find((r) => r.ok)?.message}`, output: { ips, connectors: results } };
     }
 
@@ -188,7 +205,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
         const no = await refusal(base, kase, req, host);
         if (no) return no;
       }
-      const result = await viaConnector(base, kase, req.actionType, host, { done: `${isolate ? "Isolated" : "Released"} ${host}`, todo: `${isolate ? "Isolate" : "Release"} ${host}` }, { host });
+      const result = await viaConnector(base, kase, req, req.actionType, host, { done: `${isolate ? "Isolated" : "Released"} ${host}`, todo: `${isolate ? "Isolate" : "Release"} ${host}` }, { host });
       // Only a confirmed isolation changes the endpoint inventory.
       if (result.status === "succeeded") await setEndpointIsolation(kase, host, isolate, actor);
       return result;
@@ -203,7 +220,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
         const no = await refusal(base, kase, req, user);
         if (no) return no;
       }
-      return viaConnector(base, kase, req.actionType, user, { done: `${disable ? "Disabled" : "Re-enabled"} account ${user}`, todo: `${disable ? "Disable" : "Re-enable"} account ${user}` }, { user });
+      return viaConnector(base, kase, req, req.actionType, user, { done: `${disable ? "Disabled" : "Re-enabled"} account ${user}`, todo: `${disable ? "Disable" : "Re-enable"} account ${user}` }, { user });
     }
 
     case "QUARANTINE_FILE": {
@@ -213,7 +230,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       if (no) return no;
       if (/^[a-f0-9]{32,64}$/i.test(hash)) await setIndicatorBlocked("FILE_HASH", hash.toLowerCase(), true);
       const short = hash.length > 20 ? `${hash.slice(0, 16)}…` : hash;
-      return viaConnector(base, kase, "QUARANTINE_FILE", hash, { done: `Quarantined ${short}`, todo: `Quarantine ${short}` }, { hash });
+      return viaConnector(base, kase, req, "QUARANTINE_FILE", hash, { done: `Quarantined ${short}`, todo: `Quarantine ${short}` }, { hash });
     }
 
     case "BLOCK_SENDER": {
@@ -222,7 +239,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       const no = await refusal(base, kase, req, sender);
       if (no) return no;
       await setIndicatorBlocked(sender.includes("@") ? "EMAIL_ADDRESS" : "DOMAIN", sender.toLowerCase(), true);
-      return viaConnector(base, kase, "BLOCK_SENDER", sender, { done: `Blocked sender ${sender}`, todo: `Block sender ${sender}` }, { sender });
+      return viaConnector(base, kase, req, "BLOCK_SENDER", sender, { done: `Blocked sender ${sender}`, todo: `Block sender ${sender}` }, { sender });
     }
 
     case "KILL_PROCESS": {
@@ -231,7 +248,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       if (!process || !host) return { ...base, status: "succeeded", skipped: true, summary: "No process and host identified on this case" };
       const no = await refusal(base, kase, req, process);
       if (no) return no;
-      return viaConnector(base, kase, "KILL_PROCESS", `${host}:${process}`, { done: `Terminated ${process} on ${host}`, todo: `Terminate ${process} on ${host}` }, { process, host });
+      return viaConnector(base, kase, req, "KILL_PROCESS", `${host}:${process}`, { done: `Terminated ${process} on ${host}`, todo: `Terminate ${process} on ${host}` }, { process, host });
     }
 
     case "REVOKE_AGENT":
@@ -285,7 +302,7 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       const title = renderTemplate(p.title ?? "{{case.title}}", ctx.vars);
       // The connector (Jira, ServiceNow or your automation) opens the ticket
       // and answers with its id; HELIOS never invents one.
-      return viaConnector(base, kase, "CREATE_TICKET", title, { done: `Ticket requested: "${title}"`, todo: `Open a ticket "${title}"` }, { title });
+      return viaConnector(base, kase, req, "CREATE_TICKET", title, { done: `Ticket requested: "${title}"`, todo: `Open a ticket "${title}"` }, { title });
     }
   }
 }

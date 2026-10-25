@@ -204,6 +204,16 @@ export async function rollbackResponseActionAction(actionId: string) {
   return { status: result.status };
 }
 
+// Keep a time-boxed action longer (hours), or for good (0).
+export async function extendResponseActionAction(actionId: string, hours: number) {
+  const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId }, select: { caseId: true } });
+  const user = await caseActor(action.caseId, "containment.approve");
+  const { extendAction } = await import("@/lib/connectors/safety");
+  const expiresAt = await extendAction(actionId, z.number().int().min(0).max(24 * 30).parse(hours), { id: user.id, name: user.name ?? "analyst" });
+  revalidateCases(action.caseId);
+  return { expiresAt: expiresAt?.toISOString() ?? null };
+}
+
 // The analyst carried out a MANUAL_REQUIRED action by hand and says so.
 export async function completeManualActionAction(actionId: string, note: string) {
   const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId }, select: { caseId: true } });

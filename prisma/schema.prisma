@@ -141,25 +141,29 @@ enum TenantStatus {
 }
 
 model Tenant {
-  id                String       @id @default(cuid())
-  name              String       @unique
-  slug              String       @unique
-  industry          String?
-  status            TenantStatus @default(ONBOARDING)
-  planId            String? // the managed-service plan the client is on (sets its SLA)
-  contactName       String?
-  contactEmail      String?
-  endpointsLicensed Int          @default(0)
-  usersLicensed     Int          @default(0)
+  id                    String       @id @default(cuid())
+  name                  String       @unique
+  slug                  String       @unique
+  industry              String?
+  status                TenantStatus @default(ONBOARDING)
+  planId                String? // the managed-service plan the client is on (sets its SLA)
+  contactName           String?
+  contactEmail          String?
+  endpointsLicensed     Int          @default(0)
+  usersLicensed         Int          @default(0)
   // The most autonomy the client has consented to for AI agents acting on
   // its estate; caps every agent profile.
-  aiAutonomyCap     AiAutonomy   @default(CONTAIN_WITH_APPROVAL)
-  notes             String?      @db.Text
+  aiAutonomyCap         AiAutonomy   @default(CONTAIN_WITH_APPROVAL)
+  // Circuit breaker: automatic containment paused for this client after
+  // repeated connector failures, until someone resumes it.
+  automationPausedAt    DateTime?
+  automationPauseReason String?
+  notes                 String?      @db.Text
   // Test clients hold test data only: badged everywhere, kept out of
   // commercial figures, and never a real organization.
-  isTest            Boolean      @default(false)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  isTest                Boolean      @default(false)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 
   plan         ServicePlan?           @relation(fields: [planId], references: [id], onDelete: SetNull)
   users        User[]
@@ -946,6 +950,9 @@ enum ResponseActionStatus {
   // Shadow mode: what the AI would have done, recorded silently and shown
   // only once the case is closed (lib/shadow).
   SHADOW
+  // A native connector asked the vendor; waiting for the vendor's state to
+  // confirm it (lib/connectors/verify). Never counts as containment.
+  IN_PROGRESS
 }
 
 // How far AI may go for one client and one action type, earned in shadow
@@ -1019,6 +1026,9 @@ model ResponseAction {
   trace             Json?
   // Where it is in the client's approver chain: { step, at, timedOut }.
   escalation        Json?
+  // Time-boxed actions (an IP block, a temporary disable) roll themselves
+  // back at this time unless someone extends them.
+  expiresAt         DateTime?
   result            Json?
   createdAt         DateTime             @default(now())
 

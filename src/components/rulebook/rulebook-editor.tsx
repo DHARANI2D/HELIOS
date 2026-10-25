@@ -284,7 +284,7 @@ export function RulebookEditor({ tenantId, initial, active, template, timeZone, 
         </div>
       </Section>
 
-      <Section step={5} title="Blast radius" hint="Above these limits automatic actions wait for a human, so a bad detection can't take out half the estate.">
+      <Section step={5} title="Blast radius and time boxes" hint="Above these limits automatic actions wait for a human, so a bad detection can't take out half the estate.">
         <div className="flex flex-wrap gap-4">
           <div className="grid gap-1.5">
             <Label htmlFor="br-hour" className="text-xs">Automatic actions per hour</Label>
@@ -294,7 +294,16 @@ export function RulebookEditor({ tenantId, initial, active, template, timeZone, 
             <Label htmlFor="br-hosts" className="text-xs">Hosts isolated at once</Label>
             <Input id="br-hosts" type="number" min={0} max={10000} className="h-8 w-32" disabled={disabled} value={book.blastRadius.maxHostsIsolated} onChange={(e) => patch("blastRadius", { maxHostsIsolated: Math.max(0, Number(e.target.value) || 0) })} />
           </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="tb-ip" className="text-xs">IP blocks lift after (hours)</Label>
+            <Input id="tb-ip" type="number" min={0} className="h-8 w-32" disabled={disabled} value={book.timeBoxes.blockIpHours} onChange={(e) => patch("timeBoxes", { blockIpHours: Math.max(0, Number(e.target.value) || 0) })} />
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="tb-user" className="text-xs">Disabled accounts re-enable after (hours)</Label>
+            <Input id="tb-user" type="number" min={0} className="h-8 w-32" disabled={disabled} value={book.timeBoxes.disableUserHours} onChange={(e) => patch("timeBoxes", { disableUserHours: Math.max(0, Number(e.target.value) || 0) })} />
+          </div>
         </div>
+        <p className="text-[11px] text-muted-foreground">Time boxes undo an action on their own unless someone keeps it; 0 means it stays until a person lifts it.</p>
       </Section>
 
       <Section step={6} title="Hours, maintenance windows and change freezes" hint="In the client's own time zone. Outside business hours, during maintenance or a freeze, automatic actions can be held for approval or reduced to suggestions.">

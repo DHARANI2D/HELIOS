@@ -116,13 +116,21 @@ export async function performResponseAction(actionId: string, actor: Actor) {
   let result: ActionResult;
   try {
     const approvals = Math.max(1, approvalsOf(action.approvals).length);
-    result = await executeAction({ name: ACTION_LABEL[action.actionType], actionType: action.actionType, params, approvals }, kase, ctx, actor.name);
+    result = await executeAction({ name: ACTION_LABEL[action.actionType], actionType: action.actionType, params, approvals, requestId: action.id }, kase, ctx, actor.name);
   } catch (err) {
     result = { action: ACTION_LABEL[action.actionType], actionType: action.actionType, status: "failed", summary: err instanceof Error ? err.message : String(err) };
   }
   // A rulebook refusal at the moment of acting (the rules may have changed
   // while it waited for approval) blocks it rather than failing it.
-  const status: ResponseActionStatus = result.blocked ? "BLOCKED" : result.status === "succeeded" ? "EXECUTED" : result.status === "manual" ? "MANUAL_REQUIRED" : "FAILED";
+  const status: ResponseActionStatus = result.blocked
+    ? "BLOCKED"
+    : result.status === "succeeded"
+      ? "EXECUTED"
+      : result.status === "manual"
+        ? "MANUAL_REQUIRED"
+        : result.status === "pending"
+          ? "IN_PROGRESS"
+          : "FAILED";
   const updated = await db.responseAction.update({
     where: { id: actionId },
     data: { status, result: JSON.parse(JSON.stringify(result)), ...(result.blocked ? { policyReason: result.summary } : {}) },
@@ -141,10 +149,14 @@ export async function performResponseAction(actionId: string, actor: Actor) {
   await logAction({
     actorId: actor.id,
     caseId: kase.id,
-    action: status === "EXECUTED" ? "response.executed" : status === "MANUAL_REQUIRED" ? "response.manual_required" : status === "BLOCKED" ? "response.blocked" : "response.failed",
+    action: status === "EXECUTED" ? "response.executed" : status === "MANUAL_REQUIRED" ? "response.manual_required" : status === "BLOCKED" ? "response.blocked" : status === "IN_PROGRESS" ? "response.requested_from_vendor" : "response.failed",
     detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, source: action.source, summary: result.summary },
   });
   if (status === "EXECUTED") await completeRollbackOf(action.parameters);
+  if (status === "EXECUTED" || status === "FAILED") {
+    const { afterConnectorOutcome } = await import("@/lib/connectors/safety");
+    await afterConnectorOutcome(updated, status);
+  }
   if (status === "MANUAL_REQUIRED") {
     await notify(await approversFor(kase.id), {
       kind: "approval",
@@ -167,6 +179,37 @@ async function completeRollbackOf(parameters: unknown) {
   await db.responseAction.update({ where: { id: orig.id }, data: { status: "ROLLED_BACK" } });
   const open = await db.responseAction.count({ where: { caseId: orig.caseId, status: "EXECUTED", actionType: { in: [...CONTAINMENT_ACTIONS] } } });
   if (open === 0) await db.case.updateMany({ where: { id: orig.caseId, status: "CONTAINED" }, data: { status: "INVESTIGATING" } });
+}
+
+// A native connector's request the vendor has now confirmed (or that
+// failed, or never confirmed in time): settle the action and the case.
+export async function settleInProgressAction(actionId: string, outcome: { state: "confirmed" | "failed"; message: string }) {
+  const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId } });
+  if (action.status !== "IN_PROGRESS") return action;
+  const kase = await db.case.findUniqueOrThrow({ where: { id: action.caseId } });
+  const previous = (action.result ?? {}) as Record<string, unknown>;
+  const confirmed = outcome.state === "confirmed";
+  const status: ResponseActionStatus = confirmed ? "EXECUTED" : "FAILED";
+  const summary = `${ACTION_LABEL[action.actionType]}${action.target ? ` ${action.target}` : ""}: ${outcome.message}`;
+  const updated = await db.responseAction.update({
+    where: { id: actionId },
+    data: { status, result: JSON.parse(JSON.stringify({ ...previous, status: confirmed ? "succeeded" : "failed", summary, verifiedAt: new Date().toISOString() })) },
+  });
+  if (confirmed && (action.actionType === "ISOLATE_HOST" || action.actionType === "RELEASE_HOST") && action.target) {
+    await setEndpointIsolation(kase, action.target, action.actionType === "ISOLATE_HOST", "connector");
+  }
+  await db.timelineEntry.create({
+    data: { caseId: kase.id, occurredAt: new Date(), actor: "connector", action: `response.${action.actionType.toLowerCase()}`, detail: summary, evidence: { responseActionId: actionId, verified: confirmed } },
+  });
+  await logAction({ caseId: kase.id, action: confirmed ? "response.confirmed" : "response.failed", detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, message: outcome.message } });
+  if (confirmed) await completeRollbackOf(action.parameters);
+  const { afterConnectorOutcome } = await import("@/lib/connectors/safety");
+  await afterConnectorOutcome(updated, status);
+  if (!confirmed) {
+    await notify(await approversFor(kase.id), { kind: "approval", title: `Not confirmed: ${ACTION_LABEL[action.actionType]} ${action.target ?? ""}`, body: outcome.message, caseId: kase.id, actorName: "connector" });
+  }
+  await markCaseAfterResponse(kase.id);
+  return updated;
 }
 
 // The analyst confirms they carried out a MANUAL_REQUIRED action themselves

@@ -60,6 +60,9 @@ export function RulebookSummary({ book }: { book: Rulebook }) {
         <p className="text-xs text-muted-foreground">
           At most {book.blastRadius.maxActionsPerHour} automatic actions an hour and {book.blastRadius.maxHostsIsolated} hosts isolated at once without a human.
         </p>
+        <p className="text-xs text-muted-foreground">
+          IP blocks {book.timeBoxes.blockIpHours ? `lift after ${book.timeBoxes.blockIpHours} h` : "stay until lifted"}; disabled accounts {book.timeBoxes.disableUserHours ? `re-enable after ${book.timeBoxes.disableUserHours} h` : "stay disabled until re-enabled"}, unless someone keeps them.
+        </p>
       </Block>
       <Block title="Schedule">
         <p className="text-xs">

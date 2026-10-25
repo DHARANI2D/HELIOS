@@ -23,7 +23,7 @@ export interface ActiveRulebook {
   signedAt: Date | null;
 }
 
-export function hashRulebook(body: Rulebook) {
+export function hashRulebook(body: Rulebook | unknown) {
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
 }
 
@@ -186,8 +186,9 @@ export async function signRulebook(tenantId: string, signer: Author & { isClient
   const pending = await db.orgPolicy.findFirst({ where: { tenantId, status: { in: signer.isClient ? ["AWAITING_SIGNATURE"] : ["AWAITING_SIGNATURE", "DRAFT"] } } });
   if (!pending) throw new Error("There's no version waiting to be signed");
   // The stored body must still match its hash: what was reviewed is what runs.
-  const body = parseStored(pending);
-  if (hashRulebook(body) !== pending.contentHash) throw new Error("This version changed since it was saved; save it again");
+  parseStored(pending); // and still valid under the current schema
+  // Hashed as stored, so defaults added to the schema since don't count as a change.
+  if (hashRulebook(pending.body) !== pending.contentHash) throw new Error("This version changed since it was saved; save it again");
   const now = new Date();
   const activated = await db.$transaction(async (tx) => {
     await tx.orgPolicy.updateMany({ where: { tenantId, status: "ACTIVE" }, data: { status: "SUPERSEDED" } });

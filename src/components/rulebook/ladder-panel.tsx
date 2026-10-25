@@ -6,7 +6,7 @@ import { useMutation } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Check, Eye, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { decidePromotionAction, lowerLevelAction, proposePromotionAction, startShadowModeAction } from "@/app/(app)/rulebook/ladder-actions";
+import { decidePromotionAction, lowerLevelAction, proposePromotionAction, resumeAutomationAction, startShadowModeAction } from "@/app/(app)/rulebook/ladder-actions";
 import { DEMOTION, LEVELS, PROMOTION } from "@/lib/shadow/ladder";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -150,5 +150,14 @@ export function LadderPanel({ tenantId, started, rows, verdicts, canManage, canA
         </>
       )}
     </div>
+  );
+}
+
+export function ResumeAutomationButton({ tenantId }: { tenantId: string }) {
+  const resume = useAct(() => resumeAutomationAction(tenantId), "Automatic containment resumed");
+  return (
+    <Button size="sm" variant="outline" className="w-fit" onClick={() => resume.mutate(undefined)} disabled={resume.isPending}>
+      {resume.isPending ? <Loader2 className="animate-spin" /> : <Check />} Resume automatic containment
+    </Button>
   );
 }

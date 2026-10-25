@@ -16,6 +16,7 @@ import { SEVERITY_FROM_AI, groundTriage, type GroundingReport, type TriageOutput
 import { decideResponse } from "@/lib/response/policy";
 import { rulebookVerdict } from "@/lib/rulebook/service";
 import { ladderFor, observing } from "@/lib/shadow/service";
+import { circuitBreakerFor } from "@/lib/connectors/safety";
 import { ACTION_LABEL } from "@/lib/response/executor";
 import { approversFor, markCaseAfterResponse, performResponseAction, recordResponseAction } from "@/lib/response/service";
 
@@ -178,7 +179,7 @@ async function applyTriage(
   modelCap: { autonomy: "SUGGEST"; reason: string } | null = null,
 ) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { tenant: { select: { aiAutonomyCap: true, plan: { select: { defaultAutonomyCap: true } } } } } });
-  const [settings, controller, ladder] = await Promise.all([aiSettings(), loadProfile("containment"), ladderFor(kase.tenantId)]);
+  const [settings, controller, ladder, paused] = await Promise.all([aiSettings(), loadProfile("containment"), ladderFor(kase.tenantId), circuitBreakerFor(kase.tenantId)]);
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
   // Shadow mode: with every action at level 0 the AI only observes — its
   // analysis is recorded but stays out of sight until the case closes.
@@ -203,6 +204,7 @@ async function applyTriage(
       grounded: !!ground?.grounded,
       confidence: output.confidence,
       killSwitch: settings.killSwitch,
+      paused,
       autonomy: controller.enabled ? controller.autonomy : "SUGGEST",
       allowedActions: controller.allowedActions,
       minConfidence: controller.minConfidence,

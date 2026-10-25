@@ -61,5 +61,7 @@ describe("the autonomy ladder", () => {
     expect(decideResponse({ ...base, ladder: { level: 3 } }).status).toBe("EXECUTED");
     // The ladder never loosens anything else.
     expect(decideResponse({ ...base, tenantCap: "SUGGEST", ladder: { level: 4 } }).status).toBe("SUGGESTED");
+    // A tripped circuit breaker hands every automatic action to a person.
+    expect(decideResponse({ ...base, paused: { reason: "3 connector failures" } })).toMatchObject({ status: "PENDING_APPROVAL", trace: [expect.objectContaining({ layer: "circuit_breaker" })] });
   });
 });

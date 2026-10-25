@@ -125,3 +125,63 @@ export async function testConnectorAction(id: string) {
   if (!result.ok) throw new Error(result.message);
   return result;
 }
+
+// ---------------------------------------------------------------- native connectors
+
+const nativeSchema = z.object({
+  on: z.boolean(),
+  mode: z.enum(["live", "dry_run"]),
+  values: z.record(z.string(), z.string().trim().max(2000)),
+  credentialExpiresAt: z.string().trim().max(40).optional().or(z.literal("")),
+});
+
+// Set up (or switch off) the native connector for an onboarded tool. Secret
+// fields left blank keep what's stored; secrets are sealed and never logged.
+export async function saveNativeConnectorAction(id: string, input: z.input<typeof nativeSchema>) {
+  const user = await requirePermission("integrations.manage");
+  const integration = await integrationInScope(user, id);
+  const data = nativeSchema.parse(input);
+  const { connectorForTool } = await import("@/lib/connectors/registry");
+  const connector = connectorForTool(integration.vendor);
+  if (!connector) throw new Error("This tool has no native connector; use the response webhook");
+  if (data.credentialExpiresAt && Number.isNaN(Date.parse(data.credentialExpiresAt))) throw new Error("Credential expiry must be a date");
+  for (const f of connector.fields) {
+    const v = data.values[f.key];
+    if (v && /url|base|host/i.test(f.key) && !/^https:\/\//.test(v)) throw new Error(`${f.label} must start with https://`);
+  }
+  const config = { ...((integration.config ?? {}) as IntegrationConfig) };
+  const secrets = { ...readSecrets(integration.secretCipher) };
+  const plain: Record<string, string> = { ...(config.connectorConfig ?? {}) };
+  const hidden: Record<string, string> = { ...(secrets.connector ?? {}) };
+  for (const f of connector.fields) {
+    const v = data.values[f.key];
+    if (f.secret) {
+      if (v) hidden[f.key] = v;
+    } else plain[f.key] = v ?? "";
+  }
+  if (data.on) {
+    config.connector = connector.key;
+    config.connectorMode = data.mode;
+  } else {
+    delete config.connector;
+  }
+  config.connectorConfig = plain;
+  config.credentialExpiresAt = data.credentialExpiresAt || undefined;
+  secrets.connector = hidden;
+  await db.integration.update({ where: { id }, data: { config: config as never, secretCipher: seal(JSON.stringify(secrets)) } });
+  const { forgetToken } = await import("@/lib/connectors/http");
+  forgetToken(id);
+  await logAction({ actorId: user.id, action: "integration.native_connector_saved", detail: { integrationId: id, connector: connector.key, on: data.on, mode: data.mode, fields: Object.keys(plain), secretsSet: Object.keys(hidden) } });
+  revalidate();
+}
+
+// Signs in with the connector's credentials and reads something harmless.
+export async function testNativeConnectorAction(id: string) {
+  const user = await requirePermission("integrations.manage");
+  const integration = await integrationInScope(user, id);
+  const { checkNative } = await import("@/lib/connectors/run");
+  const result = await checkNative(integration);
+  await logAction({ actorId: user.id, action: "integration.native_connector_tested", detail: { integrationId: id, ok: result.ok, message: result.message.slice(0, 300) } });
+  revalidate();
+  return result;
+}

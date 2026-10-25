@@ -310,6 +310,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     requiredApprovals: a.requiredApprovals,
                     approvedBy: approvalsOf(a.approvals).map((x) => x.name),
                     policyVersion: a.policyVersion,
+                    expiresAt: a.expiresAt?.toISOString() ?? null,
                     trace: Array.isArray(a.trace) ? (a.trace as Array<{ layer: string; reason: string }>).map((t) => ({ layer: String(t.layer), reason: String(t.reason) })) : [],
                   };
                 })}

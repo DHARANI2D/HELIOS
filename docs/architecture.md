@@ -136,16 +136,49 @@ Each client has an autonomy ladder per action type (`autonomy_levels`): L0 obser
 
 ### Background jobs (`src/instrumentation.ts`, `lib/jobs/scheduler.ts`)
 
-Timers in the server process: approval escalation every minute and the ladder review hourly. Both jobs can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them.
+Timers in the server process:
+
+| Job | Runs every |
+|---|---|
+| Approval escalation | Minute |
+| Connector verification | 30 seconds |
+| Time-box rollbacks | Minute |
+| Credential reminders | 6 hours |
+| Ladder review | Hour |
+
+Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them.
 
 ### Response actions (`lib/response`)
 
 `executor.ts` is the only place an action happens.
-- **Through a connector.** Effects on client systems go through the tenant's response connector: an onboarded tool whose catalog entry supports the action and has a webhook URL. That connector gets a signed request (`integrations/dispatch.ts`).
+- **Native connectors** (`lib/connectors`): HELIOS calls the vendor's API with the client's own least-privilege credentials, and these are preferred when set up. There are six:
+
+  | Connector | Actions |
+  |---|---|
+  | Microsoft Defender for Endpoint | Isolate and release devices; block file hashes and IPs with indicators |
+  | Microsoft Entra ID (Graph) | Disable an account and revoke its sessions; re-enable it |
+  | CrowdStrike Falcon | Contain a host; lift containment |
+  | SentinelOne | Disconnect an agent from the network; reconnect it |
+  | Okta | Suspend an account and clear its sessions; unsuspend it |
+  | Cloudflare | Block an IP account-wide with an IP Access rule; remove the block |
+
+  Each connector meets one contract:
+  1. **Preflight:** the target exists, isn't ambiguous, and isn't already in that state.
+  2. **Execute:** the response action's id goes as the idempotency key.
+  3. **Verify:** read the vendor's state back.
+
+  A request the vendor hasn't confirmed yet is `IN_PROGRESS`, which never counts as containment. The verification job follows it every 30 seconds until it is confirmed (`EXECUTED`, and the inventory is updated), fails, or runs past 30 minutes.
+
+  **Dry-run mode** runs preflight only, reports what it would do, and leaves the action to do by hand. Contract tests run each connector against its vendor's documented request and response shapes. The vendor docs couldn't be opened from the build environment, so check every connector against a lab tenant before production.
+- **Through a webhook.** Otherwise effects go through the tenant's response webhook: an onboarded tool whose catalog entry supports the action and has a webhook URL. That connector gets a signed request (`integrations/dispatch.ts`).
 - **No connector.** The action ends `MANUAL_REQUIRED`. The executor claims nothing, doesn't touch the endpoint inventory and invents no ticket IDs. It notifies approvers. `completeManualAction` records the analyst's confirmation, and only then does the action count as `EXECUTED`.
 - **Effects HELIOS owns** happen directly: agent revocation, attaching telemetry, the blocklist feed.
 - **Containment.** A case is `CONTAINED` only by `EXECUTED` containment.
 - **Rollbacks.** A rollback carries `parameters.rollbackOf` and retires the original once it has actually happened.
+- **Safety** (`lib/connectors/safety.ts`):
+  - **Circuit breaker:** three connector failures for a client within 30 minutes pause its automatic containment and page the SOC. The breaker is a policy layer, so every AI action waits for a person until someone resumes automation on the rulebook page.
+  - **Time boxes:** the client's rulebook sets hours for IP blocks and account disables. When the time is up the action rolls itself back, unless someone keeps it for 24 hours more or until lifted.
+  - **Credential reminders:** connector credentials with an expiry date trigger a reminder two weeks before.
 
 ### Integrations (`lib/integrations`)
 
