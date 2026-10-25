@@ -72,3 +72,13 @@ export function surfaceCoverage(input: QuoteConfig, ctx: Pick<PricingContext, "t
     score: possible ? Math.round((earned / possible) * 100) : 0,
   };
 }
+
+// The asset groups a quote covers beyond computers, servers and mailboxes,
+// in words: "network & security devices (12 devices); iot & …".
+export function extraGroupsText(input: QuoteConfig): string {
+  const cfg = normalizeConfig(input);
+  const counts = classCounts(cfg.profile);
+  return ASSET_CLASSES.filter((c) => !["user", "server", "email"].includes(c.key) && counts[c.key] > 0)
+    .map((c) => `${c.label.toLowerCase()} (${describeClassCount(c.key, cfg.profile)})`)
+    .join("; ");
+}

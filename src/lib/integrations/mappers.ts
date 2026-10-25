@@ -36,6 +36,9 @@ export interface InventoryRecord {
   owner?: string;
   criticality?: string;
   controls?: Record<string, string>;
+  // What it is beyond a computer: an asset group and type (lib/assets/inventory.ts).
+  assetClass?: string;
+  assetType?: string;
 }
 
 function get(obj: unknown, path: string): unknown {
@@ -349,6 +352,8 @@ export function inventoryFrom(body: unknown): InventoryRecord[] {
       owner: str(r.owner, r.user),
       criticality: str(r.criticality),
       controls: r.controls && typeof r.controls === "object" ? (r.controls as Record<string, string>) : undefined,
+      assetClass: str(r.assetClass, r.asset_class, r.class),
+      assetType: str(r.assetType, r.asset_type, r.type),
     }))
     .filter((r) => r.hostname);
 }

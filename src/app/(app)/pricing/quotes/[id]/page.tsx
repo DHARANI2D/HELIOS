@@ -8,6 +8,7 @@ import { can } from "@/lib/rbac";
 import { formatMinutes } from "@/lib/plans";
 import { CONTROLS } from "@/lib/endpoints/controls";
 import { formatMoney, quoteConfigSchema, type QuoteResult } from "@/lib/pricing/calculator";
+import { extraGroupsText } from "@/lib/assets/coverage";
 import { formatDateTime } from "@/lib/format";
 import { describeMix } from "@/lib/pricing/endpoint-mix";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +71,7 @@ export default async function QuotePage({ params }: PageProps<"/pricing/quotes/[
           <CardDescription>
             {plan ? `${plan.name}${plan.tagline ? ` — ${plan.tagline}` : ""}. ` : ""}{r.endpoints.toLocaleString()} endpoints{cfg.profile.mix ? ` (${describeMix(cfg.profile.mix)})` : ""}, {cfg.profile.users.toLocaleString()} users.{" "}
             {quote.source === "website" ? "Requested through the website estimator." : `Prepared by ${quote.createdBy?.name ?? quote.createdBy?.email ?? "HELIOS"}.`}
+            {extraGroupsText(cfg) && <span className="mt-1 block">Also covers {extraGroupsText(cfg)}.</span>}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">

@@ -9,6 +9,8 @@ import { selectedTenantId, tenantScope } from "@/lib/access";
 import { tenantOptions } from "@/lib/tenants";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
 import { CONTROLS, coverageScore, missingEssentials, parseProtections } from "@/lib/endpoints/controls";
+import { ASSET_CLASSES, type AssetClass } from "@/lib/assets/surface";
+import { DEVICE_CLASSES, assetTypeLabel, endpointClass, isAssetClass } from "@/lib/assets/inventory";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { StatTile } from "@/components/dashboard/stat-tile";
@@ -30,7 +32,7 @@ function one(v: string | string[] | undefined) {
   return Array.isArray(v) ? v[0] : v;
 }
 
-async function loadEndpoints(scope: { tenantId?: string | null }, q: string | undefined, filter: string | undefined) {
+async function loadEndpoints(scope: { tenantId?: string | null }, q: string | undefined, filter: string | undefined, cls: AssetClass | undefined) {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_DAYS * 24 * 60 * 60 * 1000);
   const where: Prisma.EndpointWhereInput = { ...scope };
@@ -39,10 +41,18 @@ async function loadEndpoints(scope: { tenantId?: string | null }, q: string | un
   if (filter === "stale") where.lastSeenAt = { lt: staleBefore };
   if (filter === "critical") where.criticality = "critical";
 
-  const [all, endpoints] = await Promise.all([
-    db.endpoint.findMany({ where: scope, select: { protections: true, isolated: true, lastSeenAt: true } }),
-    db.endpoint.findMany({ where, orderBy: [{ isolated: "desc" }, { lastSeenAt: { sort: "desc", nulls: "last" } }], take: 200, include: { tenant: { select: { name: true, isTest: true } } } }),
-  ]);
+  const everything = await db.endpoint.findMany({ where: scope, select: { id: true, protections: true, isolated: true, lastSeenAt: true, os: true, assetClass: true, assetType: true } });
+  const classOf = new Map(everything.map((e) => [e.id, endpointClass(e)]));
+  // Device controls apply to computers, servers and phones only.
+  const all = everything.filter((e) => DEVICE_CLASSES.includes(classOf.get(e.id)!));
+  if (cls) where.id = { in: everything.filter((e) => classOf.get(e.id) === cls).map((e) => e.id).slice(0, 5000) };
+  const endpoints = await db.endpoint.findMany({ where, orderBy: [{ isolated: "desc" }, { lastSeenAt: { sort: "desc", nulls: "last" } }], take: 200, include: { tenant: { select: { name: true, isTest: true } } } });
+  const byClass = ASSET_CLASSES.map((c) => {
+    const rows = everything.filter((e) => classOf.get(e.id) === c.key);
+    const types = new Map<string, number>();
+    for (const r of rows) if (r.assetType) types.set(r.assetType, (types.get(r.assetType) ?? 0) + 1);
+    return { info: c, count: rows.length, types: [...types].sort((a, b) => b[1] - a[1]).slice(0, 3) };
+  });
 
   // Open cases per host, from the telemetry linked to them.
   const hostRows = endpoints.length
@@ -67,6 +77,8 @@ async function loadEndpoints(scope: { tenantId?: string | null }, q: string | un
     endpoints,
     openCases,
     total: all.length,
+    assets: everything.length,
+    byClass,
     isolated: all.filter((e) => e.isolated).length,
     stale: all.filter((e) => !e.lastSeenAt || e.lastSeenAt < staleBefore).length,
     gaps: parsed.filter((p) => missingEssentials(p).length > 0).length,
@@ -80,25 +92,54 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
   const sp = await searchParams;
   const q = one(sp.q)?.trim() || undefined;
   const filter = one(sp.filter);
+  const cls = isAssetClass(one(sp.class)) ? (one(sp.class) as AssetClass) : undefined;
   const scope = await tenantScope(user);
-  const [data, tenants, defaultTenantId] = await Promise.all([loadEndpoints(scope, q, filter), tenantOptions(), selectedTenantId(user)]);
+  const [data, tenants, defaultTenantId] = await Promise.all([loadEndpoints(scope, q, filter, cls), tenantOptions(), selectedTenantId(user)]);
+  const href = (c: AssetClass | undefined) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (filter) params.set("filter", filter);
+    if (c) params.set("class", c);
+    return `/endpoints${params.size ? `?${params}` : ""}`;
+  };
   const canContain = can(user, "endpoints.contain");
   const canEdit = canContain || can(user, "integrations.manage");
 
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <StatTile label="Endpoints" value={data.total} icon={Laptop} />
+        <StatTile label="Assets (devices)" value={data.assets === data.total ? data.total : `${data.assets} (${data.total})`} icon={Laptop} />
         <StatTile label="Avg. protection score" value={`${data.avgScore}`} icon={ShieldCheck} tone={data.avgScore < 60 && data.total > 0 ? "warning" : "default"} />
-        <StatTile label="Missing essential controls" value={data.gaps} icon={ShieldAlert} tone={data.gaps > 0 ? "critical" : "default"} />
+        <StatTile label="Devices missing essential controls" value={data.gaps} icon={ShieldAlert} tone={data.gaps > 0 ? "critical" : "default"} />
         <StatTile label="Isolated now" value={data.isolated} icon={Lock} tone={data.isolated > 0 ? "warning" : "default"} />
         <StatTile label={`Not seen in ${STALE_DAYS}d`} value={data.stale} icon={TimerOff} />
       </div>
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">Attack surface inventory</CardTitle>
+          <CardDescription>Every asset by group: devices placed by their OS, and anything an import or tool files as network, cloud, identity, IoT/OT or application assets.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+          {data.byClass.map((c) => (
+            <Link
+              key={c.info.key}
+              href={href(cls === c.info.key ? undefined : c.info.key)}
+              aria-current={cls === c.info.key ? "true" : undefined}
+              className={cn("rounded-lg border p-3 transition-colors hover:bg-accent", cls === c.info.key && "border-primary bg-primary/5 ring-1 ring-primary", c.count === 0 && "opacity-60")}
+            >
+              <p className="text-2xl font-semibold tabular">{c.count}</p>
+              <p className="text-xs font-medium">{c.info.label}</p>
+              {c.types.length > 0 && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{c.types.map(([t, n]) => `${n} ${assetTypeLabel(c.info.key, t) ?? t}`).join(" · ")}</p>}
+            </Link>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">Protection coverage by control</CardTitle>
-          <CardDescription>Share of endpoints where each protection layer is active, from onboarded tools and imported inventory. Essential controls are marked.</CardDescription>
+          <CardDescription>Share of computers, servers and phones where each protection layer is active, from onboarded tools and imported inventory. Essential controls are marked.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-x-8 gap-y-2.5 md:grid-cols-2">
           {data.controlCoverage.map((c) => {
@@ -138,8 +179,9 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
               <option value="critical">Business-critical</option>
               <option value="stale">Not seen in {STALE_DAYS} days</option>
             </NativeSelect>
+            {cls && <input type="hidden" name="class" value={cls} />}
             <Button type="submit" variant="secondary">Filter</Button>
-            {(q || filter) && (
+            {(q || filter || cls) && (
               <Button variant="ghost" asChild>
                 <Link href="/endpoints">Reset</Link>
               </Button>
@@ -147,13 +189,13 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
           </form>
 
           {data.endpoints.length === 0 ? (
-            <EmptyState icon={Laptop} title="No endpoints yet" description="Onboard an EDR under Tools & Integrations or import an inventory CSV." />
+            <EmptyState icon={Laptop} title={cls ? "Nothing in this group yet" : "No endpoints yet"} description="Onboard an EDR under Tools & Integrations or import an inventory CSV; the class and type columns file network, cloud, IoT/OT and application assets." />
           ) : (
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Endpoint</TableHead>
+                    <TableHead>Asset</TableHead>
                     {!user.isClient && <TableHead>Client</TableHead>}
                     <TableHead>Controls</TableHead>
                     <TableHead className="text-right">Score</TableHead>
@@ -165,9 +207,11 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
                 </TableHeader>
                 <TableBody>
                   {data.endpoints.map((e) => {
+                    const group = endpointClass(e);
+                    const device = DEVICE_CLASSES.includes(group);
                     const p = parseProtections(e.protections);
                     const score = coverageScore(p);
-                    const missing = missingEssentials(p);
+                    const missing = device ? missingEssentials(p) : [];
                     const cases = data.openCases.get(e.hostname.toLowerCase()) ?? 0;
                     const stale = !e.lastSeenAt || e.lastSeenAt < data.staleBefore;
                     return (
@@ -177,10 +221,11 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
                             <span className="font-mono text-sm font-medium">{e.hostname}</span>
                             {e.isolated && <Badge variant="warning"><Lock /> isolated</Badge>}
                           </div>
-                          <p className="text-[11px] text-muted-foreground">{[e.os, e.ipAddress, e.owner].filter(Boolean).join(" · ") || "—"}</p>
+                          <p className="text-[11px] text-muted-foreground">{[assetTypeLabel(group, e.assetType) ?? ASSET_CLASSES.find((c) => c.key === group)?.label, e.os, e.ipAddress, e.owner].filter(Boolean).join(" · ")}</p>
                         </TableCell>
                         {!user.isClient && <TableCell className="text-xs">{e.tenant?.name ?? <span className="text-muted-foreground">Internal</span>}{e.tenant?.isTest && <TestBadge className="ml-1.5" />}</TableCell>}
                         <TableCell>
+                          {!device ? <span className="text-xs text-muted-foreground">Monitored through its tools</span> : <>
                           <div className="flex gap-0.5">
                             {CONTROLS.map((c) => {
                               const st = p[c.key]?.status ?? "missing";
@@ -197,8 +242,9 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
                             })}
                           </div>
                           {missing.length > 0 && <p className="mt-1 text-[11px] text-destructive">Missing: {missing.map((m) => CONTROLS.find((c) => c.key === m)?.short).join(", ")}</p>}
+                          </>}
                         </TableCell>
-                        <TableCell className={cn("text-right font-semibold tabular", score < 50 ? "text-destructive" : score < 75 ? "text-warning-ink" : "text-success-ink")}>{score}</TableCell>
+                        <TableCell className={cn("text-right font-semibold tabular", !device ? "text-muted-foreground" : score < 50 ? "text-destructive" : score < 75 ? "text-warning-ink" : "text-success-ink")}>{device ? score : "—"}</TableCell>
                         <TableCell>{canEdit ? <CriticalitySelect id={e.id} value={e.criticality} /> : <span className="text-xs capitalize">{e.criticality}</span>}</TableCell>
                         <TableCell className="text-right tabular-nums">
                           {cases > 0 ? <Link href={`/cases?q=${encodeURIComponent(e.hostname)}`} className="font-medium text-destructive hover:underline">{cases}</Link> : <span className="text-muted-foreground">0</span>}

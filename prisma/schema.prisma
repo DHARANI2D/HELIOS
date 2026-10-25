@@ -706,6 +706,9 @@ model Endpoint {
   ipAddress   String?
   owner       String?
   criticality String    @default("standard") // standard | high | critical
+  // Asset group and type (lib/assets/inventory.ts); null = placed by its OS.
+  assetClass  String?
+  assetType   String?
   // Protection control → { status, product, updatedAt }; see src/lib/endpoints/controls.ts
   protections Json?
   isolated    Boolean   @default(false)
@@ -721,6 +724,7 @@ model Endpoint {
 
   @@index([tenantId, hostname])
   @@index([hostname])
+  @@index([tenantId, assetClass])
   @@map("endpoints")
 }
 

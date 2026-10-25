@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
+  ArrowDown,
   ArrowRight,
   BellRing,
   Bot,
@@ -24,6 +25,8 @@ import {
 
 import { loadHomeData, companyProfile } from "@/lib/site";
 import { CONTROLS } from "@/lib/endpoints/controls";
+import { ASSET_CLASSES } from "@/lib/assets/surface";
+import { capabilityName } from "@/lib/assets/capabilities";
 import { AGENT_TYPES, AGENT_KEYS } from "@/lib/ai/catalog";
 import { PLAN_FEATURES, PLAN_FEATURE_LABEL, formatMinutes } from "@/lib/plans";
 import { formatMoney } from "@/lib/pricing/calculator";
@@ -81,7 +84,7 @@ export default async function HomePage() {
                 </Button>
               )}
               <Button asChild size="lg" variant="outline">
-                <Link href="#how">How it works <ArrowRight /></Link>
+                <Link href={site.estimator ? "/estimate#organization" : "#surface"}>{site.estimator ? "Design my security solution" : "What we protect"} <ArrowRight /></Link>
               </Button>
             </div>
             {showPrices && fromPrice != null && (
@@ -121,6 +124,64 @@ export default async function HomePage() {
                 </div>
                 <h3 className="font-semibold">{s.title}</h3>
                 <p className="text-sm text-muted-foreground">{s.body}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* Attack surface */}
+      <section id="surface" className="scroll-mt-16 border-b">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading
+            eyebrow="Your whole attack surface"
+            title="Every device, workload, identity and entry point, not just laptops"
+            body="We design the coverage around everything that could be compromised, protect it in priority order, and connect it all to one SOC. Priorities move with your business: OT and medical devices come first for a hospital or a factory, cloud for a cloud-first company."
+          />
+          <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {ASSET_CLASSES.map((c) => (
+              <div key={c.key} className="flex flex-col gap-3 rounded-xl border bg-card p-5">
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="font-semibold">{c.label}</h3>
+                  <Badge variant={c.defaultPriority === "P1" ? "destructive" : c.defaultPriority === "P2" ? "warning" : "soft"} className="font-mono text-[10px]">{c.defaultPriority}</Badge>
+                </div>
+                <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                  {c.examples.slice(0, 4).map((e) => <li key={e}>{e}</li>)}
+                </ul>
+                <p className="mt-auto text-xs"><span className="font-medium">We deploy: </span><span className="text-muted-foreground">{c.required.map(capabilityName).join(", ")}</span></p>
+                <p className="text-[11px] text-muted-foreground">Main risk: {c.risk}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Centralized detection and response */}
+      <section className="border-b bg-muted/20">
+        <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[1fr_1.1fr] lg:items-center">
+          <div>
+            <SectionHeading
+              eyebrow="One platform"
+              title="Centralized detection and response"
+              body="No endpoint is managed on its own. Telemetry, alerts, configuration and asset data from every layer flow into one platform, where detections are correlated into cases and response runs through your own tools."
+            />
+            <p className="mt-4 rounded-lg border bg-card p-4 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">For example:</span> an employee&apos;s laptop downloads malware. The endpoint agent flags the behaviour, the platform correlates it with an unusual sign-in for the same account, the AI first responder triages the case, and an analyst isolates the device and disables the account while incident response begins.
+            </p>
+          </div>
+          <ol className="flex flex-col items-stretch">
+            {[
+              { title: "Endpoint & asset layer", body: "Laptops · Servers · Mobile · Cloud · Network · Identity · OT · Apps" },
+              { title: "Central security data platform", body: "Log collection and correlation · asset inventory · threat intelligence" },
+              { title: "Detection & correlation", body: `EDR/XDR alerts · ${stats.techniques} ATT&CK techniques detected · AI first response · threat hunting` },
+              { title: "Response & remediation", body: "Isolate devices · disable accounts · block indicators · recover systems, with approvals and an audit trail" },
+            ].map((l, i, all) => (
+              <li key={l.title} className="flex flex-col items-center">
+                <div className={`w-full rounded-xl border p-4 ${i === 1 ? "border-primary/50 bg-primary/5" : "bg-card"}`}>
+                  <p className="font-semibold">{l.title}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{l.body}</p>
+                </div>
+                {i < all.length - 1 && <ArrowDown className="my-1 size-4 text-muted-foreground" aria-hidden />}
               </li>
             ))}
           </ol>
@@ -294,11 +355,11 @@ export default async function HomePage() {
           <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
             <div className="surface-glow flex flex-col items-start gap-4 rounded-2xl border bg-card p-8 md:flex-row md:items-center md:justify-between">
               <div>
-                <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Workflow className="size-5 text-primary" /> See your price in two minutes</h2>
-                <p className="mt-1 text-muted-foreground">Enter your endpoints by type and the tools you run today. Get a monthly and annual estimate, upgrade options with their price difference, and a suggested stack.</p>
+                <h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Workflow className="size-5 text-primary" /> Design my cybersecurity solution</h2>
+                <p className="mt-1 text-muted-foreground">Answer a few questions about your organization, count what needs protecting and the tools you run today. Get a security design with priorities, a monthly and annual estimate, upgrade options with their price difference, and a suggested stack.</p>
               </div>
               <Button asChild size="lg">
-                <Link href="/estimate">Open the estimator <ArrowRight /></Link>
+                <Link href="/estimate#organization">Start the design <ArrowRight /></Link>
               </Button>
             </div>
           </div>

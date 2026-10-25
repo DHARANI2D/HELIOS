@@ -391,7 +391,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
   it("reviews a client's current setup and numbers quotes without collisions", async () => {
     invalidateCatalog();
     const plan = await db.servicePlan.create({ data: { key: "test-upgrades", name: "Test upgrades plan", coverage: "24x7", ackMinutes: {}, containMinutes: {}, features: {}, pricePerEndpoint: 9 } });
-    const tenant = await db.tenant.create({ data: { name: "Test · Upgrades", slug: "test-upgrades", planId: plan.id, endpointsLicensed: 10, usersLicensed: 12 } });
+    const tenant = await db.tenant.create({ data: { name: "Test · Upgrades", slug: "test-upgrades", industry: "Hospital group", planId: plan.id, endpointsLicensed: 10, usersLicensed: 12 } });
     await db.integration.createMany({
       data: [
         { tenantId: tenant.id, vendor: "jamf_pro", category: "mdm", name: "Jamf" },
@@ -404,6 +404,8 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
         { tenantId: tenant.id, hostname: "up-ws-2", os: "Windows 11 Pro" },
         { tenantId: tenant.id, hostname: "up-mac-1", os: "macOS 15" },
         { tenantId: tenant.id, hostname: "up-srv-1", os: "Windows Server 2022" },
+        { tenantId: tenant.id, hostname: "up-fw-1", os: "FortiOS 7.4", assetClass: "network", assetType: "firewall" },
+        { tenantId: tenant.id, hostname: "up-pump-1", assetClass: "iot_ot", assetType: "medical" },
       ],
     });
     const ctx = await loadPricingContext();
@@ -414,6 +416,9 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     // 4 inventoried, 10 licensed: the other 6 are of unknown OS.
     expect(stack!.config.profile.mix).toMatchObject({ windows: 2, macos: 1, windowsServer: 1, other: 6 });
     expect(stack!.config.profile.users).toBe(12);
+    // Non-device assets feed the estate, not the endpoint mix.
+    expect(stack!.config.profile.estate).toMatchObject({ networkDevices: 1, otDevices: 1 });
+    expect(stack!.config.context.industry).toBe("healthcare");
     const mdm = reviewUpgrades(stack!.config, ctx).find((r) => r.category.key === "mdm")!;
     expect(mdm.baseline?.key).toBe("jamf_pro");
     expect(mdm.options.find((o) => o.tool.key === "intune_p1")!.fitGain).toBe(2);

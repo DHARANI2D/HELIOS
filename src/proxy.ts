@@ -1,5 +1,3 @@
-import { NextResponse } from "next/server";
-
 import { auth } from "@/lib/auth";
 
 // The public website: the home page and the price estimator.
@@ -17,9 +15,11 @@ export default auth((req) => {
 
   if (isApiAuthRoute || isMachineRoute || isPublicPage) return;
 
-  // Visitors who aren't signed in see the website at the root; signed-in
-  // users get their dashboard there.
-  if (!isLoggedIn && pathname === "/") return NextResponse.rewrite(new URL(`/home${search}`, origin));
+  // Visitors who aren't signed in go to the website; signed-in users get
+  // their dashboard at the root. (A redirect, not a rewrite: the auth
+  // wrapper rebuilds the request URL from AUTH_URL, so a rewrite would be
+  // treated as a proxy to another origin.)
+  if (!isLoggedIn && pathname === "/") return Response.redirect(new URL(`/home${search}`, origin));
 
   if (!isLoggedIn && !isAuthRoute) {
     const loginUrl = new URL("/login", origin);

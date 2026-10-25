@@ -73,9 +73,9 @@ export function InventoryImport({ tenants, defaultTenantId, isClient }: { tenant
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Import endpoint inventory</DialogTitle>
+            <DialogTitle>Import asset inventory</DialogTitle>
             <DialogDescription>
-              CSV with a header row: hostname, os, ip, owner, criticality (standard, high, critical), controls — each <code className="text-[11px]">control=active|degraded|missing</code>, separated by <code>;</code>, using the keys {CONTROLS.map((c) => c.key).join(", ")}. Existing hosts are updated. Export it from your RMM, MDM or EDR console.
+              CSV with a header row: hostname, os, ip, owner, criticality (standard, high, critical), controls — each <code className="text-[11px]">control=active|degraded|missing</code>, separated by <code>;</code>, using the keys {CONTROLS.map((c) => c.key).join(", ")} — and optionally class (user, mobile, server, cloud, network, identity, iot_ot, email, apps) and type (e.g. firewall, plc, medical, cloud_vm, web_app). Rows without a class are placed by their OS. Existing hosts are updated. Export it from your RMM, MDM, EDR, CMDB or network discovery tool.
             </DialogDescription>
           </DialogHeader>
           {!isClient && <TenantSelect tenants={tenants} value={tenantId} onChange={setTenantId} />}

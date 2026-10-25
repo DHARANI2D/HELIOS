@@ -25,6 +25,7 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
             <span className="truncate">{brand}</span>
           </Link>
           <nav aria-label="Site" className="ml-4 hidden items-center gap-1 text-sm text-muted-foreground md:flex">
+            <Link href="/home#surface" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">What we protect</Link>
             <Link href="/home#how" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">How it works</Link>
             <Link href="/home#ai" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">AI first response</Link>
             {site.estimator && <Link href="/home#plans" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">Plans</Link>}

@@ -6,11 +6,13 @@ import { parsePlan } from "@/lib/plans";
 import { calculateQuote, defaultQuoteConfig, quoteConfigSchema, toolMonthlyPrice, type PricingContext, type QuoteConfig } from "@/lib/pricing/calculator";
 import { EMPTY_MIX } from "@/lib/pricing/endpoint-mix";
 import { adviseStack } from "@/lib/pricing/advisor";
-import { EMPTY_CONTEXT, EMPTY_ESTATE, type Estate, type OrgContext } from "@/lib/assets/estate";
+import { EMPTY_CONTEXT, EMPTY_ESTATE, industryFromText, type Estate, type OrgContext } from "@/lib/assets/estate";
 import { assetPriorities, classCounts, describeClassCount, presentClasses, wantedCapabilities } from "@/lib/assets/surface";
 import { surfaceCoverage } from "@/lib/assets/coverage";
 import { CAPABILITIES, isDeviceControl } from "@/lib/assets/capabilities";
 import { designSolution } from "@/lib/assets/designer";
+import { endpointClass, parseAssetClass, parseAssetType } from "@/lib/assets/inventory";
+import { parseInventoryCsv } from "@/lib/endpoints/service";
 
 const tools = CATALOG_TOOLS.map((t) => toolFromRow({ ...t, customPrice: null, active: true }));
 const plan = parsePlan({
@@ -161,5 +163,41 @@ describe("solution designer", () => {
     expect(d.groups.find((g) => g.info.key === "cloud")!.inScope).toBe(false);
     expect(d.groups.find((g) => g.info.key === "user")!.inScope).toBe(true);
     expect(d.phases.at(-1)!.items.some((i) => i.startsWith("Cloud & workloads"))).toBe(true);
+  });
+});
+
+describe("inventory by asset group", () => {
+  it("places hosts by OS unless told what they are", () => {
+    expect(endpointClass({ os: "Windows Server 2022" })).toBe("server");
+    expect(endpointClass({ os: "iOS 18" })).toBe("mobile");
+    expect(endpointClass({ os: null })).toBe("user");
+    expect(endpointClass({ os: "FortiOS 7.4", assetClass: "network" })).toBe("network");
+  });
+
+  it("reads classes and types from imports, by key or by label", () => {
+    expect(parseAssetClass("IoT & operational technology")).toBe("iot_ot");
+    expect(parseAssetClass("network")).toBe("network");
+    expect(parseAssetClass(undefined, "firewall")).toBe("network");
+    expect(parseAssetType("Medical device")).toEqual({ class: "iot_ot", type: "medical" });
+    expect(parseAssetClass("nonsense")).toBeNull();
+  });
+
+  it("takes class and type columns from an inventory CSV", () => {
+    const rows = parseInventoryCsv("hostname,os,class,type\nclinic-fw01,FortiOS 7.4,network,firewall\ninfusion-07,,,medical\nlaptop-22,Windows 11,,");
+    expect(rows.map((r) => [r.hostname, r.assetClass, r.assetType])).toEqual([
+      ["clinic-fw01", "network", "firewall"],
+      ["infusion-07", undefined, "medical"],
+      ["laptop-22", undefined, undefined],
+    ]);
+  });
+});
+
+describe("client industry", () => {
+  it("reads a free-text industry", () => {
+    expect(industryFromText("Healthcare (test)")).toBe("healthcare");
+    expect(industryFromText("Metal fabrication")).toBe("manufacturing");
+    expect(industryFromText("Regional bank")).toBe("finance");
+    expect(industryFromText("Law firm")).toBe("general");
+    expect(industryFromText(null)).toBe("general");
   });
 });

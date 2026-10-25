@@ -3,6 +3,7 @@ import { View } from "@react-pdf/renderer";
 import { CONTROLS } from "@/lib/endpoints/controls";
 import { formatMinutes } from "@/lib/plans";
 import { formatMoney, type QuoteConfig, type QuoteResult } from "@/lib/pricing/calculator";
+import { extraGroupsText } from "@/lib/assets/coverage";
 import { describeMix } from "@/lib/pricing/endpoint-mix";
 import type { CompanyProfile } from "@/lib/settings";
 import { Bullets, DataTable, KeyValues, Paragraph, PdfDocument, Section, Stats, pdfDate } from "@/lib/pdf/kit";
@@ -43,6 +44,7 @@ export function QuotePdf({ quote, cfg, r, company }: { quote: QuoteDoc; cfg: Quo
       <Paragraph>
         {plan ? `${plan.name}${plan.tagline ? ` — ${plan.tagline}` : ""}. ` : ""}
         {r.endpoints.toLocaleString()} endpoints{cfg.profile.mix ? ` (${describeMix(cfg.profile.mix)})` : ""}, {cfg.profile.users.toLocaleString()} users.{quote.preparedBy ? ` Prepared by ${quote.preparedBy}.` : ""}
+        {extraGroupsText(cfg) ? ` Also covers ${extraGroupsText(cfg)}.` : ""}
       </Paragraph>
       <Stats
         items={[

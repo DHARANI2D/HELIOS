@@ -7,7 +7,6 @@ import { toast } from "sonner";
 
 import { publicAdviceAction, requestQuoteAction } from "@/app/(site)/estimate/actions";
 import { CATEGORIES, UNIT_LABEL, toolLabel } from "@/lib/integrations/catalog";
-import { CONTROLS } from "@/lib/endpoints/controls";
 import { formatMinutes } from "@/lib/plans";
 import { calculateQuote, formatMoney, toolMonthlyPrice, type MissingPrice, type PricingContext, type QuoteConfig } from "@/lib/pricing/calculator";
 import { EMPTY_MIX, type EndpointMix } from "@/lib/pricing/endpoint-mix";
@@ -23,6 +22,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { EndpointMixFields } from "@/components/pricing/endpoint-mix-fields";
 import { StackAdvisor } from "@/components/pricing/stack-advisor";
 import { UpgradeReview } from "@/components/pricing/upgrade-review";
+import { EstateFields, OrgContextFields } from "@/components/pricing/estate-fields";
+import { SolutionDesign } from "@/components/pricing/solution-design";
+import { SurfaceCoverageCard } from "@/components/pricing/surface-coverage";
+import { surfaceCoverage } from "@/lib/assets/coverage";
+import type { PlatformFacts } from "@/lib/assets/designer";
 
 interface Props {
   ctx: PricingContext;
@@ -31,6 +35,7 @@ interface Props {
   aiAdvisor: boolean;
   leads: boolean;
   contactEmail: string | null;
+  facts: PlatformFacts | null;
 }
 
 const OTHER = "__other";
@@ -65,10 +70,11 @@ function Field({ label, value, onChange, step = 1, suffix, hint }: { label: stri
   );
 }
 
-export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail }: Props) {
+export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail, facts }: Props) {
   const [cfg, setCfg] = React.useState<QuoteConfig>(initial);
-  const [tab, setTab] = React.useState("advisor");
+  const [tab, setTab] = React.useState("design");
   const result = React.useMemo(() => calculateQuote(cfg, ctx), [cfg, ctx]);
+  const surface = React.useMemo(() => surfaceCoverage(cfg, ctx), [cfg, ctx]);
   const money = React.useCallback((usd: number, decimals?: number) => formatMoney(usd, cfg.commercial.currency, cfg.commercial.fxRate, { decimals }), [cfg.commercial.currency, cfg.commercial.fxRate]);
   const mix = cfg.profile.mix ?? EMPTY_MIX;
   const plan = ctx.plans.find((p) => p.key === cfg.plan) ?? null;
@@ -146,26 +152,7 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Protection coverage</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="grid gap-1 text-xs">
-            {result.coverage.map((c) => {
-              const info = CONTROLS.find((x) => x.key === c.control)!;
-              return (
-                <li key={c.control} className="flex items-center gap-1.5" title={c.by.join(", ") || "Not covered"}>
-                  {c.covered ? <CircleCheck className="size-3.5 text-success-ink" /> : c.essential ? <X className="size-3.5 text-destructive" /> : <span className="size-3.5 rounded-full border border-dashed border-muted-foreground/50" />}
-                  <span className={cn(!c.covered && c.essential && "font-medium text-destructive")}>{info.label}</span>
-                  <span className="ml-auto max-w-[45%] truncate text-muted-foreground">{c.by[0]?.replace("(client's)", "(yours)") ?? ""}</span>
-                </li>
-              );
-            })}
-          </ul>
-          {result.gaps.length > 0 && <p className="mt-2 text-xs text-destructive">Essential gaps: see the suggested stack below.</p>}
-        </CardContent>
-      </Card>
+      <SurfaceCoverageCard coverage={surface} audience="public" />
     </div>
   );
 
@@ -174,16 +161,26 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
       <div className="max-w-2xl">
         <h1 className="text-3xl font-semibold tracking-tight">Estimate your price</h1>
         <p className="mt-2 text-muted-foreground">
-          Tell us about your devices and the tools you use today. Prices update as you type; nothing is sent to {brand} until you ask for a formal quote.
+          Tell us about your organization, everything that needs protecting (laptops to cloud workloads, network gear, OT and apps) and the tools you use today. You get a security design, a price that updates as you type, and upgrade options. Nothing is sent to {brand} until you ask for a formal quote.
         </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="flex min-w-0 flex-col gap-4">
+          <Card id="organization" className="scroll-mt-20">
+            <CardHeader>
+              <CardTitle className="text-base">1 · Your organization</CardTitle>
+              <CardDescription>Sets which assets come first: OT and medical devices are P1 for a hospital or a factory, cloud for a cloud-first company.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <OrgContextFields context={cfg.context} onChange={(context) => update((c) => ({ ...c, context }))} />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">1 · Your devices</CardTitle>
-              <CardDescription>How many of each. We check that every suggested tool runs on all of them.</CardDescription>
+              <CardTitle className="text-base">2 · Devices and users</CardTitle>
+              <CardDescription>How many of each, including BYOD, VDI and shared machines. We check that every suggested tool runs on all of them.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <EndpointMixFields mix={mix} onChange={setMix} />
@@ -196,7 +193,17 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">2 · Service plan</CardTitle>
+              <CardTitle className="text-base">3 · The rest of your attack surface</CardTitle>
+              <CardDescription>Cloud, network, identities, IoT/OT and applications. Leave at 0 what you don&apos;t have.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <EstateFields estate={cfg.profile.estate} onChange={(estate) => update((c) => ({ ...c, profile: { ...c.profile, estate } }))} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">4 · Service plan</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               {ctx.plans.length === 0 && <p className="text-sm text-muted-foreground md:col-span-3">Plans are being finalized; request a quote and we&apos;ll price the service for you.</p>}
@@ -216,7 +223,7 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">3 · Security tools</CardTitle>
+              <CardTitle className="text-base">5 · Security tools</CardTitle>
               <CardDescription>What you run today, and what goes in the estimate: keep your own licence, license a tool through us, or leave the layer out.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col divide-y">
@@ -257,7 +264,7 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">4 · AI first response</CardTitle>
+              <CardTitle className="text-base">6 · AI first response</CardTitle>
               <CardDescription>AI agents triage every alert the moment it lands; our analysts take it from there.</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -292,7 +299,7 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">5 · Term</CardTitle>
+              <CardTitle className="text-base">7 · Term</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
               <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Term">
@@ -324,11 +331,15 @@ export function Estimator({ ctx, initial, brand, aiAdvisor, leads, contactEmail 
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="gap-4">
-        <TabsList className="flex-wrap">
+        <TabsList className="flex-wrap" id="design">
+          <TabsTrigger value="design">Solution design</TabsTrigger>
           <TabsTrigger value="advisor">Suggested stack</TabsTrigger>
           <TabsTrigger value="upgrades">Upgrade review</TabsTrigger>
           <TabsTrigger value="lines">Line items</TabsTrigger>
         </TabsList>
+        <TabsContent value="design">
+          <SolutionDesign ctx={ctx} cfg={cfg} money={money} audience="public" facts={facts} onApply={apply} />
+        </TabsContent>
         <TabsContent value="advisor">
           <StackAdvisor ctx={ctx} cfg={cfg} money={money} onApply={apply} askAi={aiAdvisor ? publicAdviceAction : undefined} audience="public" />
         </TabsContent>

@@ -2,12 +2,27 @@ import { db } from "@/lib/db";
 import { getCategory } from "@/lib/integrations/catalog";
 import { defaultQuoteConfig, quoteConfigSchema, type PricingContext, type QuoteConfig } from "@/lib/pricing/calculator";
 import { mixFromCounts, mixMobile, type EndpointMix } from "@/lib/pricing/endpoint-mix";
+import { DEVICE_CLASSES, OT_TYPES, endpointClass } from "@/lib/assets/inventory";
+import { industryFromText, type Estate } from "@/lib/assets/estate";
 
-// A client's endpoints by OS from the inventory. When more endpoints are
-// licensed than inventoried, the rest are counted as unknown OS.
-export async function inventoryMix(tenantId: string, licensed = 0): Promise<EndpointMix | null> {
-  const rows = await db.endpoint.groupBy({ by: ["os"], where: { tenantId }, _count: { _all: true } });
-  return rows.length ? mixFromCounts(rows.map((r) => ({ os: r.os, count: r._count._all })), licensed) : null;
+// A client's inventory as quote inputs: computers, servers and phones by OS
+// (licensed endpoints beyond the inventory count as unknown OS), and the
+// rest of the attack surface counted by asset group and type.
+export async function inventoryProfile(tenantId: string, licensed = 0): Promise<{ mix: EndpointMix | null; estate: Partial<Estate> }> {
+  const rows = await db.endpoint.groupBy({ by: ["os", "assetClass", "assetType"], where: { tenantId }, _count: { _all: true } });
+  const devices: Array<{ os: string | null; count: number }> = [];
+  const estate: Partial<Estate> = {};
+  const bump = (k: keyof Estate, n: number) => (estate[k] = (estate[k] ?? 0) + n);
+  for (const r of rows) {
+    const n = r._count._all;
+    const cls = endpointClass(r);
+    if (DEVICE_CLASSES.includes(cls)) devices.push({ os: r.os, count: n });
+    else if (cls === "network") bump("networkDevices", n);
+    else if (cls === "iot_ot") bump(r.assetType && OT_TYPES.has(r.assetType) ? "otDevices" : "iotDevices", n);
+    else if (cls === "cloud") bump(r.assetType === "cloud_account" ? "cloudAccounts" : r.assetType === "saas" ? "saasApps" : "cloudWorkloads", n);
+    else if (cls === "apps" && r.assetType !== "repository" && r.assetType !== "ci_runner") bump("internetApps", n);
+  }
+  return { mix: devices.length ? mixFromCounts(devices, licensed) : null, estate };
 }
 
 // What a client has today, as a quote to review upgrades against: their
@@ -40,11 +55,15 @@ export async function clientStackConfig(tenantId: string, ctx: Pick<PricingConte
     }
   }
 
-  const mix = await inventoryMix(tenantId, tenant.endpointsLicensed);
+  const { mix, estate: counted } = await inventoryProfile(tenantId, tenant.endpointsLicensed);
+  const estate = { ...base.profile.estate };
+  for (const [k, v] of Object.entries(counted) as Array<[keyof Estate, number]>) estate[k] = Math.max(estate[k], v);
   const profile = mix
-    ? { ...base.profile, mix, users: Math.max(base.profile.users, tenant.usersLicensed) }
-    : { ...base.profile, workstations: Math.max(base.profile.workstations, tenant.endpointsLicensed - base.profile.servers), users: Math.max(base.profile.users, tenant.usersLicensed) };
-  const config = quoteConfigSchema.parse({ ...base, clientName: tenant.name, tools, existing, profile });
+    ? { ...base.profile, mix, estate, users: Math.max(base.profile.users, tenant.usersLicensed) }
+    : { ...base.profile, estate, workstations: Math.max(base.profile.workstations, tenant.endpointsLicensed - base.profile.servers), users: Math.max(base.profile.users, tenant.usersLicensed) };
+  // The client's recorded industry sets priorities unless the quote says otherwise.
+  const context = base.context.industry === "general" ? { ...base.context, industry: industryFromText(tenant.industry) } : base.context;
+  const config = quoteConfigSchema.parse({ ...base, clientName: tenant.name, tools, existing, profile, context });
   const mobile = mix ? mixMobile(mix) : 0;
   return {
     config,

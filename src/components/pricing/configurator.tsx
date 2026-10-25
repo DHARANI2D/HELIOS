@@ -27,6 +27,11 @@ import { TenantSelect } from "@/components/shared/tenant-select";
 import { EndpointMixFields } from "@/components/pricing/endpoint-mix-fields";
 import { StackAdvisor } from "@/components/pricing/stack-advisor";
 import { UpgradeReview } from "@/components/pricing/upgrade-review";
+import { EstateFields, OrgContextFields } from "@/components/pricing/estate-fields";
+import { SolutionDesign } from "@/components/pricing/solution-design";
+import { SurfaceCoverageCard } from "@/components/pricing/surface-coverage";
+import { surfaceCoverage } from "@/lib/assets/coverage";
+import type { PlatformFacts } from "@/lib/assets/designer";
 
 const KIND_LABEL = { service: "Managed service", license: "Tool licences", ai: "AI first response", services: "Professional services" } as const;
 const KINDS = ["service", "license", "ai", "services"] as const;
@@ -40,7 +45,7 @@ export interface ClientSizing {
   mix: EndpointMix | null; // from the endpoint inventory
 }
 
-const TABS = ["build", "upgrades", "advisor", "compare", "breakdown"] as const;
+const TABS = ["build", "design", "upgrades", "advisor", "compare", "breakdown"] as const;
 
 interface Props {
   ctx: PricingContext;
@@ -55,6 +60,8 @@ interface Props {
   initialTab?: string;
   // What the upgrade review compares against, in words.
   baselineLabel?: string;
+  // Live detector, ATT&CK and playbook counts for the solution design.
+  facts?: PlatformFacts | null;
 }
 
 function NumberField({ label, value, onChange, min = 0, step = 1, suffix }: { label: string; value: number; onChange: (n: number) => void; min?: number; step?: number; suffix?: string }) {
@@ -117,12 +124,13 @@ function CompositionBar({ result, money }: { result: QuoteResult; money: (usd: n
 
 const FIX_HINT = { plan: "Service plans", "price-book": "Price book", tool: "Tool catalog", "ai-usage": "AI usage below", model: "Model prices", currency: "Currencies" } as const;
 
-export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, quoteId, quoteReference, quoteTenantId, initialTab, baselineLabel }: Props) {
+export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, quoteId, quoteReference, quoteTenantId, initialTab, baselineLabel, facts = null }: Props) {
   const router = useRouter();
   const [cfg, setCfg] = React.useState<QuoteConfig>(initial);
   const [tenantId, setTenantId] = React.useState(quoteTenantId ?? "none");
   const [compareCategory, setCompareCategory] = React.useState("edr");
   const result = React.useMemo(() => calculateQuote(cfg, ctx), [cfg, ctx]);
+  const surface = React.useMemo(() => surfaceCoverage(cfg, ctx), [cfg, ctx]);
   const plans = React.useMemo(() => comparePlans(cfg, ctx), [cfg, ctx]);
   const plan = ctx.plans.find((p) => p.key === cfg.plan) ?? null;
   const currencies = [{ code: "USD", symbol: "$", rate: 1 }, ...ctx.currencies.filter((c) => c.code !== "USD")];
@@ -238,9 +246,11 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
         </CardContent>
       </Card>
 
+      <SurfaceCoverageCard coverage={surface} audience="staff" />
+
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Protection coverage of this stack</CardTitle>
+          <CardTitle className="text-sm">Device protection of this stack</CardTitle>
         </CardHeader>
         <CardContent>
           <ul className="grid grid-cols-1 gap-1 text-xs">
@@ -266,6 +276,7 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
     <Tabs defaultValue={TABS.find((t) => t === initialTab) ?? "build"} className="gap-4">
       <TabsList className="no-print flex-wrap">
         <TabsTrigger value="build">Build</TabsTrigger>
+        <TabsTrigger value="design">Design</TabsTrigger>
         <TabsTrigger value="upgrades">Upgrades</TabsTrigger>
         <TabsTrigger value="advisor">Advisor</TabsTrigger>
         <TabsTrigger value="compare">Compare</TabsTrigger>
@@ -278,7 +289,7 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">1 · Client profile</CardTitle>
-                <CardDescription>Size drives every per-unit price and the volume discount.</CardDescription>
+                <CardDescription>Size drives every per-unit price and the volume discount; the organization and the rest of the attack surface drive priorities, coverage and the design.</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -327,6 +338,14 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
                   <NumberField label="Users / mailboxes" value={cfg.profile.users} onChange={(n) => set("profile", { users: n })} />
                   <NumberField label="Log volume" value={cfg.profile.logGbPerDay} onChange={(n) => set("profile", { logGbPerDay: n })} step={0.5} suffix="GB/day" />
                 </div>
+                <details className="group rounded-lg border p-3" open>
+                  <summary className="cursor-pointer text-xs font-medium">Organization</summary>
+                  <div className="mt-3"><OrgContextFields context={cfg.context} onChange={(context) => setCfg((c) => ({ ...c, context }))} /></div>
+                </details>
+                <details className="group rounded-lg border p-3" open>
+                  <summary className="cursor-pointer text-xs font-medium">The rest of the attack surface: cloud, network, identities, IoT/OT, applications</summary>
+                  <EstateFields className="mt-3" estate={cfg.profile.estate} onChange={(estate) => set("profile", { estate })} />
+                </details>
               </CardContent>
             </Card>
 
@@ -536,6 +555,20 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
                 <p className="text-[11px] text-muted-foreground sm:col-span-4 sm:self-end">The rate comes from Pricing setup → Currencies; adjust it here for this quote if needed. Term discounts apply to your services, not resold licences.</p>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="design">
+            <SolutionDesign
+              ctx={ctx}
+              cfg={cfg}
+              money={money}
+              audience="staff"
+              facts={facts}
+              onApply={(config) => {
+                setCfg(config);
+                toast.success("Design stack applied to the quote");
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="upgrades">

@@ -10,6 +10,8 @@ import { PRICE_ITEMS, ITEM_UNIT_LABEL } from "@/lib/pricing/items";
 import { defaultQuoteConfig, formatMoney, quoteConfigSchema, type QuoteResult } from "@/lib/pricing/calculator";
 import { loadModelPrices, loadPricingContext } from "@/lib/pricing/service";
 import { clientStackConfig } from "@/lib/pricing/client-stack";
+import { platformFacts } from "@/lib/site";
+import { DEVICE_CLASSES, endpointClass } from "@/lib/assets/inventory";
 import { mixFromCounts, mixServers, mixWorkstations } from "@/lib/pricing/endpoint-mix";
 import { formatRelative } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -33,10 +35,10 @@ function one(v: string | string[] | undefined) {
 async function clientSizing(): Promise<ClientSizing[]> {
   const [tenants, inventory] = await Promise.all([
     db.tenant.findMany({ where: { status: { not: "SUSPENDED" } }, select: { id: true, name: true, endpointsLicensed: true, usersLicensed: true }, orderBy: { name: "asc" } }),
-    db.endpoint.groupBy({ by: ["tenantId", "os"], where: { tenantId: { not: null } }, _count: { _all: true } }),
+    db.endpoint.groupBy({ by: ["tenantId", "os", "assetClass"], where: { tenantId: { not: null } }, _count: { _all: true } }),
   ]);
   return tenants.map((t) => {
-    const rows = inventory.filter((r) => r.tenantId === t.id).map((r) => ({ os: r.os, count: r._count._all }));
+    const rows = inventory.filter((r) => r.tenantId === t.id && DEVICE_CLASSES.includes(endpointClass(r))).map((r) => ({ os: r.os, count: r._count._all }));
     const mix = rows.length ? mixFromCounts(rows, t.endpointsLicensed) : null;
     const servers = mix ? mixServers(mix) : 0;
     return { id: t.id, name: t.name, endpoints: Math.max(t.endpointsLicensed, mix ? mixWorkstations(mix) + servers : 0), servers, users: t.usersLicensed, mix };
@@ -72,7 +74,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
   const parsed = editing ? quoteConfigSchema.safeParse(editing.config) : null;
   // ?tenant= reviews a client's current setup; ?quote= edits a saved quote.
   const clientId = editing ? undefined : one(sp.tenant);
-  const client = clientId ? await clientStackConfig(clientId, ctx) : null;
+  const [client, facts] = await Promise.all([clientId ? clientStackConfig(clientId, ctx) : Promise.resolve(null), platformFacts()]);
   const initial = parsed?.success ? parsed.data : client?.config ?? defaultQuoteConfig(ctx);
 
   const rows: PriceRow[] = PRICE_ITEMS.map((i) => ({
@@ -102,6 +104,7 @@ export default async function PricingPage({ searchParams }: PageProps<"/pricing"
         quoteReference={editing?.reference}
         quoteTenantId={editing?.tenantId ?? (client ? clientId : undefined)}
         initialTab={one(sp.tab)}
+        facts={facts}
         baselineLabel={client?.label}
       />
 

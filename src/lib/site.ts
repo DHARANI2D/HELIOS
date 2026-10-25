@@ -7,6 +7,9 @@ import { publicContext } from "@/lib/pricing/public";
 import { CATEGORIES, toolLabel } from "@/lib/integrations/catalog";
 import { detectionCapabilities } from "@/lib/mitre/coverage";
 import { TACTICS, getTechnique } from "@/lib/mitre/catalog";
+import { DETECTORS } from "@/lib/siem/engine";
+import { db } from "@/lib/db";
+import type { PlatformFacts } from "@/lib/assets/designer";
 
 // The public website's data: the MSSP's own settings, its prices and the
 // platform's real capabilities. Nothing here is per-client.
@@ -17,6 +20,19 @@ export const companyProfile = cache(() => getSetting("company.profile"));
 export async function publicPricingContext(): Promise<PricingContext> {
   return publicContext(await loadPricingContext());
 }
+
+// What the platform itself brings to a design: live detector, ATT&CK and
+// playbook counts.
+export const platformFacts = cache(async (): Promise<PlatformFacts> => {
+  const [disabled, playbooks] = await Promise.all([getSetting("detection.disabledDetectors"), db.playbook.count({ where: { enabled: true } })]);
+  const techniques = new Set(detectionCapabilities(disabled).map((c) => c.techniqueId));
+  return {
+    detectors: DETECTORS.filter((d) => !disabled.includes(d.name)).length,
+    techniques: techniques.size,
+    tactics: new Set([...techniques].map((t) => getTechnique(t)?.tactic).filter(Boolean)).size,
+    playbooks,
+  };
+});
 
 export async function loadHomeData() {
   const [company, site, environment, disabled, ctx] = await Promise.all([

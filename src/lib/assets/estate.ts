@@ -73,3 +73,21 @@ export function usersBracket(users: number) {
   if (users <= 2000) return "500–2,000 users";
   return "Over 2,000 users";
 }
+
+// A client record's free-text industry ("Healthcare", "Hospital group",
+// "Metal fabrication") as one of the industries priorities know about.
+const INDUSTRY_WORDS: Array<[OrgContext["industry"], RegExp]> = [
+  ["healthcare", /health|hospital|clinic|medical|pharma|care home/i],
+  ["manufacturing", /manufactur|factory|industrial|fabricat|plant|automotive/i],
+  ["energy", /energy|utilit|power|oil|gas|water/i],
+  ["finance", /financ|bank|insur|invest|fintech|accounting/i],
+  ["retail", /retail|e-?commerce|shop|store|hospitality/i],
+  ["technology", /tech|software|saas|it services|digital/i],
+  ["education", /educat|school|universit|college|academ/i],
+  ["public", /public|government|council|municipal|federal|ministry/i],
+];
+
+export function industryFromText(text: string | null | undefined): OrgContext["industry"] {
+  if (!text) return "general";
+  return INDUSTRY_WORDS.find(([, re]) => re.test(text))?.[0] ?? "general";
+}

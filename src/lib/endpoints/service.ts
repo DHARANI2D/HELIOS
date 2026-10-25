@@ -7,6 +7,7 @@ import { dispatchAction } from "@/lib/integrations/dispatch";
 import { CONTROL_KEYS, parseProtections, type ControlStatus, type EndpointProtections, type ProtectionControl } from "@/lib/endpoints/controls";
 import type { InventoryRecord } from "@/lib/integrations/mappers";
 import { isDeviceControl } from "@/lib/assets/capabilities";
+import { parseAssetClass, parseAssetType } from "@/lib/assets/inventory";
 
 // The endpoint inventory builds itself: every host seen in telemetry gets a
 // row, a tool that reports through its integration marks the protection
@@ -100,6 +101,7 @@ export async function applyInventory(tenantId: string | null, records: Inventory
       ipAddress: r.ipAddress ?? existing?.ipAddress ?? undefined,
       owner: r.owner ?? existing?.owner ?? undefined,
       criticality: r.criticality && ["standard", "high", "critical"].includes(r.criticality) ? r.criticality : existing?.criticality ?? "standard",
+      ...assetFields(r),
       protections: protections as Prisma.InputJsonValue,
       lastSeenAt: new Date(),
     };
@@ -108,6 +110,15 @@ export async function applyInventory(tenantId: string | null, records: Inventory
     count++;
   }
   return count;
+}
+
+// An import or tool that says what a row is (a firewall, a PLC, a cloud VM)
+// files it under that asset group; otherwise the OS decides.
+function assetFields(r: InventoryRecord): { assetClass?: string; assetType?: string | null } {
+  const type = parseAssetType(r.assetType);
+  const cls = parseAssetClass(r.assetClass, r.assetType);
+  if (!cls) return {};
+  return { assetClass: cls, assetType: type && type.class === cls ? type.type : null };
 }
 
 // Direct isolation from the endpoint inventory (no case): same connector
@@ -124,7 +135,7 @@ export async function setEndpointIsolated(endpointId: string, isolate: boolean, 
   return result;
 }
 
-// CSV import: hostname,os,ip,owner,criticality[,control=status;...]
+// CSV import: hostname,os,ip,owner,criticality[,controls,class,type]
 export function parseInventoryCsv(text: string): InventoryRecord[] {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) return [];
@@ -142,6 +153,6 @@ export function parseInventoryCsv(text: string): InventoryRecord[] {
       const [k, v] = pair.split("=").map((x) => x?.trim());
       if (k && v) controls[k] = v;
     }
-    return { hostname: get("hostname") ?? "", os: get("os"), ipAddress: get("ip"), owner: get("owner"), criticality: get("criticality")?.toLowerCase(), controls };
+    return { hostname: get("hostname") ?? "", os: get("os"), ipAddress: get("ip"), owner: get("owner"), criticality: get("criticality")?.toLowerCase(), controls, assetClass: get("class"), assetType: get("type") };
   }).filter((r) => r.hostname);
 }
