@@ -48,7 +48,11 @@ export function DetonationView({ result }: { result: DetonationResult }) {
           {result.reasons.map((r, i) => <li key={i}>{r}</li>)}
         </ul>
       )}
-      <p className="mt-2 text-[11px] text-muted-foreground">HTTP-level detonation — page HTML inspected, JavaScript not executed.</p>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        HTTP-level detonation — page HTML inspected, JavaScript not executed.
+        {result.egress === "proxy" && " Fetched through the egress proxy."}
+        {result.proxyResolved?.length ? ` ${result.proxyResolved.join(", ")} resolved by the proxy, not checked against internal ranges here.` : ""}
+      </p>
     </div>
   );
 }

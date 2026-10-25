@@ -1,6 +1,7 @@
 import { lookup } from "node:dns";
+import { lookup as lookupAsync } from "node:dns/promises";
 import { isIP } from "node:net";
-import { Agent, fetch as undiciFetch } from "undici";
+import { Agent, ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
 
 import { analyzeHtml, type HtmlIntel } from "@/lib/forensics/html-intel";
 import { hostOf, registrableDomain } from "@/lib/forensics/urls";
@@ -17,6 +18,13 @@ import { SANDBOX_RULES } from "@/lib/forensics/scoring";
 // connection is checked against private/loopback/link-local ranges at
 // connect time (not just at URL-parse time), which also defeats DNS
 // rebinding to internal addresses.
+//
+// Behind an egress proxy (DETONATION_PROXY, else HTTPS_PROXY / HTTP_PROXY
+// by scheme; DETONATION_PROXY=none forces direct), each hop's host is
+// checked before the request: IP literals and names that resolve locally
+// must be public; names only the proxy can resolve are allowed unless they
+// look internal (single label, .local, .internal, .corp, …). The proxy does
+// the final resolution, so it should itself refuse internal destinations.
 
 const MAX_REDIRECTS = 8;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -46,6 +54,42 @@ const guardedAgent = new Agent({
   },
 });
 
+const INTERNAL_SUFFIX = /(^|\.)(local|localhost|localdomain|internal|intranet|lan|corp|home|home\.arpa|private|svc\.cluster\.local)$/i;
+
+export function detonationProxy(url: string): string | undefined {
+  const explicit = process.env.DETONATION_PROXY?.trim();
+  if (explicit) return explicit.toLowerCase() === "none" ? undefined : explicit;
+  const env = (name: string) => process.env[name] || process.env[name.toLowerCase()] || undefined;
+  return new URL(url).protocol === "https:" ? env("HTTPS_PROXY") ?? env("HTTP_PROXY") : env("HTTP_PROXY");
+}
+
+const proxyAgents = new Map<string, ProxyAgent>();
+function proxyAgent(proxy: string) {
+  let agent = proxyAgents.get(proxy);
+  if (!agent) proxyAgents.set(proxy, (agent = new ProxyAgent({ uri: proxy, connectTimeout: TIMEOUT_MS })));
+  return agent;
+}
+
+// The SSRF check for a hop that goes through the proxy. Returns how the
+// address was vetted.
+async function vetThroughProxy(host: string): Promise<"checked" | "proxy-resolved"> {
+  const bare = host.replace(/^\[|\]$/g, "");
+  if (isIP(bare)) {
+    if (blockedAddress(bare)) throw new Error(`Refusing to connect to internal address ${bare}`);
+    return "checked";
+  }
+  if (!bare.includes(".") || INTERNAL_SUFFIX.test(bare)) throw new Error(`Refusing to detonate internal-looking host ${bare}`);
+  try {
+    const addresses = await lookupAsync(bare, { all: true });
+    const blocked = addresses.find((a) => blockedAddress(a.address));
+    if (blocked) throw new Error(`Refusing to connect to internal address ${blocked.address}`);
+    return "checked";
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Refusing")) throw err;
+    return "proxy-resolved"; // no local DNS for public names (egress-only networks)
+  }
+}
+
 export interface DetonationResult {
   url: string;
   finalUrl?: string;
@@ -60,6 +104,11 @@ export interface DetonationResult {
   blockRecommendations: string[];
   error?: string;
   engine: "http";
+  // How the request left: directly (address checked at connect time) or
+  // through the egress proxy, and whether every hop's address could be
+  // checked locally or some were resolved only by the proxy.
+  egress?: "direct" | "proxy";
+  proxyResolved?: string[];
 }
 
 async function readCapped(body: ReadableStream<Uint8Array> | null): Promise<string> {
@@ -95,8 +144,17 @@ export async function detonateUrl(url: string): Promise<DetonationResult> {
     if (isIP(startHost) && blockedAddress(startHost)) throw new Error("Refusing to detonate an internal address");
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const proxy = detonationProxy(current);
+      let dispatcher: Dispatcher = guardedAgent;
+      if (proxy) {
+        if ((await vetThroughProxy(hostOf(current) ?? "")) === "proxy-resolved") {
+          result.proxyResolved = [...new Set([...(result.proxyResolved ?? []), hostOf(current)!])];
+        }
+        dispatcher = proxyAgent(proxy);
+      }
+      result.egress = proxy ? "proxy" : "direct";
       const res = await undiciFetch(current, {
-        dispatcher: guardedAgent,
+        dispatcher,
         redirect: "manual",
         signal: AbortSignal.timeout(TIMEOUT_MS),
         headers: {
