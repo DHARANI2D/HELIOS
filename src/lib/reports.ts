@@ -199,7 +199,7 @@ export async function loadServiceReport(scope: Prisma.CaseWhereInput, range: Rep
       take: 2000,
     }),
     db.aiRun.findMany({ where: { createdAt: window, case: scope }, select: { status: true, feedback: true, durationMs: true, trigger: true, isLocal: true } }),
-    db.responseAction.findMany({ where: { createdAt: window, case: scope }, select: { actionType: true, status: true, source: true } }),
+    db.responseAction.findMany({ where: { createdAt: window, case: scope, status: { not: "SHADOW" } }, select: { actionType: true, status: true, source: true } }),
   ]);
 
   const summary = summarizeCases(current.opened, current.closed, range, now);

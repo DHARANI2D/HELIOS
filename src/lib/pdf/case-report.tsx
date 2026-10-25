@@ -24,7 +24,7 @@ export async function loadCaseReport(caseId: string, audience: "staff" | "client
       timeline: { orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }], take: MAX_TIMELINE },
       mitreTechniques: { include: { technique: { include: { tactic: true } } } },
       indicators: { include: { indicator: true } },
-      responseActions: { orderBy: { createdAt: "asc" } },
+      responseActions: { where: { status: { not: "SHADOW" } }, orderBy: { createdAt: "asc" } },
       aiRuns: audience === "staff" ? { where: { agentKey: { in: ["triage", "phishing", "threat_intel"] }, status: { not: "failed" } }, orderBy: { createdAt: "desc" }, take: 1 } : false,
       _count: { select: { timeline: true, events: true } },
     },

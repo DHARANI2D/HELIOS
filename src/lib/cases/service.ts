@@ -1,4 +1,4 @@
-import type { CaseSeverity, CaseStatus, Prisma, SecurityDomain } from "@prisma/client";
+import type { CaseDisposition, CaseSeverity, CaseStatus, Prisma, SecurityDomain } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
@@ -7,13 +7,28 @@ import { CLOSED_STATUSES } from "@/lib/cases/labels";
 // Analyst-driven case lifecycle: triage status and severity, plus the list
 // filters. Assignment, comments and escalation live in lib/cases/collab.
 
-export async function setCaseStatus(caseId: string, status: CaseStatus, actorId: string, note?: string) {
+export const DISPOSITIONS: CaseDisposition[] = ["TRUE_POSITIVE", "BENIGN_TRUE_POSITIVE", "FALSE_POSITIVE"];
+
+// Closing a case takes the analyst's disposition and why: the ground truth
+// AI decisions are scored against (lib/shadow). "False positive" as a status
+// implies the disposition; the reason can come from the note.
+export async function setCaseStatus(caseId: string, status: CaseStatus, actorId: string, note?: string, close?: { disposition?: CaseDisposition | null; reason?: string | null }) {
   const before = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { status: true, acknowledgedAt: true } });
   const closing = CLOSED_STATUSES.includes(status);
+  const disposition = closing ? (close?.disposition ?? (status === "FALSE_POSITIVE" ? "FALSE_POSITIVE" : null)) : null;
+  const reason = (close?.reason ?? note ?? "").trim();
+  if (closing && !disposition) throw new Error("Choose a disposition to close the case: true positive, benign true positive or false positive");
+  if (closing && reason.length < 3) throw new Error("Say why (the reason is kept with the disposition)");
+  if (status === "FALSE_POSITIVE" && disposition !== "FALSE_POSITIVE") throw new Error("A case closed as a false positive has that disposition");
   // The first human status change counts as acknowledgement.
   await db.case.update({
     where: { id: caseId },
-    data: { status, resolvedAt: closing ? new Date() : null, ...(before.acknowledgedAt ? {} : { acknowledgedAt: new Date() }) },
+    data: {
+      status,
+      resolvedAt: closing ? new Date() : null,
+      ...(before.acknowledgedAt ? {} : { acknowledgedAt: new Date() }),
+      ...(closing ? { disposition, dispositionReason: reason, dispositionById: actorId, dispositionAt: new Date() } : { disposition: null, dispositionReason: null, dispositionById: null, dispositionAt: null }),
+    },
   });
   await db.timelineEntry.create({
     data: {
@@ -24,7 +39,10 @@ export async function setCaseStatus(caseId: string, status: CaseStatus, actorId:
       detail: `${before.status} → ${status}${note ? `: ${note}` : ""}`,
     },
   });
-  await logAction({ actorId, caseId, action: "case.status_changed", detail: { from: before.status, to: status, note } });
+  await logAction({ actorId, caseId, action: "case.status_changed", detail: { from: before.status, to: status, note, ...(closing ? { disposition, reason } : {}) } });
+  // Score the AI against the analyst's call (or clear the scores on reopen).
+  const { scoreClosedCase } = await import("@/lib/shadow/service");
+  await scoreClosedCase(caseId);
 }
 
 export async function setCaseSeverity(caseId: string, severity: CaseSeverity, actorId: string) {

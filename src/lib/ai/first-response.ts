@@ -15,6 +15,7 @@ import { runReportAgent, runTriageAgent } from "@/lib/ai/agents";
 import { SEVERITY_FROM_AI, groundTriage, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
 import { decideResponse } from "@/lib/response/policy";
 import { rulebookVerdict } from "@/lib/rulebook/service";
+import { ladderFor, observing } from "@/lib/shadow/service";
 import { ACTION_LABEL } from "@/lib/response/executor";
 import { approversFor, markCaseAfterResponse, performResponseAction, recordResponseAction } from "@/lib/response/service";
 
@@ -97,7 +98,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
     if (key === "report") {
       const [latest, actions] = await Promise.all([
         db.aiRun.findFirst({ where: { caseId, agentKey: { in: ["triage", "phishing", "threat_intel"] }, status: { not: "failed" } }, orderBy: { createdAt: "desc" } }),
-        db.responseAction.findMany({ where: { caseId }, orderBy: { createdAt: "asc" } }),
+        db.responseAction.findMany({ where: { caseId, status: { not: "SHADOW" } }, orderBy: { createdAt: "asc" } }),
       ]);
       const outcome = await runReportAgent(
         evidence,
@@ -135,7 +136,9 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
     // A client-picked model that hasn't passed its evaluation only suggests;
     // the built-in engine (after a fallback) isn't capped by it.
     const modelCap = resolved.autonomyCap && outcome.engine !== "built-in" ? { autonomy: resolved.autonomyCap, reason: resolution?.capReason ?? "Model not evaluated" } : null;
-    const statuses = await applyTriage(caseId, run.id, output, report, profile.name, outcome.engine, opts, modelCap);
+    const { statuses, silent } = await applyTriage(caseId, run.id, output, report, profile.name, outcome.engine, opts, modelCap);
+    // Shadow-mode runs stay out of sight on the case until it closes.
+    if (silent) await db.aiRun.update({ where: { id: run.id }, data: { resolution: { ...((runScope.resolution as object | undefined) ?? {}), shadow: true } } });
     await finishRun(caseId, key, run.id, outcome.engine, outcome.model, outcome.status, opts, { verdict: output.verdict, confidence: output.confidence, actions: statuses, grounding: report.notes });
     return run;
   } catch (err) {
@@ -175,8 +178,11 @@ async function applyTriage(
   modelCap: { autonomy: "SUGGEST"; reason: string } | null = null,
 ) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { tenant: { select: { aiAutonomyCap: true, plan: { select: { defaultAutonomyCap: true } } } } } });
-  const [settings, controller] = await Promise.all([aiSettings(), loadProfile("containment")]);
+  const [settings, controller, ladder] = await Promise.all([aiSettings(), loadProfile("containment"), ladderFor(kase.tenantId)]);
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  // Shadow mode: with every action at level 0 the AI only observes — its
+  // analysis is recorded but stays out of sight until the case closes.
+  const silent = observing(ladder);
 
   const statuses: Array<{ action: PlaybookActionType; target: string; status: string; reason: string }> = [];
   const pendingLabels: string[] = [];
@@ -185,12 +191,13 @@ async function applyTriage(
     const ground = report.actions[i];
     const target = ground?.matched ?? proposed.target;
     // Don't propose the same thing twice on one case.
-    const duplicate = await db.responseAction.findFirst({ where: { caseId, actionType: proposed.action, target, status: { in: ["PENDING_APPROVAL", "EXECUTED", "SUGGESTED"] } } });
+    const duplicate = await db.responseAction.findFirst({ where: { caseId, actionType: proposed.action, target, status: { in: ["PENDING_APPROVAL", "EXECUTED", "SUGGESTED", "SHADOW"] } } });
     if (duplicate) continue;
 
     const endpoint = proposed.action === "ISOLATE_HOST" ? await db.endpoint.findFirst({ where: { tenantId: kase.tenantId, hostname: { equals: target, mode: "insensitive" } }, select: { criticality: true } }) : null;
     const autoActionsLastHour = await db.responseAction.count({ where: { tenantId: kase.tenantId, source: "ai", status: "EXECUTED", createdAt: { gte: hourAgo } } });
     const rulebook = await rulebookVerdict({ tenantId: kase.tenantId, actionType: proposed.action, target, severity: kase.severity });
+    const level = ladder?.get(proposed.action) ?? null;
     const decision = decideResponse({
       actionType: proposed.action,
       grounded: !!ground?.grounded,
@@ -202,11 +209,33 @@ async function applyTriage(
       planCap: kase.tenant?.plan?.defaultAutonomyCap,
       tenantCap: kase.tenant?.aiAutonomyCap ?? "AUTO_CONTAIN",
       rulebook,
+      // Level 0 is decided as if allowed and recorded as shadow below.
+      ladder: level != null && level > 0 ? { level } : null,
       modelCap,
       endpointCriticality: endpoint?.criticality,
       autoActionsLastHour,
       maxAutoActionsPerHour: settings.maxAutoActionsPerHour,
     });
+
+    if (level === 0) {
+      // What the AI would have done, kept for the comparison at close.
+      await recordResponseAction({
+        caseId,
+        actionType: proposed.action,
+        target,
+        source: "ai",
+        status: "SHADOW",
+        rationale: `${proposed.rationale} (${proposed.urgency})`,
+        confidence: output.confidence,
+        policyReason: `Shadow mode: would have been ${decision.status.toLowerCase().replace("_", " ")} — ${decision.reason}`,
+        aiRunId: runId,
+        requestedById: opts.requestedBy?.id,
+        parameters: { ladderLevel: "0" },
+        decision,
+      });
+      statuses.push({ action: proposed.action, target, status: "SHADOW", reason: decision.reason });
+      continue;
+    }
 
     const action = await recordResponseAction({
       caseId,
@@ -219,15 +248,35 @@ async function applyTriage(
       policyReason: decision.reason,
       aiRunId: runId,
       requestedById: opts.requestedBy?.id,
+      ...(level != null ? { parameters: { ladderLevel: String(level) } } : {}),
       decision,
     });
     if (decision.status === "EXECUTED") {
       await db.responseAction.update({ where: { id: action.id }, data: { decidedAt: new Date() } });
-      await performResponseAction(action.id, { name: `${agentName} (auto-contain)` });
+      const done = await performResponseAction(action.id, { name: `${agentName} (auto-contain)` });
+      // Level 3: the client hears straight away, with how to undo it.
+      if (level === 3 && done.status === "EXECUTED" && kase.tenantId) {
+        const admins = await db.user.findMany({ where: { tenantId: kase.tenantId, role: "CLIENT_ADMIN", active: true }, select: { id: true } });
+        const watchers = await db.caseWatcher.findMany({ where: { caseId }, select: { userId: true } });
+        await notify([...admins.map((a) => a.id), ...watchers.map((w) => w.userId)], {
+          kind: "ai",
+          title: `HELIOS acted: ${ACTION_LABEL[proposed.action]} ${target}`,
+          body: `On "${kase.title}". It can be rolled back from the case.`,
+          caseId,
+          actorName: agentName,
+        });
+      }
     } else if (decision.status === "PENDING_APPROVAL") {
       pendingLabels.push(`${ACTION_LABEL[proposed.action]} ${target}`);
     }
     statuses.push({ action: proposed.action, target, status: decision.status, reason: decision.reason });
+  }
+
+  if (silent) {
+    await db.timelineEntry.create({
+      data: { caseId, occurredAt: new Date(), actor: agentName, action: "ai.shadow_recorded", detail: "AI analysis recorded in shadow mode; it's shown when the case is closed", evidence: { runId } },
+    });
+    return { statuses, silent };
   }
 
   // Severity only ratchets up; the analyst decides on any downgrade.
@@ -282,7 +331,7 @@ async function applyTriage(
       actorName: agentName,
     }, { exclude: opts.requestedBy?.id });
   }
-  return statuses;
+  return { statuses, silent };
 }
 
 export async function aiSpend(since: Date) {

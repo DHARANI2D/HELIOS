@@ -19,6 +19,8 @@ import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook } from "@/l
 import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { resolveForClient } from "@/lib/ai/gateway";
 import { loadProfile } from "@/lib/ai/resolve";
+import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
+import { setCaseStatus } from "@/lib/cases/service";
 import { onboardIntegration } from "@/lib/integrations/service";
 import { signPayload } from "@/lib/integrations/dispatch";
 import { invalidateCatalog } from "@/lib/integrations/tools";
@@ -402,6 +404,43 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect((await resolveForClient("triage", profile, { tenantId: tenant.id, severity: "CRITICAL" })).resolution.source).toBe("platform");
     expect((await db.tenantAiPolicy.findUniqueOrThrow({ where: { tenantId: tenant.id } })).budgetReachedMonth).not.toBeNull();
     await db.aiProvider.deleteMany({ where: { id: { in: [cloud.id, local.id] } } });
+  });
+
+  it("measures AI in shadow mode and moves the ladder on the record", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Shadow", slug: "test-shadow" } });
+    const author = { id: adminId, name: "Test Admin" };
+    await startShadowMode(tenant.id, author);
+    const ladder = await ladderFor(tenant.id);
+    expect(observing(ladder)).toBe(true);
+
+    // A closed case needs a disposition and a reason; then the AI is scored against it.
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Shadow case", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    await recordResponseAction({ caseId: kase.id, actionType: "BLOCK_IP", target: "203.0.113.77", source: "ai", status: "SHADOW", parameters: { ladderLevel: "0" } });
+    await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: "TEST-SH-01", source: "ai", status: "SHADOW", parameters: { ladderLevel: "0" } });
+    await recordResponseAction({ caseId: kase.id, actionType: "BLOCK_IP", target: "203.0.113.77", source: "analyst", status: "MANUAL_REQUIRED" });
+    await expect(setCaseStatus(kase.id, "RESOLVED", adminId)).rejects.toThrow(/disposition/);
+    await setCaseStatus(kase.id, "RESOLVED", adminId, undefined, { disposition: "TRUE_POSITIVE", reason: "Confirmed C2 beacon" });
+    const outcomes = await db.aiDecisionOutcome.findMany({ where: { caseId: kase.id } });
+    expect(outcomes.map((o) => [o.actionType, o.agreed]).sort()).toEqual([["BLOCK_IP", true], ["ISOLATE_HOST", false]]);
+    // Reopening clears the scores.
+    await setCaseStatus(kase.id, "INVESTIGATING", adminId);
+    expect(await db.aiDecisionOutcome.count({ where: { caseId: kase.id } })).toBe(0);
+
+    // A clean record proposes a promotion; the client approves it.
+    await db.aiDecisionOutcome.createMany({ data: Array.from({ length: 20 }, () => ({ tenantId: tenant.id, caseId: kase.id, kind: "action", actionType: "BLOCK_IP" as const, aiOutcome: "EXECUTED", humanOutcome: "took", agreed: true, severity: "HIGH" as const })) });
+    await reviewLadders();
+    expect(await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).toMatchObject({ level: 0, proposedLevel: 1 });
+    await expect(decidePromotion(tenant.id, "BLOCK_IP", true, { ...author, isClient: false }, "short")).rejects.toThrow();
+    await decidePromotion(tenant.id, "BLOCK_IP", true, { ...author, isClient: true }, "");
+    expect((await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).level).toBe(1);
+    expect(observing(await ladderFor(tenant.id))).toBe(false);
+
+    // A wrong containment of a critical asset this week drops it back.
+    await setAutonomyLevel(tenant.id, "BLOCK_IP", 3, author, "Test");
+    await db.aiDecisionOutcome.create({ data: { tenantId: tenant.id, caseId: kase.id, kind: "action", actionType: "BLOCK_IP", aiOutcome: "EXECUTED", humanOutcome: "did_not", agreed: false, falseContainment: true, critical: true, severity: "HIGH" } });
+    await reviewLadders();
+    expect((await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).level).toBe(1);
+    expect(await db.auditLog.count({ where: { action: "autonomy.demoted" } })).toBe(1);
   });
 
   it("imports a threat feed, matches it in detection, and drops delisted entries", async () => {

@@ -12,7 +12,9 @@ import { assetTypeLabel, endpointClass } from "@/lib/assets/inventory";
 import { industryFromText } from "@/lib/assets/estate";
 import { formatRelative } from "@/lib/format";
 import { diffRulebooks } from "@/lib/rulebook/diff";
-import { AI_RESIDENCY, EMPTY_RULEBOOK } from "@/lib/rulebook/schema";
+import { ACTION_MODES, AI_RESIDENCY, EMPTY_RULEBOOK, RULED_ACTIONS, RULED_ACTION_LABEL } from "@/lib/rulebook/schema";
+import { DEMOTION, EMPTY_STATS, PROMOTION, promotionCheck } from "@/lib/shadow/ladder";
+import { ladderStats } from "@/lib/shadow/service";
 import { buildTemplate, templateFor } from "@/lib/rulebook/templates";
 import { parseStored, rulebookReminders, rulebookState } from "@/lib/rulebook/service";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +25,7 @@ import { TestBadge } from "@/components/shared/test-badge";
 import { RulebookEditor } from "@/components/rulebook/rulebook-editor";
 import { RulebookSummary } from "@/components/rulebook/rulebook-summary";
 import { ClientAiPanel } from "@/components/rulebook/client-ai-panel";
+import { LadderPanel } from "@/components/rulebook/ladder-panel";
 import { AllowlistPanel, CodePanel, DraftControls, DryRunPanel, SignPanel } from "@/components/rulebook/rulebook-panels";
 
 const STATUS_LABEL = { DRAFT: "Draft", AWAITING_SIGNATURE: "Awaiting signature", ACTIVE: "In force", SUPERSEDED: "Superseded" } as const;
@@ -83,7 +86,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
   if (!tenant) notFound();
 
   const since = daysAgo(30);
-  const [state, allowlist, endpoints, accounts, providers, reminders, aiPreview, aiPolicy, aiSpend, aiProviders, me] = await Promise.all([
+  const [state, allowlist, endpoints, accounts, providers, reminders, aiPreview, aiPolicy, aiSpend, aiProviders, me, ladderRows, monthStats, weekStats] = await Promise.all([
     rulebookState(tenant.id),
     db.policyAllowlistEntry.findMany({ where: { tenantId: tenant.id }, orderBy: { createdAt: "desc" } }),
     db.endpoint.findMany({ where: { tenantId: tenant.id }, orderBy: { hostname: "asc" }, select: { hostname: true, os: true, assetClass: true, assetType: true, criticality: true }, take: 1000 }),
@@ -95,6 +98,9 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
     clientAiSpend(tenant.id),
     db.aiProvider.findMany({ where: { enabled: true, OR: [{ tenantId: null }, { tenantId: tenant.id }] }, orderBy: [{ tenantId: "desc" }, { name: "asc" }] }),
     db.user.findUnique({ where: { id: user.id }, select: { preferences: true } }),
+    db.autonomyLevel.findMany({ where: { tenantId: tenant.id } }),
+    ladderStats(tenant.id, daysAgo(PROMOTION.windowDays)),
+    ladderStats(tenant.id, daysAgo(DEMOTION.windowDays)),
   ]);
 
   const canEdit = can(user, "rulebook.edit");
@@ -109,6 +115,35 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
     ? `${AI_RESIDENCY[rules.residency]}${rules.residency === "region" ? ` (${rules.regions.join(", ") || "no region named"})` : ""}; ${rules.allowedProviders.length ? `${rules.allowedProviders.length} allowed provider${rules.allowedProviders.length === 1 ? "" : "s"} plus the client's own` : "any provider HELIOS offers"}; personal data ${rules.redactPii ? "masked for cloud models" : "not masked"}; users ${rules.allowUserChoice ? "may" : "may not"} choose their own model.`
     : "No rulebook in force: any provider HELIOS offers, without masking.";
   const prefs = me?.preferences && typeof me.preferences === "object" ? ((me.preferences as { aiModels?: Record<string, string> }).aiModels ?? {}) : {};
+  // The ladder per action, with what else caps it for this client.
+  const capRank = (a: string) => (a === "AUTO_CONTAIN" ? 3 : a === "CONTAIN_WITH_APPROVAL" ? 2 : 1);
+  const levelRank = (l: number) => (l >= 3 ? 3 : l === 2 ? 2 : 1);
+  const ladder = RULED_ACTIONS.map((a) => {
+    const row = ladderRows.find((r) => r.actionType === a);
+    const level = row?.level ?? 0;
+    const month = monthStats.byAction.get(a) ?? EMPTY_STATS;
+    const week = weekStats.byAction.get(a) ?? EMPTY_STATS;
+    const check = promotionCheck(level, month);
+    const caps: Array<[string, number]> = [
+      [`the plan (${tenant.plan ? AUTONOMY_LABEL[tenant.plan.defaultAutonomyCap].toLowerCase() : "none"})`, tenant.plan ? capRank(tenant.plan.defaultAutonomyCap) : 3],
+      [`AI consent (${AUTONOMY_LABEL[tenant.aiAutonomyCap].toLowerCase()})`, capRank(tenant.aiAutonomyCap)],
+      ...(active ? ([[`the rulebook (${ACTION_MODES[active.actions[a].mode].toLowerCase()})`, { auto: 3, approve: 2, suggest: 1, never: 0 }[active.actions[a].mode]]] as Array<[string, number]>) : []),
+    ];
+    const tightest = caps.reduce((m, c) => (c[1] < m[1] ? c : m), ["", 9] as [string, number]);
+    return {
+      actionType: a,
+      label: RULED_ACTION_LABEL[a],
+      level,
+      reason: row?.reason ?? null,
+      changedBy: row?.changedByName ?? "",
+      proposedLevel: row?.proposedLevel ?? null,
+      month,
+      week: { decisions: week.decisions, agreed: week.agreed },
+      eligible: check.eligible,
+      notYet: check.reasons,
+      cappedBy: level > 0 && tightest[1] < levelRank(level) ? tightest[0] : null,
+    };
+  });
   const versions = state.versions.map((v, i) => {
     const previous = state.versions.slice(i + 1).find((p) => p.status === "ACTIVE" || p.status === "SUPERSEDED");
     return { ...v, diff: diffRulebooks(previous ? parseStored(previous) : null, parseStored(v)) };
@@ -123,7 +158,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
             {!user.isClient && <Link href="/rulebook" className="ml-auto text-xs font-normal text-muted-foreground hover:underline" scroll={false} prefetch={false}>All clients</Link>}
           </CardTitle>
           <CardDescription>
-            What HELIOS may do on {user.isClient ? "your" : "this client's"} estate. On every decision the order is fixed and the most restrictive rule wins: kill switch, plan ({tenant.plan ? AUTONOMY_LABEL[tenant.plan.defaultAutonomyCap].toLowerCase() : "no plan"}), AI consent ({AUTONOMY_LABEL[tenant.aiAutonomyCap].toLowerCase()}), this rulebook, the agent profile, then rate limits.
+            What HELIOS may do on {user.isClient ? "your" : "this client's"} estate. On every decision the order is fixed and the most restrictive rule wins: kill switch, plan ({tenant.plan ? AUTONOMY_LABEL[tenant.plan.defaultAutonomyCap].toLowerCase() : "no plan"}), AI consent ({AUTONOMY_LABEL[tenant.aiAutonomyCap].toLowerCase()}), this rulebook, the autonomy ladder, the agent profile, the model&apos;s evaluation, then rate limits.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -165,6 +200,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
           <TabsTrigger value="allow">Allowlist ({allowlist.length})</TabsTrigger>
           <TabsTrigger value="versions">Versions ({state.versions.length})</TabsTrigger>
           <TabsTrigger value="ai">AI models</TabsTrigger>
+          <TabsTrigger value="ladder">Autonomy</TabsTrigger>
           <TabsTrigger value="code">Policy as code</TabsTrigger>
         </TabsList>
         <TabsContent value="rules">
@@ -255,6 +291,17 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
             budget={aiPolicy?.monthlyBudgetUsd ?? null}
             spend={aiSpend}
             mine={rules?.allowUserChoice && can(user, "ai.dispatch") ? prefs : null}
+          />
+        </TabsContent>
+        <TabsContent value="ladder">
+          <LadderPanel
+            tenantId={tenant.id}
+            started={ladderRows.length > 0}
+            rows={ladder}
+            verdicts={monthStats.verdicts}
+            canManage={!user.isClient && can(user, "ai.configure")}
+            canApprove={can(user, "rulebook.sign")}
+            isClient={user.isClient}
           />
         </TabsContent>
         <TabsContent value="code">

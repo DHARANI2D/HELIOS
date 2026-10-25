@@ -41,6 +41,7 @@ const LAYER_LABEL: Record<string, string> = {
   plan: "Plan",
   consent: "Client consent",
   rulebook: "Client rulebook",
+  ladder: "Autonomy ladder",
   agent: "Agent profile",
   model: "Model evaluation",
   rate_limit: "Rate limit",
@@ -55,6 +56,7 @@ const STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "ou
   REJECTED: "outline",
   SUGGESTED: "soft",
   ROLLED_BACK: "secondary",
+  SHADOW: "outline",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -66,6 +68,7 @@ const STATUS_LABEL: Record<string, string> = {
   REJECTED: "Rejected",
   SUGGESTED: "Suggested",
   ROLLED_BACK: "Rolled back",
+  SHADOW: "Shadow mode",
 };
 
 interface Props {

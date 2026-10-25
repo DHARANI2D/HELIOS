@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
+import { startShadowMode } from "@/lib/shadow/service";
 import { logAction } from "@/lib/audit";
 import { requirePermission, requireUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
@@ -38,6 +39,8 @@ export async function saveTenantAction(input: z.input<typeof tenantSchema>, tena
     let slug = slugify(data.name);
     if (await db.tenant.findUnique({ where: { slug } })) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     saved = await db.tenant.create({ data: { ...fields, slug, ...(plan ? { aiAutonomyCap: plan.defaultAutonomyCap } : {}) } });
+    // New clients start in shadow mode: the AI observes and earns autonomy.
+    await startShadowMode(saved.id, { id: user.id, name: user.name ?? user.email ?? "user" });
   }
   await logAction({ actorId: user.id, action: tenantId ? "tenant.updated" : "tenant.created", detail: { tenantId: saved.id, name: saved.name, plan: plan?.key ?? null, status: saved.status, isTest: saved.isTest } });
   revalidatePath("/tenants");

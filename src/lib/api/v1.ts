@@ -91,7 +91,7 @@ export async function getCase(p: ApiPrincipal, id: string) {
       indicators: { select: { role: true, indicator: { select: { type: true, value: true, maliciousScore: true, blockedAt: true } } } },
       mitreTechniques: { select: { technique: { select: { id: true, name: true, tacticId: true } } } },
       timeline: { orderBy: [{ occurredAt: "desc" }], take: 100, select: { occurredAt: true, actor: true, action: true, detail: true } },
-      responseActions: { orderBy: { createdAt: "asc" }, select: { id: true, actionType: true, target: true, status: true, source: true, createdAt: true, decidedAt: true } },
+      responseActions: { where: { status: { not: "SHADOW" } }, orderBy: { createdAt: "asc" }, select: { id: true, actionType: true, target: true, status: true, source: true, createdAt: true, decidedAt: true } },
       comments: { where: p.isClient ? { internal: false } : {}, orderBy: { createdAt: "asc" }, select: { id: true, authorName: true, body: true, internal: true, createdAt: true } },
     },
   });
@@ -114,6 +114,8 @@ const updateSchema = z
     // Email of the analyst to assign, or null to unassign.
     assignee: z.string().email().nullable().optional(),
     note: z.string().trim().max(2000).optional(),
+    // Required to close as resolved; the note is the reason.
+    disposition: z.enum(["TRUE_POSITIVE", "BENIGN_TRUE_POSITIVE", "FALSE_POSITIVE"]).optional(),
   })
   .strict()
   .refine((u) => u.status || u.severity || u.assignee !== undefined, { message: "Nothing to change" });
@@ -122,7 +124,13 @@ export async function updateCase(p: ApiPrincipal, id: string, body: unknown) {
   await visibleCase(p, id);
   const u = updateSchema.parse(body);
   if ((u.status || u.severity || u.assignee !== undefined) && !can(p, "cases.triage")) throw new ApiError(403, "The token's owner lacks: cases.triage");
-  if (u.status) await setCaseStatus(id, u.status as (typeof CASE_STATUSES)[number], p.id, u.note || undefined);
+  if (u.status) {
+    try {
+      await setCaseStatus(id, u.status as (typeof CASE_STATUSES)[number], p.id, u.note || undefined, { disposition: u.disposition ?? null });
+    } catch (err) {
+      throw new ApiError(400, err instanceof Error ? err.message : "Can't change the status");
+    }
+  }
   if (u.severity) await setCaseSeverity(id, u.severity, p.id);
   if (u.assignee !== undefined) {
     const assignee = u.assignee ? await db.user.findUnique({ where: { email: u.assignee.toLowerCase() }, select: { id: true, active: true, tenantId: true } }) : null;

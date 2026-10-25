@@ -14,7 +14,7 @@ const ENDPOINTS: Array<{ method: string; path: string; what: string; needs: stri
   { method: "GET", path: "/api/v1/me", what: "Who the token acts as, and its permissions", needs: "any token" },
   { method: "GET", path: "/api/v1/cases?status=open&severity=HIGH&limit=50", what: "Cases you can see, newest first; page with nextCursor (&cursor=)", needs: "cases.view" },
   { method: "GET", path: "/api/v1/cases/{id}", what: "One case: detections, indicators, ATT&CK, timeline, response actions, comments", needs: "cases.view" },
-  { method: "PATCH", path: "/api/v1/cases/{id}", what: '{"status":"RESOLVED","note":"…"} · {"severity":"HIGH"} · {"assignee":"analyst@…"}', needs: "write token, cases.triage (cases.assign for others)" },
+  { method: "PATCH", path: "/api/v1/cases/{id}", what: '{"status":"RESOLVED","disposition":"TRUE_POSITIVE","note":"why"} · {"severity":"HIGH"} · {"assignee":"analyst@…"}', needs: "write token, cases.triage (cases.assign for others)" },
   { method: "POST", path: "/api/v1/cases/{id}/comments", what: '{"body":"…","clientVisible":false}', needs: "write token, cases.comment" },
   { method: "GET", path: "/api/v1/indicators?value=203.0.113.7", what: "Indicator reputation from the shared store (&refresh=1 asks the providers)", needs: "intel.view" },
   { method: "GET", path: "/api/v1/metrics?range=30d", what: "Service metrics as on the Reports page (or &month=YYYY-MM)", needs: "reports.view" },
@@ -140,7 +140,7 @@ export default async function ApiTokensPage() {
           <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 font-mono text-xs">{`curl -H "Authorization: Bearer $HELIOS_TOKEN" "${base}/api/v1/cases?status=open&limit=20"
 
 curl -X PATCH -H "Authorization: Bearer $HELIOS_TOKEN" -H "content-type: application/json" \\
-  -d '{"status":"RESOLVED","note":"Confirmed benign"}' "${base}/api/v1/cases/<case id>"`}</pre>
+  -d '{"status":"RESOLVED","disposition":"BENIGN_TRUE_POSITIVE","note":"Confirmed benign"}' "${base}/api/v1/cases/<case id>"`}</pre>
         </CardContent>
       </Card>
     </div>

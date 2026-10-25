@@ -3,7 +3,7 @@
 import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { CaseSeverity, CaseStatus, PlaybookActionType } from "@prisma/client";
+import type { CaseDisposition, CaseSeverity, CaseStatus, PlaybookActionType } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { requirePermission, type SessionUser } from "@/lib/session";
@@ -11,7 +11,7 @@ import { can, type Permission } from "@/lib/rbac";
 import { assertCaseAccess } from "@/lib/access";
 import { resolveTenantInput } from "@/lib/tenants";
 import { CASE_STATUSES } from "@/lib/cases/labels";
-import { setCaseSeverity, setCaseStatus } from "@/lib/cases/service";
+import { DISPOSITIONS, setCaseSeverity, setCaseStatus } from "@/lib/cases/service";
 import { acknowledgeCase, addComment, assignCaseTo, escalateCase, publishReport, setWatching, shareCase } from "@/lib/cases/collab";
 import { executePlaybook } from "@/lib/playbooks/engine";
 import { logAction } from "@/lib/audit";
@@ -81,10 +81,11 @@ export async function ingestLogsAction(source: string, text: string, tenantId?: 
 
 // --- triage --------------------------------------------------------------
 
-export async function setCaseStatusAction(caseId: string, status: CaseStatus, note?: string) {
+export async function setCaseStatusAction(caseId: string, status: CaseStatus, note?: string, close?: { disposition?: string | null; reason?: string | null }) {
   const user = await caseActor(caseId, "cases.triage");
   if (!CASE_STATUSES.includes(status)) throw new Error("Invalid status");
-  await setCaseStatus(caseId, status, user.id, note?.trim() || undefined);
+  const disposition = close?.disposition ? z.enum(DISPOSITIONS as [CaseDisposition, ...CaseDisposition[]]).parse(close.disposition) : null;
+  await setCaseStatus(caseId, status, user.id, note?.trim() || undefined, { disposition, reason: close?.reason?.trim().slice(0, 2000) ?? null });
   revalidateCases(caseId);
 }
 

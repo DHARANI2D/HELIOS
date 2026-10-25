@@ -6,7 +6,8 @@ import { pageGuard, type SessionUser } from "@/lib/session";
 import { assertCaseAccess } from "@/lib/access";
 import { can, roleLabel } from "@/lib/rbac";
 import { formatDateTime, formatPercent, formatRelative } from "@/lib/format";
-import { CASE_SOURCE_HREF, CASE_SOURCE_LABEL } from "@/lib/cases/labels";
+import { CASE_SOURCE_HREF, CASE_SOURCE_LABEL, CLOSED_STATUSES } from "@/lib/cases/labels";
+import { dispositionLabel } from "@/lib/shadow/service";
 import { formatMinutes, parsePlan } from "@/lib/plans";
 import { recommendPlaybooks } from "@/lib/playbooks/recommend";
 import { findRelatedCases } from "@/lib/cases/related";
@@ -72,6 +73,7 @@ async function loadCasePage(id: string, user: SessionUser) {
       watchers: { include: { user: { select: { id: true, name: true, email: true } } } },
       responseActions: { orderBy: { createdAt: "asc" } },
       aiRuns: { orderBy: { createdAt: "desc" }, take: 6 },
+      aiOutcomes: { orderBy: { createdAt: "asc" } },
       auditLogs: { orderBy: { seq: "desc" }, take: 25, include: { actor: { select: { name: true, email: true } } } },
       _count: { select: { events: true } },
     },
@@ -109,7 +111,12 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   const suggestions = recommended.filter((p) => !ranPlaybookIds.has(p.id));
   const plan = kase.tenant?.plan ? parsePlan(kase.tenant.plan) : null;
   const watching = kase.watchers.some((w) => w.userId === user.id);
-  const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel"].includes(r.agentKey) && r.status !== "failed");
+  const closed = CLOSED_STATUSES.includes(kase.status);
+  // Shadow-mode analysis stays hidden until the case is closed, so it can't
+  // steer the analyst whose call it's measured against.
+  const isShadow = (r: { resolution: unknown }) => !!(r.resolution as { shadow?: boolean } | null)?.shadow;
+  const shadowHidden = !closed && kase.aiRuns.some(isShadow);
+  const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel"].includes(r.agentKey) && r.status !== "failed" && (closed || !isShadow(r)));
   const triage = latestTriage?.output as TriageOutput | undefined;
   const grounding = latestTriage?.grounding as GroundingReport | undefined;
   const lastFailure = kase.aiRuns[0]?.status === "failed" ? kase.aiRuns[0] : null;
@@ -259,7 +266,9 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    {kase.aiStatus === "skipped" ? "Below the automatic first-response severity — dispatch an agent if you want one." : "No AI analysis yet."}
+                    {shadowHidden
+                      ? "This client is in shadow mode: the AI has recorded its analysis, and it's shown here once you close the case, so it can be compared with your call."
+                      : kase.aiStatus === "skipped" ? "Below the automatic first-response severity — dispatch an agent if you want one." : "No AI analysis yet."}
                   </p>
                 )}
                 {lastFailure && <p className="text-xs text-destructive">Last run failed: {lastFailure.error}</p>}
@@ -282,7 +291,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                 canApprove={canApprove}
                 canRequest={can(user, "containment.request")}
                 requestable={requestable}
-                actions={kase.responseActions.map((a) => {
+                actions={kase.responseActions.filter((a) => a.status !== "SHADOW" || (closed && showSoc)).map((a) => {
                   const result = (a.result ?? null) as { summary?: string; manual?: { by?: string } } | null;
                   return {
                     id: a.id,
@@ -418,6 +427,8 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                 <TriagePanel
                   caseId={kase.id}
                   status={kase.status}
+                  disposition={kase.disposition ? { value: kase.disposition, label: dispositionLabel(kase.disposition), reason: kase.dispositionReason } : null}
+                  aiScore={closed && kase.aiOutcomes.length ? { agreed: kase.aiOutcomes.filter((o) => o.agreed).length, total: kase.aiOutcomes.length, falseContainments: kase.aiOutcomes.filter((o) => o.falseContainment).length, misses: kase.aiOutcomes.filter((o) => o.aiOutcome === "NONE").length } : null}
                   severity={kase.severity}
                   assigneeId={kase.assignedToId}
                   acknowledged={!!kase.acknowledgedAt}

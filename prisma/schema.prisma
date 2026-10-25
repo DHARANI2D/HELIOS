@@ -173,6 +173,7 @@ model Tenant {
   allowlist    PolicyAllowlistEntry[]
   aiProviders  AiProvider[]
   aiPolicy     TenantAiPolicy?
+  autonomy     AutonomyLevel[]
 
   @@map("tenants")
 }
@@ -197,6 +198,12 @@ enum CaseSeverity {
   CRITICAL
 }
 
+enum CaseDisposition {
+  TRUE_POSITIVE
+  BENIGN_TRUE_POSITIVE // real activity, but expected or authorised
+  FALSE_POSITIVE
+}
+
 enum CaseStatus {
   OPEN
   TRIAGING
@@ -208,28 +215,33 @@ enum CaseStatus {
 }
 
 model Case {
-  id                 String          @id @default(cuid())
+  id                 String           @id @default(cuid())
   sourceType         CaseSource
   title              String
-  summary            String?         @db.Text
-  severity           CaseSeverity    @default(MEDIUM)
-  status             CaseStatus      @default(OPEN)
+  summary            String?          @db.Text
+  severity           CaseSeverity     @default(MEDIUM)
+  status             CaseStatus       @default(OPEN)
   confidence         Float? // 0-1, e.g. asip's QA-validated confidence score
   verdict            String? // e.g. desas "malicious"/"suspicious"/"clean"
   riskScore          Float?
   assignedToId       String?
   sourceRef          String? // originating agentId / investigationId / alertId / emailId
-  rootCauseNarrative String?         @db.Text
+  rootCauseNarrative String?          @db.Text
   metadata           Json? // source-specific payload (headers, IOC lists, etc.)
   tenantId           String?
   domain             SecurityDomain?
-  tier               Int             @default(1) // escalation tier: 1 triage, 2 analysis, 3 incident response
+  tier               Int              @default(1) // escalation tier: 1 triage, 2 analysis, 3 incident response
   slaDueAt           DateTime? // acknowledge-by deadline from the tenant's plan
   acknowledgedAt     DateTime?
   containedAt        DateTime?
   aiStatus           String? // queued | running | completed | failed | skipped
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  // The analyst's call when closing: the ground truth AI is measured against.
+  disposition        CaseDisposition?
+  dispositionReason  String?          @db.Text
+  dispositionById    String?
+  dispositionAt      DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
   resolvedAt         DateTime?
 
   tenant          Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -246,6 +258,7 @@ model Case {
   aiRuns          AiRun[]
   notifications   Notification[]
   responseActions ResponseAction[]
+  aiOutcomes      AiDecisionOutcome[]
 
   @@index([tenantId, status])
   @@index([domain, status])
@@ -930,6 +943,53 @@ enum ResponseActionStatus {
   // Approved, but no response connector can carry it out: someone does it
   // in the tool's own console and marks it done here.
   MANUAL_REQUIRED
+  // Shadow mode: what the AI would have done, recorded silently and shown
+  // only once the case is closed (lib/shadow).
+  SHADOW
+}
+
+// How far AI may go for one client and one action type, earned in shadow
+// mode (lib/shadow/ladder.ts): 0 observe, 1 suggest, 2 approve, 3 act and
+// notify, 4 act. A promotion waits for the client's approval.
+model AutonomyLevel {
+  tenantId      String
+  actionType    PlaybookActionType
+  level         Int
+  reason        String?
+  changedByName String
+  proposedLevel Int?
+  proposedAt    DateTime?
+  proposalStats Json?
+  updatedAt     DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, actionType])
+  @@map("autonomy_levels")
+}
+
+// One AI decision scored against what analysts did, when its case closed.
+model AiDecisionOutcome {
+  id               String              @id @default(cuid())
+  tenantId         String?
+  caseId           String
+  kind             String // action | verdict
+  actionType       PlaybookActionType?
+  target           String?
+  level            Int? // the ladder level when the AI decided
+  aiOutcome        String // the policy outcome the AI got (or would have, in shadow); for a verdict, the AI's verdict; NONE when only a human acted
+  humanOutcome     String // took | did_not; for a verdict, the disposition
+  agreed           Boolean
+  falseContainment Boolean             @default(false)
+  critical         Boolean             @default(false)
+  severity         CaseSeverity
+  createdAt        DateTime            @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, actionType, createdAt])
+  @@index([caseId])
+  @@map("ai_decision_outcomes")
 }
 
 model ResponseAction {

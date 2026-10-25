@@ -2,13 +2,14 @@ import type { AiAutonomy, PlaybookActionType, ResponseActionStatus } from "@pris
 
 import { minAutonomy } from "@/lib/ai/catalog";
 import { OUTCOME_RANK, type Outcome, type RuleHit } from "@/lib/rulebook/evaluate";
+import { levelCap } from "@/lib/shadow/ladder";
 
 // The containment gate between what an AI agent recommends and what happens.
 // Deterministic and side-effect free so it can be tested exhaustively: the
 // model proposes, this policy disposes. Each layer sets a ceiling and the
 // most restrictive one wins, in a fixed order of precedence:
 //   grounding → kill switch → plan → client consent → client rulebook →
-//   agent profile → the model's evaluation → rate limit.
+//   autonomy ladder → agent profile → the model's evaluation → rate limit.
 // Every decision carries the reason shown to analysts and written to the
 // audit chain, and a trace naming every rule that restricted it.
 
@@ -28,6 +29,8 @@ export interface PolicyInput {
   tenantCap: AiAutonomy;
   // The client's active rulebook and what it says about this action.
   rulebook?: { version: number; hash: string; hits: RuleHit[] } | null;
+  // The client's autonomy ladder for this action (lib/shadow), when started.
+  ladder?: { level: number } | null;
   // A model the client picked that hasn't passed its evaluation.
   modelCap?: { autonomy: AiAutonomy; reason: string } | null;
   // For host actions: the endpoint's business criticality.
@@ -36,7 +39,7 @@ export interface PolicyInput {
   maxAutoActionsPerHour: number;
 }
 
-export type PolicyLayer = "grounding" | "kill_switch" | "plan" | "consent" | "rulebook" | "agent" | "model" | "rate_limit";
+export type PolicyLayer = "grounding" | "kill_switch" | "plan" | "consent" | "rulebook" | "ladder" | "agent" | "model" | "rate_limit";
 
 export interface TraceEntry {
   layer: PolicyLayer;
@@ -80,6 +83,11 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
   if (consent !== "EXECUTED") add("consent", "tenant.aiAutonomyCap", consent, consent === "SUGGESTED" ? "Client's AI consent allows suggestions only" : "Client requires approval for containment");
 
   for (const hit of input.rulebook?.hits ?? []) add("rulebook", hit.rule, hit.outcome, input.rulebook ? `${hit.reason} (rulebook v${input.rulebook.version})` : hit.reason);
+
+  if (input.ladder) {
+    const cap = levelCap(input.ladder.level);
+    if (cap) add("ladder", `ladder.L${input.ladder.level}`, cap, cap === "SUGGESTED" ? `Autonomy ladder: suggestions only for this client until the AI earns more (L${input.ladder.level})` : `Autonomy ladder: approval needed for this client (L${input.ladder.level})`);
+  }
 
   const agent = capOutcome(input.autonomy);
   if (agent === "SUGGESTED") add("agent", "agent.autonomy", "SUGGESTED", "Containment controller is set to suggest only");
