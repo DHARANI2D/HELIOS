@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
-import { ArrowLeft, Bot, Clock, Laptop, Plug, ShieldAlert, Timer, TrendingUp, Users } from "lucide-react";
+import { ArrowLeft, Bot, Clock, Laptop, Plug, ShieldAlert, ShieldCheck, Timer, TrendingUp, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -80,6 +80,11 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+          {can(user, "rulebook.view") && (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/rulebook?tenant=${tenant.id}`}><ShieldCheck /> Rulebook</Link>
+            </Button>
+          )}
           {can(user, "pricing.view") && (
             <Button asChild size="sm" variant="outline">
               <Link href={`/pricing?tenant=${tenant.id}&tab=upgrades`}><TrendingUp /> Review upgrades &amp; price</Link>

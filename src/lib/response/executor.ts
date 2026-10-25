@@ -5,6 +5,7 @@ import { ACTION_LABEL } from "@/lib/response/labels";
 import { renderTemplate } from "@/lib/playbooks/trigger";
 import { dispatchAction } from "@/lib/integrations/dispatch";
 import { dispatchChatMessage } from "@/lib/integrations/chat";
+import { humanRulebookGate } from "@/lib/rulebook/service";
 
 export { ACTION_LABEL };
 
@@ -23,6 +24,7 @@ export interface ActionResult {
   status: "succeeded" | "failed" | "manual";
   summary: string;
   skipped?: boolean; // no-op (nothing to act on) — never counts as containment
+  blocked?: boolean; // refused by the client's rulebook — nothing was done
   output?: Record<string, unknown>;
 }
 
@@ -37,6 +39,8 @@ export interface ActionRequest {
   name: string;
   actionType: PlaybookActionType;
   params: Record<string, string | undefined>;
+  // How many people approved it (the two-person rule counts them).
+  approvals?: number;
 }
 
 export const CONTAINMENT_ACTIONS = new Set<PlaybookActionType>([
@@ -131,6 +135,19 @@ async function setIndicatorBlocked(type: "IP" | "EMAIL_ADDRESS" | "FILE_HASH" | 
   });
 }
 
+// The client's rulebook binds every path that acts — AI agents, analysts and
+// playbooks — so its hard rules are checked here, against the latest active
+// version, at the moment of acting: a never-isolate asset, a protected
+// account, an action the client forbids, or too few approvals.
+async function refusal(base: Pick<ActionResult, "action" | "actionType">, kase: Case, req: ActionRequest, target: string): Promise<ActionResult | null> {
+  const gate = await humanRulebookGate({ tenantId: kase.tenantId, actionType: req.actionType, target, severity: kase.severity, fresh: true });
+  if (!gate.allowed) return { ...base, status: "failed", blocked: true, summary: `Not done — ${gate.reason} (rulebook v${gate.version})`, output: { target, rulebookVersion: gate.version } };
+  if (gate.approvals > (req.approvals ?? 1)) {
+    return { ...base, status: "failed", blocked: true, summary: `Not done — ${gate.reason}; it has ${req.approvals ?? 1} (rulebook v${gate.version})`, output: { target, rulebookVersion: gate.version } };
+  }
+  return null;
+}
+
 export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionContext, actor = "helios"): Promise<ActionResult> {
   const base = { action: req.name, actionType: req.actionType };
   const p = req.params;
@@ -139,10 +156,13 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
     case "BLOCK_IP":
     case "UNBLOCK_IP": {
       const block = req.actionType === "BLOCK_IP";
-      const ips = p.ip ? [p.ip] : block ? ctx.ips : [];
-      if (ips.length === 0) {
+      const candidates = p.ip ? [p.ip] : block ? ctx.ips : [];
+      if (candidates.length === 0) {
         return { ...base, status: "succeeded", skipped: true, summary: block ? "No public IPs linked to this case — nothing to block" : "No IP given" };
       }
+      const refused = block ? (await Promise.all(candidates.map((ip) => refusal(base, kase, req, ip)))).filter((r): r is ActionResult => !!r) : [];
+      const ips = candidates.filter((_, i) => !refused.some((r) => r.output?.target === candidates[i]));
+      if (ips.length === 0) return refused.length === 1 ? refused[0] : { ...base, status: "failed", blocked: true, summary: refused.map((r) => r.summary).join("; ") };
       // The shared indicator store doubles as the blocklist feed firewalls can
       // pull (Threat Intelligence → blocklist); the connector, if any, pushes
       // the block to the client's firewall directly.
@@ -164,6 +184,10 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       if (!host) {
         return { ...base, status: "succeeded", skipped: true, summary: "No host identified on this case — nothing to isolate" };
       }
+      if (isolate) {
+        const no = await refusal(base, kase, req, host);
+        if (no) return no;
+      }
       const result = await viaConnector(base, kase, req.actionType, host, { done: `${isolate ? "Isolated" : "Released"} ${host}`, todo: `${isolate ? "Isolate" : "Release"} ${host}` }, { host });
       // Only a confirmed isolation changes the endpoint inventory.
       if (result.status === "succeeded") await setEndpointIsolation(kase, host, isolate, actor);
@@ -175,12 +199,18 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       const user = p.user ?? ctx.user;
       if (!user) return { ...base, status: "succeeded", skipped: true, summary: "No account identified on this case" };
       const disable = req.actionType === "DISABLE_USER";
+      if (disable) {
+        const no = await refusal(base, kase, req, user);
+        if (no) return no;
+      }
       return viaConnector(base, kase, req.actionType, user, { done: `${disable ? "Disabled" : "Re-enabled"} account ${user}`, todo: `${disable ? "Disable" : "Re-enable"} account ${user}` }, { user });
     }
 
     case "QUARANTINE_FILE": {
       const hash = p.hash ?? p.file;
       if (!hash) return { ...base, status: "succeeded", skipped: true, summary: "No file identified on this case" };
+      const no = await refusal(base, kase, req, hash);
+      if (no) return no;
       if (/^[a-f0-9]{32,64}$/i.test(hash)) await setIndicatorBlocked("FILE_HASH", hash.toLowerCase(), true);
       const short = hash.length > 20 ? `${hash.slice(0, 16)}…` : hash;
       return viaConnector(base, kase, "QUARANTINE_FILE", hash, { done: `Quarantined ${short}`, todo: `Quarantine ${short}` }, { hash });
@@ -189,6 +219,8 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
     case "BLOCK_SENDER": {
       const sender = p.sender;
       if (!sender) return { ...base, status: "succeeded", skipped: true, summary: "No sender identified on this case" };
+      const no = await refusal(base, kase, req, sender);
+      if (no) return no;
       await setIndicatorBlocked(sender.includes("@") ? "EMAIL_ADDRESS" : "DOMAIN", sender.toLowerCase(), true);
       return viaConnector(base, kase, "BLOCK_SENDER", sender, { done: `Blocked sender ${sender}`, todo: `Block sender ${sender}` }, { sender });
     }
@@ -197,6 +229,8 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       const process = p.process;
       const host = p.host ?? ctx.host;
       if (!process || !host) return { ...base, status: "succeeded", skipped: true, summary: "No process and host identified on this case" };
+      const no = await refusal(base, kase, req, process);
+      if (no) return no;
       return viaConnector(base, kase, "KILL_PROCESS", `${host}:${process}`, { done: `Terminated ${process} on ${host}`, todo: `Terminate ${process} on ${host}` }, { process, host });
     }
 
@@ -207,6 +241,10 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
         return { ...base, status: "succeeded", skipped: true, summary: "Case is not tied to an AI agent — skipped" };
       }
       const revoke = req.actionType === "REVOKE_AGENT";
+      if (revoke) {
+        const no = await refusal(base, kase, req, agentId);
+        if (no) return no;
+      }
       const agent = await db.agent.update({
         where: { id: agentId },
         data: revoke ? { status: "REVOKED", trust: 0, level: 0, mode: "ISOLATED" } : { status: "ACTIVE", trust: 100, level: 10, mode: "FULL_ACCESS" },
@@ -224,6 +262,8 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       if (or.length === 0) {
         return { ...base, status: "succeeded", skipped: true, summary: "No host or user on this case to collect telemetry for" };
       }
+      const no = await refusal(base, kase, req, host ?? ctx.user!);
+      if (no) return no;
       const from = new Date(kase.createdAt.getTime() - windowMinutes * 60_000);
       const to = new Date(kase.createdAt.getTime() + windowMinutes * 60_000);
       const { count } = await db.securityEvent.updateMany({

@@ -1,11 +1,16 @@
 import type { AiAutonomy, PlaybookActionType, ResponseActionStatus } from "@prisma/client";
 
 import { minAutonomy } from "@/lib/ai/catalog";
+import { OUTCOME_RANK, type Outcome, type RuleHit } from "@/lib/rulebook/evaluate";
 
 // The containment gate between what an AI agent recommends and what happens.
 // Deterministic and side-effect free so it can be tested exhaustively: the
-// model proposes, this policy disposes. Every decision carries the reason
-// shown to analysts and written to the audit chain.
+// model proposes, this policy disposes. Each layer sets a ceiling and the
+// most restrictive one wins, in a fixed order of precedence:
+//   grounding → kill switch → plan → client consent → client rulebook →
+//   agent profile → rate limit.
+// Every decision carries the reason shown to analysts and written to the
+// audit chain, and a trace naming every rule that restricted it.
 
 export interface PolicyInput {
   actionType: PlaybookActionType;
@@ -17,58 +22,85 @@ export interface PolicyInput {
   autonomy: AiAutonomy;
   allowedActions: PlaybookActionType[];
   minConfidence: number;
+  // The most the client's plan allows.
+  planCap?: AiAutonomy;
   // What the client consented to.
   tenantCap: AiAutonomy;
+  // The client's active rulebook and what it says about this action.
+  rulebook?: { version: number; hash: string; hits: RuleHit[] } | null;
   // For host actions: the endpoint's business criticality.
   endpointCriticality?: string | null;
   autoActionsLastHour: number;
   maxAutoActionsPerHour: number;
 }
 
+export type PolicyLayer = "grounding" | "kill_switch" | "plan" | "consent" | "rulebook" | "agent" | "rate_limit";
+
+export interface TraceEntry {
+  layer: PolicyLayer;
+  rule: string;
+  outcome: Outcome;
+  reason: string;
+}
+
 export interface PolicyDecision {
   status: Extract<ResponseActionStatus, "SUGGESTED" | "PENDING_APPROVAL" | "EXECUTED" | "BLOCKED">;
   reason: string;
   effectiveAutonomy: AiAutonomy;
+  // The rule that decided, then every other rule that restricted the action.
+  trace: TraceEntry[];
+  approvals: number;
+  policyVersion: number | null;
+  policyHash: string | null;
 }
 
 // Never automated, whatever the configuration: these lock people out or are
 // easy to get wrong at scale. They can still be approved by a human.
 const ALWAYS_HUMAN: PlaybookActionType[] = ["DISABLE_USER", "KILL_PROCESS"];
 
+function capOutcome(cap: AiAutonomy): Outcome {
+  return cap === "AUTO_CONTAIN" ? "EXECUTED" : cap === "CONTAIN_WITH_APPROVAL" ? "PENDING_APPROVAL" : "SUGGESTED";
+}
+
 export function decideResponse(input: PolicyInput): PolicyDecision {
-  const effectiveAutonomy = minAutonomy(input.autonomy, input.tenantCap);
+  const planCap = input.planCap ?? "AUTO_CONTAIN";
+  const effectiveAutonomy = minAutonomy(minAutonomy(input.autonomy, input.tenantCap), planCap);
   const pct = (n: number) => `${Math.round(n * 100)}%`;
+  const entries: TraceEntry[] = [];
+  const add = (layer: PolicyLayer, rule: string, outcome: Outcome, reason: string) => entries.push({ layer, rule, outcome, reason });
 
-  if (!input.grounded) {
-    return { status: "BLOCKED", effectiveAutonomy, reason: "Target doesn't appear in this case's evidence — the agent may have hallucinated it" };
-  }
-  if (input.killSwitch) {
-    return { status: "SUGGESTED", effectiveAutonomy, reason: "AI kill switch is on — recommendations only" };
-  }
-  if (effectiveAutonomy === "OFF" || effectiveAutonomy === "SUGGEST") {
-    const capped = input.tenantCap !== input.autonomy && effectiveAutonomy === input.tenantCap;
-    return { status: "SUGGESTED", effectiveAutonomy, reason: capped ? "Client's AI consent allows suggestions only" : "Containment controller is set to suggest only" };
-  }
-  if (effectiveAutonomy === "CONTAIN_WITH_APPROVAL") {
-    const capped = input.tenantCap === "CONTAIN_WITH_APPROVAL" && input.autonomy === "AUTO_CONTAIN";
-    return { status: "PENDING_APPROVAL", effectiveAutonomy, reason: capped ? "Client requires approval for containment" : "Containment requires analyst approval" };
-  }
+  if (!input.grounded) add("grounding", "grounding", "BLOCKED", "Target doesn't appear in this case's evidence — the agent may have hallucinated it");
+  if (input.killSwitch) add("kill_switch", "killSwitch", "SUGGESTED", "AI kill switch is on — recommendations only");
 
-  // AUTO_CONTAIN: every guardrail must pass, otherwise a human decides.
-  if (ALWAYS_HUMAN.includes(input.actionType)) {
-    return { status: "PENDING_APPROVAL", effectiveAutonomy, reason: "This action always needs a human" };
-  }
-  if (!input.allowedActions.includes(input.actionType)) {
-    return { status: "PENDING_APPROVAL", effectiveAutonomy, reason: "Action isn't on the pre-approved list" };
-  }
-  if (input.confidence < input.minConfidence) {
-    return { status: "PENDING_APPROVAL", effectiveAutonomy, reason: `Confidence ${pct(input.confidence)} is below the ${pct(input.minConfidence)} bar` };
-  }
-  if (input.actionType === "ISOLATE_HOST" && input.endpointCriticality === "critical") {
-    return { status: "PENDING_APPROVAL", effectiveAutonomy, reason: "Business-critical endpoint — isolation needs approval" };
-  }
-  if (input.autoActionsLastHour >= input.maxAutoActionsPerHour) {
-    return { status: "PENDING_APPROVAL", effectiveAutonomy, reason: `Auto-containment limit reached (${input.maxAutoActionsPerHour}/hour for this client)` };
-  }
-  return { status: "EXECUTED", effectiveAutonomy, reason: `Pre-approved action at ${pct(input.confidence)} confidence` };
+  const plan = capOutcome(planCap);
+  if (plan !== "EXECUTED") add("plan", "plan.autonomyCap", plan, plan === "SUGGESTED" ? "The client's plan allows suggestions only" : "The client's plan requires approval for containment");
+  const consent = capOutcome(input.tenantCap);
+  if (consent !== "EXECUTED") add("consent", "tenant.aiAutonomyCap", consent, consent === "SUGGESTED" ? "Client's AI consent allows suggestions only" : "Client requires approval for containment");
+
+  for (const hit of input.rulebook?.hits ?? []) add("rulebook", hit.rule, hit.outcome, input.rulebook ? `${hit.reason} (rulebook v${input.rulebook.version})` : hit.reason);
+
+  const agent = capOutcome(input.autonomy);
+  if (agent === "SUGGESTED") add("agent", "agent.autonomy", "SUGGESTED", "Containment controller is set to suggest only");
+  else if (agent === "PENDING_APPROVAL") add("agent", "agent.autonomy", "PENDING_APPROVAL", "Containment requires analyst approval");
+  if (ALWAYS_HUMAN.includes(input.actionType)) add("agent", "agent.alwaysHuman", "PENDING_APPROVAL", "This action always needs a human");
+  if (!input.allowedActions.includes(input.actionType)) add("agent", "agent.allowedActions", "PENDING_APPROVAL", "Action isn't on the pre-approved list");
+  if (input.confidence < input.minConfidence) add("agent", "agent.minConfidence", "PENDING_APPROVAL", `Confidence ${pct(input.confidence)} is below the ${pct(input.minConfidence)} bar`);
+  if (input.actionType === "ISOLATE_HOST" && input.endpointCriticality === "critical") add("agent", "agent.criticalEndpoint", "PENDING_APPROVAL", "Business-critical endpoint — isolation needs approval");
+
+  if (input.autoActionsLastHour >= input.maxAutoActionsPerHour) add("rate_limit", "platform.maxAutoActionsPerHour", "PENDING_APPROVAL", `Auto-containment limit reached (${input.maxAutoActionsPerHour}/hour for this client)`);
+
+  const status = entries.reduce<Outcome>((worst, e) => (OUTCOME_RANK[e.outcome] < OUTCOME_RANK[worst] ? e.outcome : worst), "EXECUTED");
+  // The first rule (in precedence order) at the final outcome decides.
+  const decider = entries.find((e) => e.outcome === status);
+  const trace = decider ? [decider, ...entries.filter((e) => e !== decider)] : [];
+  const approvals = Math.max(1, ...(input.rulebook?.hits ?? []).map((h) => h.approvals ?? 1));
+  return {
+    status,
+    reason: decider?.reason ?? `Pre-approved action at ${pct(input.confidence)} confidence`,
+    effectiveAutonomy,
+    trace,
+    approvals,
+    policyVersion: input.rulebook?.version ?? null,
+    policyHash: input.rulebook?.hash ?? null,
+  };
 }

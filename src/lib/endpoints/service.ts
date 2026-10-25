@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { humanRulebookGate } from "@/lib/rulebook/service";
 import { logAction } from "@/lib/audit";
 import { getCatalogTool } from "@/lib/integrations/tools";
 import { dispatchAction } from "@/lib/integrations/dispatch";
@@ -125,6 +126,12 @@ function assetFields(r: InventoryRecord): { assetClass?: string; assetType?: str
 // path as case containment, recorded in the audit chain.
 export async function setEndpointIsolated(endpointId: string, isolate: boolean, actor: { id: string; name: string }) {
   const endpoint = await db.endpoint.findUniqueOrThrow({ where: { id: endpointId } });
+  if (isolate) {
+    // The client's rulebook binds direct isolation too.
+    const gate = await humanRulebookGate({ tenantId: endpoint.tenantId, actionType: "ISOLATE_HOST", target: endpoint.hostname, severity: "HIGH", fresh: true });
+    if (!gate.allowed) throw new Error(`${gate.reason} (rulebook v${gate.version})`);
+    if (gate.approvals > 1) throw new Error(`${gate.reason}: request it from a case so a second person can approve`);
+  }
   const result = await dispatchAction({ tenantId: endpoint.tenantId, actionType: isolate ? "ISOLATE_HOST" : "RELEASE_HOST", target: endpoint.hostname, caseRef: null });
   if (result.dispatched && !result.ok) throw new Error(result.message);
   await db.endpoint.update({

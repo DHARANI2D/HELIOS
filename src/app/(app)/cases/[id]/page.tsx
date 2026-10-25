@@ -16,6 +16,7 @@ import { resolveAgent } from "@/lib/ai/resolve";
 import { gatherEvidence } from "@/lib/ai/evidence";
 import { PROPOSABLE_ACTIONS, matchTarget, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
 import { ACTION_LABEL, ROLLBACK_OF } from "@/lib/response/executor";
+import { approvalsOf } from "@/lib/response/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TestBadge } from "@/components/shared/test-badge";
@@ -297,6 +298,10 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     manualBy: result?.manual?.by ?? null,
                     rollbackable: !!ROLLBACK_OF[a.actionType],
                     createdAt: a.createdAt.toISOString(),
+                    requiredApprovals: a.requiredApprovals,
+                    approvedBy: approvalsOf(a.approvals).map((x) => x.name),
+                    policyVersion: a.policyVersion,
+                    trace: Array.isArray(a.trace) ? (a.trace as Array<{ layer: string; reason: string }>).map((t) => ({ layer: String(t.layer), reason: String(t.reason) })) : [],
                   };
                 })}
               />

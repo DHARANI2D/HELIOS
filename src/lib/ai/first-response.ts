@@ -13,6 +13,7 @@ import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
 import { runReportAgent, runTriageAgent } from "@/lib/ai/agents";
 import { SEVERITY_FROM_AI, groundTriage, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
 import { decideResponse } from "@/lib/response/policy";
+import { rulebookVerdict } from "@/lib/rulebook/service";
 import { ACTION_LABEL } from "@/lib/response/executor";
 import { approversFor, markCaseAfterResponse, performResponseAction, recordResponseAction } from "@/lib/response/service";
 
@@ -162,7 +163,7 @@ async function applyTriage(
   engine: string,
   opts: DispatchOptions,
 ) {
-  const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { tenant: { select: { aiAutonomyCap: true } } } });
+  const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { tenant: { select: { aiAutonomyCap: true, plan: { select: { defaultAutonomyCap: true } } } } } });
   const [settings, controller] = await Promise.all([aiSettings(), loadProfile("containment")]);
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
@@ -178,6 +179,7 @@ async function applyTriage(
 
     const endpoint = proposed.action === "ISOLATE_HOST" ? await db.endpoint.findFirst({ where: { tenantId: kase.tenantId, hostname: { equals: target, mode: "insensitive" } }, select: { criticality: true } }) : null;
     const autoActionsLastHour = await db.responseAction.count({ where: { tenantId: kase.tenantId, source: "ai", status: "EXECUTED", createdAt: { gte: hourAgo } } });
+    const rulebook = await rulebookVerdict({ tenantId: kase.tenantId, actionType: proposed.action, target, severity: kase.severity });
     const decision = decideResponse({
       actionType: proposed.action,
       grounded: !!ground?.grounded,
@@ -186,7 +188,9 @@ async function applyTriage(
       autonomy: controller.enabled ? controller.autonomy : "SUGGEST",
       allowedActions: controller.allowedActions,
       minConfidence: controller.minConfidence,
+      planCap: kase.tenant?.plan?.defaultAutonomyCap,
       tenantCap: kase.tenant?.aiAutonomyCap ?? "AUTO_CONTAIN",
+      rulebook,
       endpointCriticality: endpoint?.criticality,
       autoActionsLastHour,
       maxAutoActionsPerHour: settings.maxAutoActionsPerHour,
@@ -203,6 +207,7 @@ async function applyTriage(
       policyReason: decision.reason,
       aiRunId: runId,
       requestedById: opts.requestedBy?.id,
+      decision,
     });
     if (decision.status === "EXECUTED") {
       await db.responseAction.update({ where: { id: action.id }, data: { decidedAt: new Date() } });

@@ -42,6 +42,9 @@ export interface IngestSummary {
   casesCreated: number;
   casesUpdated: number;
   caseIds: string[];
+  // Findings about entities on the client's allowlist (a known scanner, an
+  // admin tool), recorded as telemetry but not filed as cases.
+  allowlisted?: number;
 }
 
 function humanize(ruleId: string) {
@@ -192,8 +195,16 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
     fresh.push(d);
   });
 
+  // The client vouches for some activity (rulebook allowlist): those risk
+  // objects don't open cases.
+  const allowed = tenantId
+    ? await db.policyAllowlistEntry.findMany({ where: { tenantId, kind: { in: ["host", "ip", "user"] }, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }, select: { kind: true, value: true } })
+    : [];
+  const isAllowed = (d: ScoredDetection) => allowed.some((a) => a.kind === d.riskObjectType && a.value.toLowerCase() === String(d.riskObject).toLowerCase());
+  const allowlisted = fresh.filter(isAllowed).length;
+
   const groups = new Map<string, ScoredDetection[]>();
-  for (const d of fresh) {
+  for (const d of fresh.filter((x) => !isAllowed(x))) {
     const key = `${d.riskObjectType}:${d.riskObject}`;
     groups.set(key, [...(groups.get(key) ?? []), d]);
   }
@@ -254,6 +265,7 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
     casesCreated,
     casesUpdated,
     caseIds,
+    ...(allowlisted ? { allowlisted } : {}),
   };
   await logAction({
     actorId: options.actorId,

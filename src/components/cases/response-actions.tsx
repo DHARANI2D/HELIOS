@@ -28,6 +28,21 @@ export interface ResponseActionView {
   manualBy: string | null; // who confirmed doing it by hand
   rollbackable: boolean;
   createdAt: string;
+  // The two-person rule, and the client rulebook behind the decision.
+  requiredApprovals: number;
+  approvedBy: string[];
+  policyVersion: number | null;
+  trace: Array<{ layer: string; reason: string }>;
+}
+
+const LAYER_LABEL: Record<string, string> = {
+  grounding: "Evidence",
+  kill_switch: "Kill switch",
+  plan: "Plan",
+  consent: "Client consent",
+  rulebook: "Client rulebook",
+  agent: "Agent profile",
+  rate_limit: "Rate limit",
 }
 
 const STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "outline" | "soft" | "secondary"> = {
@@ -78,7 +93,10 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
 
   const decide = useMutation({
     mutationFn: ({ id, decision }: { id: string; decision: "approved" | "rejected" }) => decideResponseActionAction(id, decision),
-    onSuccess: (r) => refresh(r.status === "REJECTED" ? "Rejected" : r.status === "EXECUTED" ? "Approved and executed" : `Status: ${r.status.toLowerCase()}`),
+    onSuccess: (r) =>
+      refresh(
+        r.status === "REJECTED" ? "Rejected" : r.status === "EXECUTED" ? "Approved and executed" : r.status === "PENDING_APPROVAL" ? "Approved — it needs a second person" : r.status === "BLOCKED" ? "Blocked by the client's rulebook" : `Status: ${r.status.toLowerCase()}`,
+      ),
     onError,
   });
   const rollback = useMutation({
@@ -103,7 +121,15 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
       setTarget("");
       setRationale("");
       setOpen(false);
-      refresh(r.status === "EXECUTED" ? "Executed" : r.status === "MANUAL_REQUIRED" ? "No connector — carry it out by hand, then mark it done" : "Requested — waiting for approval");
+      refresh(
+        r.status === "EXECUTED"
+          ? "Executed"
+          : r.status === "MANUAL_REQUIRED"
+            ? "No connector — carry it out by hand, then mark it done"
+            : r.status === "BLOCKED"
+              ? "Blocked by the client's rulebook"
+              : "Requested — waiting for approval",
+      );
     },
     onError,
   });
@@ -126,6 +152,23 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
               {a.confidence != null && ` · ${Math.round(a.confidence * 100)}% confidence`} · {formatRelative(new Date(a.createdAt), nowDate)}
               {a.policyReason && <> · <span className="text-foreground/80">{a.policyReason}</span></>}
             </p>
+            {a.requiredApprovals > 1 && (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                Two-person rule: {a.approvedBy.length} of {a.requiredApprovals} approvals{a.approvedBy.length ? ` (${a.approvedBy.join(", ")})` : ""}
+              </p>
+            )}
+            {a.trace.length > 1 && (
+              <details className="mt-1 text-[11px] text-muted-foreground">
+                <summary className="cursor-pointer select-none">Why: {a.trace.length} rules applied{a.policyVersion ? ` · rulebook v${a.policyVersion}` : ""}</summary>
+                <ul className="mt-1 flex flex-col gap-0.5 pl-3">
+                  {a.trace.map((t, i) => (
+                    <li key={i}>
+                      <span className="font-medium text-foreground/80">{LAYER_LABEL[t.layer] ?? t.layer}:</span> {t.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {a.summary && (
               <p className={cn("mt-1 text-xs", a.status === "FAILED" ? "text-destructive" : "text-foreground/80")}>
                 {a.summary}
@@ -152,7 +195,7 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
               <div className="mt-2 flex gap-1.5">
                 <Button size="sm" className="h-7" onClick={() => decide.mutate({ id: a.id, decision: "approved" })} disabled={decide.isPending}>
                   {decide.isPending && decide.variables?.id === a.id && decide.variables.decision === "approved" ? <Loader2 className="animate-spin" /> : <Check />}
-                  {a.status === "SUGGESTED" ? "Run it" : "Approve"}
+                  {a.status === "SUGGESTED" ? "Run it" : a.requiredApprovals > 1 ? `Approve (${a.approvedBy.length + 1} of ${a.requiredApprovals})` : "Approve"}
                 </Button>
                 <Button size="sm" variant="outline" className="h-7" onClick={() => decide.mutate({ id: a.id, decision: "rejected" })} disabled={decide.isPending}>
                   <X /> {a.status === "SUGGESTED" ? "Dismiss" : "Reject"}

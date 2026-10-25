@@ -161,7 +161,7 @@ model Tenant {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  plan         ServicePlan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
+  plan         ServicePlan?           @relation(fields: [planId], references: [id], onDelete: SetNull)
   users        User[]
   cases        Case[]
   events       SecurityEvent[]
@@ -169,6 +169,8 @@ model Tenant {
   integrations Integration[]
   agents       Agent[]
   quotes       Quote[]
+  policies     OrgPolicy[]
+  allowlist    PolicyAllowlistEntry[]
 
   @@map("tenants")
 }
@@ -813,6 +815,62 @@ model AiRun {
 
 // One containment step on one target, proposed by an AI agent or requested
 // by an analyst, and gated by the response policy (src/lib/response/policy.ts).
+enum OrgPolicyStatus {
+  DRAFT
+  AWAITING_SIGNATURE
+  ACTIVE
+  SUPERSEDED
+}
+
+// A client's rulebook (lib/rulebook): what HELIOS may do on its estate,
+// versioned, hashed and signed by the client. One ACTIVE version at a time;
+// the response policy reads it on every decision.
+model OrgPolicy {
+  id             String          @id @default(cuid())
+  tenantId       String
+  version        Int
+  status         OrgPolicyStatus @default(DRAFT)
+  body           Json
+  contentHash    String
+  template       String?
+  reason         String?         @db.Text
+  authoredById   String?
+  authoredByName String
+  submittedAt    DateTime?
+  signedById     String?
+  signedByName   String?
+  signedAt       DateTime?
+  signatureNote  String?         @db.Text
+  effectiveFrom  DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, version])
+  @@index([tenantId, status])
+  @@map("org_policies")
+}
+
+// Known-good activity a client vouches for (a vulnerability scanner, an
+// admin tool, an expected job): each with an owner, a reason and an expiry.
+model PolicyAllowlistEntry {
+  id          String    @id @default(cuid())
+  tenantId    String
+  kind        String // ip | host | user | domain | hash | process | sender
+  value       String
+  reason      String
+  owner       String
+  expiresAt   DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, kind, value])
+  @@map("policy_allowlist")
+}
+
 enum ResponseActionStatus {
   SUGGESTED // recommendation only — autonomy doesn't allow acting
   PENDING_APPROVAL
@@ -827,23 +885,34 @@ enum ResponseActionStatus {
 }
 
 model ResponseAction {
-  id            String               @id @default(cuid())
-  caseId        String
-  tenantId      String?
-  actionType    PlaybookActionType
-  target        String?
-  parameters    Json?
-  source        String // ai | analyst
-  status        ResponseActionStatus
-  rationale     String?              @db.Text
-  confidence    Float?
-  policyReason  String?
-  aiRunId       String?
-  requestedById String?
-  decidedById   String?
-  decidedAt     DateTime?
-  result        Json?
-  createdAt     DateTime             @default(now())
+  id                String               @id @default(cuid())
+  caseId            String
+  tenantId          String?
+  actionType        PlaybookActionType
+  target            String?
+  parameters        Json?
+  source            String // ai | analyst
+  status            ResponseActionStatus
+  rationale         String?              @db.Text
+  confidence        Float?
+  policyReason      String?
+  aiRunId           String?
+  requestedById     String?
+  decidedById       String?
+  decidedAt         DateTime?
+  // The two-person rule: approvals needed, and who has approved so far
+  // ([{ id, name, at }]).
+  requiredApprovals Int                  @default(1)
+  approvals         Json?
+  // The client rulebook version that decided, and every rule that
+  // restricted the action (lib/response/policy.ts).
+  policyVersion     Int?
+  policyHash        String?
+  trace             Json?
+  // Where it is in the client's approver chain: { step, at, timedOut }.
+  escalation        Json?
+  result            Json?
+  createdAt         DateTime             @default(now())
 
   case  Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
   aiRun AiRun? @relation(fields: [aiRunId], references: [id], onDelete: SetNull)

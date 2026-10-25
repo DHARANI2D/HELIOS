@@ -14,7 +14,9 @@ import { buildScenarios } from "@/lib/__tests__/fixtures/governance/scenarios";
 import { agentForToken, issueAgentIdentity } from "@/lib/governance/agents";
 import { evaluateAgentAction } from "@/lib/governance/runtime";
 import { createCase } from "@/lib/cases/writer";
-import { completeManualAction, performResponseAction, recordResponseAction } from "@/lib/response/service";
+import { completeManualAction, decideResponseAction, performResponseAction, recordResponseAction, requestAnalystAction } from "@/lib/response/service";
+import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook } from "@/lib/rulebook/service";
+import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { onboardIntegration } from "@/lib/integrations/service";
 import { signPayload } from "@/lib/integrations/dispatch";
 import { invalidateCatalog } from "@/lib/integrations/tools";
@@ -295,6 +297,65 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(JSON.parse(req.body)).toMatchObject({ action: "ISOLATE_HOST", target: "TEST-CONN-01", case: { id: kase.id } });
     expect(req.headers["x-helios-signature"]).toBe(signPayload("test-secret", String(req.headers["x-helios-timestamp"]), req.body));
     expect(await db.endpoint.count({ where: { tenantId: tenant.id, hostname: "TEST-CONN-01", isolated: true } })).toBe(1);
+  });
+
+  it("applies the client's signed rulebook to AI, analysts and approvals", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Rulebook", slug: "test-rulebook", aiAutonomyCap: "AUTO_CONTAIN" } });
+    const author = { id: adminId, name: "Test Admin" };
+    const second = await db.user.create({ data: { email: "responder@test.local", name: "Second Responder", role: "INCIDENT_RESPONDER" } });
+    await db.endpoint.create({ data: { tenantId: tenant.id, hostname: "TEST-DC-01", assetClass: "server", assetType: "domain_controller", criticality: "critical" } });
+
+    // Saved, then signed on the client's behalf: only then does it apply.
+    const body = {
+      assets: { neverIsolate: [{ kind: "assetType", value: "domain_controller", note: "Domain controllers" }] },
+      identities: { breakGlass: ["break-glass*"] },
+      actions: { BLOCK_IP: { mode: "auto", autoFrom: "HIGH" } },
+      blastRadius: { twoPerson: ["DISABLE_USER"] },
+      approvers: { chain: [{ name: "Client CISO", contact: "ciso@test.local", channel: "phone", timeoutMinutes: 10 }], onTimeout: "suggest" },
+    };
+    await saveDraft(tenant.id, { body, reason: "Onboarding" }, author);
+    expect(await rulebookVerdict({ tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "TEST-DC-01", severity: "HIGH" })).toBeNull();
+    await expect(signRulebook(tenant.id, { ...author, isClient: false }, "short")).rejects.toThrow();
+    const v1 = await signRulebook(tenant.id, { ...author, isClient: false }, "Client CISO approved by email on 25 Oct");
+    expect(v1).toMatchObject({ status: "ACTIVE", version: 1 });
+    expect(await db.auditLog.count({ where: { action: "rulebook.activated" } })).toBe(1);
+
+    const verdict = await rulebookVerdict({ tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "TEST-DC-01", severity: "HIGH", fresh: true });
+    expect(verdict?.hits.find((h) => h.outcome === "BLOCKED")).toMatchObject({ rule: "assets.neverIsolate[0]", hard: true });
+
+    // An analyst can't isolate a never-isolate asset either.
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Rulebook case", severity: "HIGH", tenantId: tenant.id, deferPipelines: true, metadata: { hostName: "TEST-DC-01" } });
+    const blocked = await requestAnalystAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: "TEST-DC-01", actor: author, canApprove: true });
+    expect(blocked).toMatchObject({ status: "BLOCKED", policyVersion: 1 });
+    expect(await db.endpoint.count({ where: { hostname: "TEST-DC-01", isolated: true } })).toBe(0);
+    const glass = await requestAnalystAction({ caseId: kase.id, actionType: "DISABLE_USER", target: "CORP\\break-glass-1", actor: author, canApprove: true });
+    expect(glass.status).toBe("BLOCKED");
+
+    // Two people for disabling an account: the requester's approval is one.
+    const disable = await requestAnalystAction({ caseId: kase.id, actionType: "DISABLE_USER", target: "jdoe", actor: author, canApprove: true });
+    expect(disable).toMatchObject({ status: "PENDING_APPROVAL", requiredApprovals: 2 });
+    await expect(decideResponseAction(disable.id, "approved", author)).rejects.toThrow(/second person/);
+    const done = await decideResponseAction(disable.id, "approved", { id: second.id, name: "Second Responder" });
+    expect(done.status).toBe("MANUAL_REQUIRED");
+
+    // A pending AI proposal walks the approver chain, then times out to a suggestion.
+    const pending = await recordResponseAction({ caseId: kase.id, actionType: "BLOCK_IP", target: "203.0.113.50", source: "ai", status: "PENDING_APPROVAL" });
+    const created = (await db.responseAction.findUniqueOrThrow({ where: { id: pending.id } })).createdAt;
+    await escalatePendingApprovals(new Date(created.getTime() + 60_000));
+    expect((await db.responseAction.findUniqueOrThrow({ where: { id: pending.id } })).escalation).toMatchObject({ step: 0 });
+    await escalatePendingApprovals(new Date(created.getTime() + 11 * 60_000));
+    const timedOut = await db.responseAction.findUniqueOrThrow({ where: { id: pending.id } });
+    expect(timedOut.status).toBe("SUGGESTED");
+    expect(timedOut.policyReason).toContain("downgraded to a suggestion");
+
+    // Allowlisted entities don't open cases.
+    await addAllowlistEntry(tenant.id, { kind: "ip", value: "10.9.9.9", reason: "Vulnerability scanner", owner: "Client IT", expiresAt: null }, author);
+    const scan = (ip: string) => Array.from({ length: 15 }, (_, i) => ({ source: "network" as const, data: { timestamp: new Date(Date.now() - i * 1000).toISOString(), src_ip: ip, dst_ip: "10.0.0.5", dst_port: 1000 + i } }));
+    const control = await ingestTelemetry(scan("10.9.9.8"), { tenantId: tenant.id });
+    expect(control.casesCreated).toBeGreaterThan(0);
+    const allowed = await ingestTelemetry(scan("10.9.9.9"), { tenantId: tenant.id });
+    expect(allowed).toMatchObject({ casesCreated: 0, casesUpdated: 0 });
+    expect(allowed.allowlisted).toBeGreaterThan(0);
   });
 
   it("imports a threat feed, matches it in detection, and drops delisted entries", async () => {

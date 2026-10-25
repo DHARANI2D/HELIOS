@@ -3,6 +3,8 @@ import type { PlaybookActionType, ResponseActionStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { notify, staffFor } from "@/lib/notifications";
+import type { PolicyDecision } from "@/lib/response/policy";
+import { humanRulebookGate } from "@/lib/rulebook/service";
 import { ACTION_LABEL, CONTAINMENT_ACTIONS, ROLLBACK_OF, buildActionContext, executeAction, setEndpointIsolation, type ActionResult } from "@/lib/response/executor";
 
 // Lifecycle of individual response actions (ResponseAction rows): proposed by
@@ -35,6 +37,16 @@ export interface Actor {
   name: string;
 }
 
+interface ApprovalMark {
+  id: string;
+  name: string;
+  at: string;
+}
+
+export function approvalsOf(value: unknown): ApprovalMark[] {
+  return Array.isArray(value) ? value.filter((a): a is ApprovalMark => !!a && typeof a === "object" && typeof (a as ApprovalMark).id === "string") : [];
+}
+
 export async function approversFor(caseId: string) {
   const kase = await db.case.findUnique({ where: { id: caseId }, select: { domain: true, tenantId: true } });
   if (!kase) return [];
@@ -57,9 +69,20 @@ export async function recordResponseAction(input: {
   aiRunId?: string | null;
   requestedById?: string | null;
   parameters?: Record<string, string>;
+  // The policy decision behind it: rulebook version, trace, approvals needed.
+  decision?: Pick<PolicyDecision, "trace" | "approvals" | "policyVersion" | "policyHash">;
 }) {
+  const { decision, ...data } = input;
   const kase = await db.case.findUniqueOrThrow({ where: { id: input.caseId }, select: { tenantId: true } });
-  return db.responseAction.create({ data: { ...input, tenantId: kase.tenantId } });
+  return db.responseAction.create({
+    data: {
+      ...data,
+      tenantId: kase.tenantId,
+      ...(decision
+        ? { trace: JSON.parse(JSON.stringify(decision.trace)), requiredApprovals: decision.approvals, policyVersion: decision.policyVersion, policyHash: decision.policyHash }
+        : {}),
+    },
+  });
 }
 
 async function markCaseAfterResponse(caseId: string) {
@@ -92,12 +115,18 @@ export async function performResponseAction(actionId: string, actor: Actor) {
 
   let result: ActionResult;
   try {
-    result = await executeAction({ name: ACTION_LABEL[action.actionType], actionType: action.actionType, params }, kase, ctx, actor.name);
+    const approvals = Math.max(1, approvalsOf(action.approvals).length);
+    result = await executeAction({ name: ACTION_LABEL[action.actionType], actionType: action.actionType, params, approvals }, kase, ctx, actor.name);
   } catch (err) {
     result = { action: ACTION_LABEL[action.actionType], actionType: action.actionType, status: "failed", summary: err instanceof Error ? err.message : String(err) };
   }
-  const status: ResponseActionStatus = result.status === "succeeded" ? "EXECUTED" : result.status === "manual" ? "MANUAL_REQUIRED" : "FAILED";
-  const updated = await db.responseAction.update({ where: { id: actionId }, data: { status, result: JSON.parse(JSON.stringify(result)) } });
+  // A rulebook refusal at the moment of acting (the rules may have changed
+  // while it waited for approval) blocks it rather than failing it.
+  const status: ResponseActionStatus = result.blocked ? "BLOCKED" : result.status === "succeeded" ? "EXECUTED" : result.status === "manual" ? "MANUAL_REQUIRED" : "FAILED";
+  const updated = await db.responseAction.update({
+    where: { id: actionId },
+    data: { status, result: JSON.parse(JSON.stringify(result)), ...(result.blocked ? { policyReason: result.summary } : {}) },
+  });
 
   await db.timelineEntry.create({
     data: {
@@ -112,7 +141,7 @@ export async function performResponseAction(actionId: string, actor: Actor) {
   await logAction({
     actorId: actor.id,
     caseId: kase.id,
-    action: status === "EXECUTED" ? "response.executed" : status === "MANUAL_REQUIRED" ? "response.manual_required" : "response.failed",
+    action: status === "EXECUTED" ? "response.executed" : status === "MANUAL_REQUIRED" ? "response.manual_required" : status === "BLOCKED" ? "response.blocked" : "response.failed",
     detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, source: action.source, summary: result.summary },
   });
   if (status === "EXECUTED") await completeRollbackOf(action.parameters);
@@ -170,11 +199,19 @@ export async function completeManualAction(actionId: string, actor: Actor & { id
 export async function decideResponseAction(actionId: string, decision: "approved" | "rejected", approver: Actor & { id: string }, note?: string) {
   const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId } });
   if (action.status !== "PENDING_APPROVAL" && action.status !== "SUGGESTED") throw new Error("Action is not awaiting a decision");
+  const approvals = approvalsOf(action.approvals);
+  if (decision === "approved" && approvals.some((a) => a.id === approver.id)) throw new Error("You've already approved this; it needs a second person");
+  const nextApprovals = decision === "approved" ? [...approvals, { id: approver.id, name: approver.name, at: new Date().toISOString() }] : approvals;
   await db.responseAction.update({
     where: { id: actionId },
-    data: { decidedById: approver.id, decidedAt: new Date(), policyReason: note ? `${action.policyReason ?? ""}${action.policyReason ? " · " : ""}${decision} by ${approver.name}: ${note}` : action.policyReason },
+    data: {
+      decidedById: approver.id,
+      decidedAt: new Date(),
+      approvals: JSON.parse(JSON.stringify(nextApprovals)),
+      policyReason: note ? `${action.policyReason ?? ""}${action.policyReason ? " · " : ""}${decision} by ${approver.name}: ${note}` : action.policyReason,
+    },
   });
-  await logAction({ actorId: approver.id, caseId: action.caseId, action: `response.${decision}`, detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, note } });
+  await logAction({ actorId: approver.id, caseId: action.caseId, action: `response.${decision}`, detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, note, approvals: nextApprovals.length, required: action.requiredApprovals } });
 
   if (action.requestedById && action.requestedById !== approver.id) {
     await notify([action.requestedById], {
@@ -190,6 +227,19 @@ export async function decideResponseAction(actionId: string, decision: "approved
     const rejected = await db.responseAction.update({ where: { id: actionId }, data: { status: "REJECTED" } });
     await markCaseAfterResponse(action.caseId);
     return rejected;
+  }
+  // The two-person rule: wait for another approver.
+  if (nextApprovals.length < action.requiredApprovals) {
+    const waiting = await db.responseAction.update({ where: { id: actionId }, data: { status: "PENDING_APPROVAL" } });
+    await notify(await approversFor(action.caseId), {
+      kind: "approval",
+      title: `Second approval needed: ${ACTION_LABEL[action.actionType]} ${action.target ?? ""}`,
+      body: `${approver.name} approved; the client's rulebook needs ${action.requiredApprovals} people.`,
+      caseId: action.caseId,
+      actorName: approver.name,
+    }, { exclude: approver.id });
+    await markCaseAfterResponse(action.caseId);
+    return waiting;
   }
   return performResponseAction(actionId, approver);
 }
@@ -216,6 +266,26 @@ export async function rollbackResponseAction(actionId: string, actor: Actor & { 
 // An analyst asks for one action directly. People who may approve
 // containment run it straight away; everyone else queues it for approval.
 export async function requestAnalystAction(input: { caseId: string; actionType: PlaybookActionType; target: string; rationale?: string; actor: Actor & { id: string }; canApprove: boolean }) {
+  const kase = await db.case.findUniqueOrThrow({ where: { id: input.caseId }, select: { tenantId: true, severity: true } });
+  // The client's rulebook binds analysts too: a forbidden action is recorded
+  // as blocked, and the two-person rule sets how many approvals it needs.
+  const gate = await humanRulebookGate({ tenantId: kase.tenantId, actionType: input.actionType, target: input.target, severity: kase.severity });
+  if (!gate.allowed) {
+    const blocked = await recordResponseAction({
+      caseId: input.caseId,
+      actionType: input.actionType,
+      target: input.target,
+      source: "analyst",
+      status: "BLOCKED",
+      rationale: input.rationale ?? null,
+      policyReason: `${gate.reason} (rulebook v${gate.version})`,
+      requestedById: input.actor.id,
+      decision: { trace: [{ layer: "rulebook", rule: "hard", outcome: "BLOCKED", reason: gate.reason ?? "" }], approvals: 1, policyVersion: gate.version, policyHash: gate.hash },
+    });
+    await logAction({ actorId: input.actor.id, caseId: input.caseId, action: "response.blocked", detail: { responseActionId: blocked.id, actionType: input.actionType, target: input.target, reason: gate.reason, rulebookVersion: gate.version } });
+    return blocked;
+  }
+  const twoPerson = gate.approvals > 1;
   const action = await recordResponseAction({
     caseId: input.caseId,
     actionType: input.actionType,
@@ -223,13 +293,24 @@ export async function requestAnalystAction(input: { caseId: string; actionType: 
     source: "analyst",
     status: "PENDING_APPROVAL",
     rationale: input.rationale ?? null,
-    policyReason: input.canApprove ? `Requested and approved by ${input.actor.name}` : `Requested by ${input.actor.name}`,
+    policyReason: input.canApprove ? `Requested and approved by ${input.actor.name}${twoPerson ? `; ${gate.reason}` : ""}` : `Requested by ${input.actor.name}${twoPerson ? `; ${gate.reason}` : ""}`,
     requestedById: input.actor.id,
+    decision: { trace: [], approvals: gate.approvals, policyVersion: gate.version, policyHash: gate.hash },
   });
-  await logAction({ actorId: input.actor.id, caseId: input.caseId, action: "response.requested", detail: { responseActionId: action.id, actionType: input.actionType, target: input.target } });
+  await logAction({ actorId: input.actor.id, caseId: input.caseId, action: "response.requested", detail: { responseActionId: action.id, actionType: input.actionType, target: input.target, requiredApprovals: gate.approvals } });
   if (input.canApprove) {
-    await db.responseAction.update({ where: { id: action.id }, data: { decidedById: input.actor.id, decidedAt: new Date() } });
-    return performResponseAction(action.id, input.actor);
+    const approvals = [{ id: input.actor.id, name: input.actor.name, at: new Date().toISOString() }];
+    await db.responseAction.update({ where: { id: action.id }, data: { decidedById: input.actor.id, decidedAt: new Date(), approvals } });
+    if (!twoPerson) return performResponseAction(action.id, input.actor);
+    await markCaseAfterResponse(input.caseId);
+    await notify(await approversFor(input.caseId), {
+      kind: "approval",
+      title: `Second approval needed: ${ACTION_LABEL[input.actionType]} ${input.target}`,
+      body: `${input.actor.name} asked for and approved it; the client's rulebook needs ${gate.approvals} people.`,
+      caseId: input.caseId,
+      actorName: input.actor.name,
+    }, { exclude: input.actor.id });
+    return db.responseAction.findUniqueOrThrow({ where: { id: action.id } });
   }
   await markCaseAfterResponse(input.caseId);
   await notify(await approversFor(input.caseId), {
