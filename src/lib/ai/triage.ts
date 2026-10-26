@@ -215,7 +215,11 @@ export function builtinTriage(ev: CaseEvidence): TriageOutput {
   const vendorEndpoint = sources.has("VENDOR_ALERT") && severe && ev.domain === "ENDPOINT";
   const vendorIdentity = sources.has("VENDOR_ALERT") && severe && ev.domain === "IDENTITY";
 
-  if (verdict === "true_positive" || verdict === "suspicious") {
+  // When the originating module judged the activity benign and nothing
+  // high-severity fired (an approved change, a known scanner), it stays a
+  // question for the analyst rather than a containment proposal.
+  const vouched = (moduleVerdict === "benign" || moduleVerdict === "clean") && highDetections.length === 0;
+  if ((verdict === "true_positive" || verdict === "suspicious") && !vouched) {
     if ([...sources].some((s) => HOST_SOURCES.includes(s)) || vendorEndpoint || (ev.sourceType === "SOC_INVESTIGATION" && verdict === "true_positive")) {
       for (const host of ev.entities.hosts.slice(0, 2)) add("ISOLATE_HOST", host, "Host shows post-exploitation behavior (persistence, lateral movement or impact)", severe ? "immediate" : "soon");
     }

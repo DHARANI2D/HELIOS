@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 import type { PlaybookActionType } from "@prisma/client";
 
@@ -13,6 +14,7 @@ import { AGENT_KEYS, AGENT_TYPES, PROVIDER_PRESETS, type AgentKey } from "@/lib/
 import { providerFromRow } from "@/lib/ai/resolve";
 import { anthropicProvider } from "@/lib/ai/anthropic";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
+import { startEvaluation } from "@/lib/ai/evals/service";
 
 function revalidate() {
   revalidatePath("/ai");
@@ -153,4 +155,28 @@ export async function saveAgentProfileAction(input: z.input<typeof profileSchema
   await db.aiAgentProfile.upsert({ where: { key: p.key }, update: data, create: { key: p.key, ...data } });
   await logAction({ actorId: user.id, action: "ai.profile_updated", detail: { ...p, instructions: p.instructions ? `${p.instructions.length} chars` : null } });
   revalidate();
+}
+
+const evalSchema = z.object({
+  target: z.union([z.object({ kind: z.literal("builtin") }), z.object({ kind: z.literal("env") }), z.object({ kind: z.literal("provider"), id: z.string().min(1) })]),
+  agentKey: z.enum(["triage", "phishing", "threat_intel"]),
+});
+
+// Scores a model on the golden set. The built-in engine takes a moment and
+// returns its scorecard; a model takes a call per case, so it finishes after
+// the response and the page shows it running until then.
+export async function runEvaluationAction(input: z.input<typeof evalSchema>) {
+  const user = await requirePermission("ai.configure");
+  const { target, agentKey } = evalSchema.parse(input);
+  // Client providers too: staff who configure AI manage every client's.
+  if (target.kind === "provider" && !(await db.aiProvider.count({ where: { id: target.id } }))) throw new Error("Not found");
+  const { model, done } = await startEvaluation(target, agentKey, user.id);
+  if (target.kind === "builtin") {
+    const card = await done;
+    revalidate();
+    return { model, finished: true, passed: card.passed, score: card.score };
+  }
+  after(() => done.catch((err) => console.error("evaluation failed", model, err)));
+  revalidate();
+  return { model, finished: false, passed: null, score: null };
 }

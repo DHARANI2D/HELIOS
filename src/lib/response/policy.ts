@@ -8,7 +8,7 @@ import { levelCap } from "@/lib/shadow/ladder";
 // Deterministic and side-effect free so it can be tested exhaustively: the
 // model proposes, this policy disposes. Each layer sets a ceiling and the
 // most restrictive one wins, in a fixed order of precedence:
-//   grounding → kill switch → circuit breaker → plan → client consent → client rulebook →
+//   grounding → AI safety → kill switch → circuit breaker → plan → client consent → client rulebook →
 //   autonomy ladder → agent profile → the model's evaluation → rate limit.
 // Every decision carries the reason shown to analysts and written to the
 // audit chain, and a trace naming every rule that restricted it.
@@ -34,6 +34,10 @@ export interface PolicyInput {
   rulebook?: { version: number; hash: string; hits: RuleHit[] } | null;
   // The client's autonomy ladder for this action (lib/shadow), when started.
   ladder?: { level: number } | null;
+  // The case's evidence contains text aimed at the AI (lib/ai/safety).
+  manipulated?: { reason: string } | null;
+  // A host target the client's asset inventory doesn't know.
+  targetUnknown?: boolean;
   // A model the client picked that hasn't passed its evaluation.
   modelCap?: { autonomy: AiAutonomy; reason: string } | null;
   // For host actions: the endpoint's business criticality.
@@ -42,7 +46,7 @@ export interface PolicyInput {
   maxAutoActionsPerHour: number;
 }
 
-export type PolicyLayer = "grounding" | "kill_switch" | "circuit_breaker" | "plan" | "consent" | "rulebook" | "ladder" | "agent" | "model" | "rate_limit";
+export type PolicyLayer = "grounding" | "ai_safety" | "kill_switch" | "circuit_breaker" | "plan" | "consent" | "rulebook" | "ladder" | "agent" | "model" | "rate_limit";
 
 export interface TraceEntry {
   layer: PolicyLayer;
@@ -78,6 +82,7 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
   const add = (layer: PolicyLayer, rule: string, outcome: Outcome, reason: string) => entries.push({ layer, rule, outcome, reason });
 
   if (!input.grounded) add("grounding", "grounding", "BLOCKED", "Target doesn't appear in this case's evidence — the agent may have hallucinated it");
+  if (input.manipulated) add("ai_safety", "evidence.injection", "PENDING_APPROVAL", `The evidence contains text aimed at the AI (${input.manipulated.reason}); a person decides`);
   if (input.killSwitch) add("kill_switch", "killSwitch", "SUGGESTED", "AI kill switch is on — recommendations only");
   if (input.paused) add("circuit_breaker", "tenant.automationPaused", "PENDING_APPROVAL", `Automatic containment is paused for this client (${input.paused.reason}); a person decides`);
 
@@ -99,6 +104,7 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
   if (ALWAYS_HUMAN.includes(input.actionType)) add("agent", "agent.alwaysHuman", "PENDING_APPROVAL", "This action always needs a human");
   if (!input.allowedActions.includes(input.actionType)) add("agent", "agent.allowedActions", "PENDING_APPROVAL", "Action isn't on the pre-approved list");
   if (input.confidence < input.minConfidence) add("agent", "agent.minConfidence", "PENDING_APPROVAL", `Confidence ${pct(input.confidence)} is below the ${pct(input.minConfidence)} bar`);
+  if (input.targetUnknown) add("agent", "agent.targetInInventory", "PENDING_APPROVAL", "The host isn't in the client's asset inventory — isolation needs approval");
   if (input.actionType === "ISOLATE_HOST" && input.endpointCriticality === "critical") add("agent", "agent.criticalEndpoint", "PENDING_APPROVAL", "Business-critical endpoint — isolation needs approval");
 
   if (input.modelCap) {

@@ -11,8 +11,8 @@ import { aiCostOf } from "@/lib/pricing/service";
 import { gatherEvidence } from "@/lib/ai/evidence";
 import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
 import { withRedaction } from "@/lib/ai/gateway";
-import { runReportAgent, runTriageAgent } from "@/lib/ai/agents";
-import { SEVERITY_FROM_AI, groundTriage, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
+import { analyzeCase, runReportAgent, type CaseAnalysis } from "@/lib/ai/agents";
+import { SEVERITY_FROM_AI, type TriageOutput } from "@/lib/ai/triage";
 import { decideResponse } from "@/lib/response/policy";
 import { rulebookVerdict } from "@/lib/rulebook/service";
 import { ladderFor, observing } from "@/lib/shadow/service";
@@ -124,8 +124,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
       return run;
     }
 
-    const outcome = await runTriageAgent(key, evidence, profile, provider);
-    const { output, report } = groundTriage(outcome.output, evidence);
+    const { outcome, output, report, manipulated } = await analyzeCase(key, evidence, profile, provider);
     const run = await db.aiRun.create({
       data: {
         caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
@@ -137,7 +136,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
     // A client-picked model that hasn't passed its evaluation only suggests;
     // the built-in engine (after a fallback) isn't capped by it.
     const modelCap = resolved.autonomyCap && outcome.engine !== "built-in" ? { autonomy: resolved.autonomyCap, reason: resolution?.capReason ?? "Model not evaluated" } : null;
-    const { statuses, silent } = await applyTriage(caseId, run.id, output, report, profile.name, outcome.engine, opts, modelCap);
+    const { statuses, silent } = await applyTriage(caseId, run.id, output, report, profile.name, outcome.engine, opts, modelCap, manipulated);
     // Shadow-mode runs stay out of sight on the case until it closes.
     if (silent) await db.aiRun.update({ where: { id: run.id }, data: { resolution: { ...((runScope.resolution as object | undefined) ?? {}), shadow: true } } });
     await finishRun(caseId, key, run.id, outcome.engine, outcome.model, outcome.status, opts, { verdict: output.verdict, confidence: output.confidence, actions: statuses, grounding: report.notes });
@@ -172,11 +171,12 @@ async function applyTriage(
   caseId: string,
   runId: string,
   output: TriageOutput,
-  report: GroundingReport,
+  report: CaseAnalysis["report"],
   agentName: string,
   engine: string,
   opts: DispatchOptions,
   modelCap: { autonomy: "SUGGEST"; reason: string } | null = null,
+  manipulated = false,
 ) {
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, include: { tenant: { select: { aiAutonomyCap: true, plan: { select: { defaultAutonomyCap: true } } } } } });
   const [settings, controller, ladder, paused] = await Promise.all([aiSettings(), loadProfile("containment"), ladderFor(kase.tenantId), circuitBreakerFor(kase.tenantId)]);
@@ -196,6 +196,8 @@ async function applyTriage(
     if (duplicate) continue;
 
     const endpoint = proposed.action === "ISOLATE_HOST" ? await db.endpoint.findFirst({ where: { tenantId: kase.tenantId, hostname: { equals: target, mode: "insensitive" } }, select: { criticality: true } }) : null;
+    // A host the client's inventory doesn't know is never isolated automatically.
+    const targetUnknown = proposed.action === "ISOLATE_HOST" && !!kase.tenantId && !endpoint;
     const autoActionsLastHour = await db.responseAction.count({ where: { tenantId: kase.tenantId, source: "ai", status: "EXECUTED", createdAt: { gte: hourAgo } } });
     const rulebook = await rulebookVerdict({ tenantId: kase.tenantId, actionType: proposed.action, target, severity: kase.severity });
     const level = ladder?.get(proposed.action) ?? null;
@@ -214,6 +216,8 @@ async function applyTriage(
       // Level 0 is decided as if allowed and recorded as shadow below.
       ladder: level != null && level > 0 ? { level } : null,
       modelCap,
+      manipulated: manipulated ? { reason: report.injection.map((f) => f.ref).slice(0, 3).join(", ") } : null,
+      targetUnknown,
       endpointCriticality: endpoint?.criticality,
       autoActionsLastHour,
       maxAutoActionsPerHour: settings.maxAutoActionsPerHour,
@@ -272,6 +276,13 @@ async function applyTriage(
       pendingLabels.push(`${ACTION_LABEL[proposed.action]} ${target}`);
     }
     statuses.push({ action: proposed.action, target, status: decision.status, reason: decision.reason });
+  }
+
+  const injection = report.injection;
+  if (injection.length) {
+    await db.timelineEntry.create({
+      data: { caseId, occurredAt: new Date(), actor: agentName, action: "ai.manipulation_suspected", detail: `Evidence contains text aimed at the AI: ${injection.slice(0, 3).map((f) => `${f.ref} "${f.excerpt}"`).join("; ")}`, evidence: { runId, injection: JSON.parse(JSON.stringify(injection)) } },
+    });
   }
 
   if (silent) {

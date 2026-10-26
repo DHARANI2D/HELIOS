@@ -39,6 +39,7 @@ export interface ResponseActionView {
 
 const LAYER_LABEL: Record<string, string> = {
   grounding: "Evidence",
+  ai_safety: "AI safety",
   kill_switch: "Kill switch",
   circuit_breaker: "Circuit breaker",
   plan: "Plan",

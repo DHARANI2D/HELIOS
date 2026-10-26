@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Bot, CircleDollarSign, Gauge, ShieldBan, ShieldCheck, ThumbsUp } from "lucide-react";
+import { Bot, CircleDollarSign, FlaskConical, Gauge, ShieldBan, ShieldCheck, ThumbsUp } from "lucide-react";
+
+import { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -20,6 +22,36 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SafetyControls } from "@/components/ai/safety-controls";
 import { ProvidersPanel } from "@/components/ai/providers-panel";
 import { AgentProfileCard } from "@/components/ai/agent-profiles";
+import { EvaluationsPanel, type CaseResultView, type EvalTargetView, type ScorecardView } from "@/components/ai/evaluations-panel";
+import { GOLDEN } from "@/lib/ai/evals/golden";
+import { PASS } from "@/lib/ai/evals/run";
+import { runningEvaluations } from "@/lib/ai/evals/service";
+
+const EVAL_AGENTS = ["triage", "phishing", "threat_intel"] as const;
+type EvalAgent = (typeof EVAL_AGENTS)[number];
+
+// Scorecards, what can be evaluated, and which models clients or users
+// picked (those only suggest until they pass).
+async function loadEvaluations() {
+  const [capabilities, clientProviders, policies, users] = await Promise.all([
+    db.modelCapability.findMany({ orderBy: [{ evaluatedAt: "desc" }] }),
+    db.aiProvider.findMany({ where: { tenantId: { not: null }, enabled: true }, orderBy: { name: "asc" } }),
+    db.tenantAiPolicy.findMany({ include: { tenant: { select: { name: true } } } }),
+    db.user.findMany({ where: { NOT: { preferences: { equals: Prisma.DbNull } } }, select: { name: true, email: true, preferences: true } }),
+  ]);
+  const providers = new Map((await db.aiProvider.findMany({ select: { id: true, model: true } })).map((p) => [p.id, p.model]));
+  // model:agent → who picked it
+  const picks = new Map<string, Set<string>>();
+  const pick = (providerId: unknown, agent: string, who: string) => {
+    const model = typeof providerId === "string" ? providers.get(providerId) : undefined;
+    if (!model || !(EVAL_AGENTS as readonly string[]).includes(agent)) return;
+    const key = `${model}:${agent}`;
+    picks.set(key, (picks.get(key) ?? new Set()).add(who));
+  };
+  for (const p of policies) for (const [agent, id] of Object.entries((p.defaults as Record<string, unknown> | null) ?? {})) pick(id, agent, p.tenant.name);
+  for (const u of users) for (const [agent, id] of Object.entries((u.preferences as { aiModels?: Record<string, unknown> } | null)?.aiModels ?? {})) pick(id, agent, u.name ?? u.email);
+  return { capabilities, clientProviders, picks };
+}
 
 async function loadAiPage(visibility: ReturnType<typeof caseVisibility>) {
   const now = new Date();
@@ -50,7 +82,7 @@ async function loadAiPage(visibility: ReturnType<typeof caseVisibility>) {
 export default async function AiPage() {
   const user = await pageGuard("ai.view");
   const canConfigure = can(user, "ai.configure");
-  const { now, settings, providers, runs, recent, feedback, executed, blocked, profilesUsage, profiles } = await loadAiPage(caseVisibility(user));
+  const [{ now, settings, providers, runs, recent, feedback, executed, blocked, profilesUsage, profiles }, evals] = await Promise.all([loadAiPage(caseVisibility(user)), loadEvaluations()]);
 
   const spend = await aiCostOf(runs);
   const agree = feedback.find((f) => f.feedback === "agree")?._count._all ?? 0;
@@ -59,6 +91,44 @@ export default async function AiPage() {
   const fallbacks = runs.filter((r) => r.status === "fallback").length;
   const runsByAgent = new Map(profilesUsage.map((p) => [p.agentKey, p._count._all]));
   const providerOptions = providers.filter((p) => p.enabled).map((p) => ({ id: p.id, name: p.name, model: p.model, isLocal: p.isLocal }));
+
+  const envModel = process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
+  const evalTargets: EvalTargetView[] = [
+    { value: "builtin", target: { kind: "builtin" }, label: "Built-in engine", model: "built-in" },
+    ...(envClaudeAvailable() ? [{ value: "env", target: { kind: "env" as const }, label: "Claude (environment key)", model: envModel }] : []),
+    ...[...providers.filter((p) => p.enabled), ...evals.clientProviders].map((p) => ({ value: p.id, target: { kind: "provider" as const, id: p.id }, label: p.name, model: p.model })),
+  ];
+  const labelOf = new Map(evalTargets.map((t) => [t.value, `${t.label} · ${t.model}`]));
+  const running = [...runningEvaluations()].map(([key, startedAt]) => {
+    const [value, agent] = key.split(":");
+    return { key, label: `${labelOf.get(value) ?? value} · ${AGENT_TYPES[agent as EvalAgent]?.name ?? agent}`, startedAt: startedAt.toISOString() };
+  });
+  const scorecards: ScorecardView[] = evals.capabilities.map((c) => {
+    const d = (c.details ?? {}) as Partial<{ verdictAccuracy: number; actionRecall: number; falseContainments: number; injectionFailures: number; reasons: string[]; results: CaseResultView[] }>;
+    return {
+      model: c.model,
+      agentKey: c.agentKey as EvalAgent,
+      score: c.score,
+      passed: c.passed,
+      cases: c.cases,
+      evaluatedAt: c.evaluatedAt.toISOString(),
+      verdictAccuracy: d.verdictAccuracy ?? null,
+      actionRecall: d.actionRecall ?? null,
+      falseContainments: d.falseContainments ?? null,
+      injectionFailures: d.injectionFailures ?? null,
+      reasons: d.reasons ?? [],
+      results: d.results ?? [],
+      inUse: [...(evals.picks.get(`${c.model}:${c.agentKey}`) ?? [])],
+    };
+  });
+  const passing = new Set(evals.capabilities.filter((c) => c.passed).map((c) => `${c.model}:${c.agentKey}`));
+  const unevaluated = [...evals.picks]
+    .filter(([key]) => !passing.has(key))
+    .map(([key, who]) => {
+      const i = key.lastIndexOf(":");
+      return `${key.slice(0, i)} for ${AGENT_TYPES[key.slice(i + 1) as EvalAgent].name} (${[...who].join(", ")})`;
+    });
+  const byKind = GOLDEN.reduce<Record<string, number>>((m, g) => ({ ...m, [g.kind]: (m[g.kind] ?? 0) + 1 }), {});
 
   return (
     <div className="flex flex-col gap-6">
@@ -145,6 +215,25 @@ export default async function AiPage() {
               }}
             />
           ))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><FlaskConical className="size-4" /> Evaluations</CardTitle>
+          <CardDescription>How each model does on the golden set, before it may act on its own.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <EvaluationsPanel
+            targets={evalTargets}
+            scorecards={scorecards}
+            running={running}
+            golden={{ total: GOLDEN.length, byKind, why: Object.fromEntries(GOLDEN.map((g) => [g.id, g.why])) }}
+            pass={{ verdictAccuracy: PASS.verdictAccuracy, actionRecall: PASS.actionRecall }}
+            unevaluated={unevaluated}
+            now={now.toISOString()}
+            canConfigure={canConfigure}
+          />
         </CardContent>
       </Card>
 

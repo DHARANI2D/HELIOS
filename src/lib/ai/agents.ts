@@ -3,7 +3,8 @@ import type { CaseEvidence } from "@/lib/ai/evidence";
 import { renderEvidence } from "@/lib/ai/evidence";
 import type { LlmProvider, LlmUsage } from "@/lib/ai/provider";
 import type { AgentProfileView } from "@/lib/ai/resolve";
-import { TriageSchema, builtinTriage, normalizeTriage, type TriageOutput } from "@/lib/ai/triage";
+import { TriageSchema, builtinTriage, groundTriage, normalizeTriage, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
+import { UNTRUSTED_RULES, holdDowngrades, scanForInjection, type InjectionFinding } from "@/lib/ai/safety";
 
 // Case-level agents: the triage first responder and its specialist variants
 // (phishing analyst, threat-intel enricher) share one output contract; the
@@ -13,7 +14,9 @@ import { TriageSchema, builtinTriage, normalizeTriage, type TriageOutput } from 
 const SOC_CONTEXT =
   "You work inside a managed security operations center (MSSP/MDR) that protects client organizations. The case data below was collected by the SOC from the client's own security tools for defensive incident response. Base every statement on the supplied evidence and never invent hosts, accounts, IPs, hashes, or timestamps.";
 
-const TRIAGE_RULES = `Rules:
+const TRIAGE_RULES = `${UNTRUSTED_RULES}
+
+Rules:
 - Cite evidence ids (D1, E4, I2, T3, C1) for every key finding. A finding you can't cite doesn't belong in the output.
 - Recommend containment only against targets listed in <entities>, spelled exactly as they appear there. Prefer the least disruptive action that stops the threat; recommend nothing when the evidence doesn't justify it.
 - A human analyst does the primary analysis after you: be explicit about what you are unsure of in analyst_next_steps.
@@ -124,7 +127,7 @@ export async function runReportAgent(
   if (provider) {
     try {
       const res = await provider.text({
-        system: `${SOC_CONTEXT}\n\nRole: client communications lead at the SOC. Write a short incident summary for the client's management in GitHub-flavored Markdown with these sections: What happened; What we have done; What we recommend you do; Current status. Plain language, no internal jargon or evidence ids, no speculation beyond the evidence. Mention any containment step still waiting to be carried out by hand (status MANUAL_REQUIRED) as an open action. Start with a level-1 heading. Output only the report.${instructions(profile)}`,
+        system: `${SOC_CONTEXT}\n\n${UNTRUSTED_RULES}\n\nRole: client communications lead at the SOC. Write a short incident summary for the client's management in GitHub-flavored Markdown with these sections: What happened; What we have done; What we recommend you do; Current status. Plain language, no internal jargon or evidence ids, no speculation beyond the evidence. Mention any containment step still waiting to be carried out by hand (status MANUAL_REQUIRED) as an open action. Start with a level-1 heading. Output only the report.${instructions(profile)}`,
         user: `${renderEvidence(evidence)}\n\n<first_response>\n${JSON.stringify({ triage: ctx.triage ?? null, actions: ctx.actions }, null, 2)}\n</first_response>`,
         effort: profile.effort,
       });
@@ -134,4 +137,33 @@ export async function runReportAgent(
     }
   }
   return { output: builtinReport(evidence, ctx), engine: "built-in", model: null, isLocal: true, usage: {}, status: "succeeded", durationMs: Date.now() - started };
+}
+
+export interface CaseAnalysis {
+  outcome: AgentOutcome<TriageOutput>;
+  output: TriageOutput;
+  report: GroundingReport & { injection: InjectionFinding[]; held: boolean };
+  manipulated: boolean;
+}
+
+// The one triage pipeline, used by first response and by evaluations alike:
+// scan the evidence for text aimed at the AI, run the agent on escaped
+// evidence, keep only what the evidence supports, then hold any downgrade
+// the evidence doesn't justify for a human.
+export async function analyzeCase(
+  key: "triage" | "phishing" | "threat_intel",
+  evidence: CaseEvidence,
+  profile: AgentProfileView,
+  provider: LlmProvider | null,
+): Promise<CaseAnalysis> {
+  const injection = scanForInjection(evidence);
+  const outcome = await runTriageAgent(key, evidence, profile, provider);
+  const grounded = groundTriage(outcome.output, evidence);
+  const held = holdDowngrades(grounded.output, evidence, injection);
+  return {
+    outcome,
+    output: held.output,
+    report: { ...grounded.report, notes: [...grounded.report.notes, ...held.notes], injection, held: held.held },
+    manipulated: injection.length > 0,
+  };
 }

@@ -8,6 +8,7 @@ import { can, roleLabel } from "@/lib/rbac";
 import { formatDateTime, formatPercent, formatRelative } from "@/lib/format";
 import { CASE_SOURCE_HREF, CASE_SOURCE_LABEL, CLOSED_STATUSES } from "@/lib/cases/labels";
 import { dispositionLabel } from "@/lib/shadow/service";
+import { INJECTION_LABEL, type InjectionFinding } from "@/lib/ai/safety";
 import { formatMinutes, parsePlan } from "@/lib/plans";
 import { recommendPlaybooks } from "@/lib/playbooks/recommend";
 import { findRelatedCases } from "@/lib/cases/related";
@@ -118,7 +119,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   const shadowHidden = !closed && kase.aiRuns.some(isShadow);
   const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel"].includes(r.agentKey) && r.status !== "failed" && (closed || !isShadow(r)));
   const triage = latestTriage?.output as TriageOutput | undefined;
-  const grounding = latestTriage?.grounding as GroundingReport | undefined;
+  const grounding = latestTriage?.grounding as (GroundingReport & { injection?: InjectionFinding[] }) | undefined;
   const lastFailure = kase.aiRuns[0]?.status === "failed" ? kase.aiRuns[0] : null;
 
   const canApprove = can(user, "containment.approve");
@@ -250,6 +251,17 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                         <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
                           {triage.analyst_next_steps.map((s, i) => <li key={i}>{s}</li>)}
                         </ul>
+                      </div>
+                    )}
+                    {grounding?.injection && grounding.injection.length > 0 && (
+                      <div className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs">
+                        <p className="font-medium text-destructive">Text in the evidence is aimed at the AI</p>
+                        <ul className="mt-1 flex flex-col gap-0.5">
+                          {grounding.injection.slice(0, 5).map((f, i) => (
+                            <li key={i}><span className="font-mono">{f.ref}</span> {INJECTION_LABEL[f.kind]}: <span className="text-muted-foreground">&ldquo;{f.excerpt}&rdquo;</span></li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 text-muted-foreground">Containment from this run needs a person, and the AI can&apos;t lower the verdict on its own.</p>
                       </div>
                     )}
                     {grounding && grounding.notes.length > 0 && (
