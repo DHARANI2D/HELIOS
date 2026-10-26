@@ -57,6 +57,12 @@ model User {
   lastLoginAt  DateTime?
   failedLogins Int              @default(0)
   lockedUntil  DateTime?
+  // Two-step sign-in (lib/mfa): the TOTP secret, sealed; hashes of the
+  // unused recovery codes; the last time step accepted (no replays).
+  mfaSecretCipher   String?
+  mfaEnabledAt      DateTime?
+  mfaRecoveryHashes String[]  @default([])
+  mfaLastStep       Int?
   preferences  Json?
   createdAt    DateTime         @default(now())
 
@@ -178,6 +184,7 @@ model Tenant {
   aiProviders  AiProvider[]
   aiPolicy     TenantAiPolicy?
   autonomy     AutonomyLevel[]
+  keys         TenantKey[]
 
   @@map("tenants")
 }
@@ -1311,4 +1318,23 @@ model ThreatFeed {
   createdAt      DateTime      @default(now())
 
   @@map("threat_feeds")
+}
+
+// A client's own data key (lib/keys): it seals that client's credentials
+// and is itself stored wrapped by the platform's master key. Rotation adds
+// a version and re-seals; destroying the keys makes the client's stored
+// credentials unreadable (offboarding).
+model TenantKey {
+  id          String    @id @default(cuid())
+  tenantId    String
+  version     Int
+  wrapped     String
+  createdAt   DateTime  @default(now())
+  retiredAt   DateTime?
+  destroyedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, version])
+  @@map("tenant_keys")
 }

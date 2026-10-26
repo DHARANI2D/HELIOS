@@ -100,12 +100,13 @@ export default async function TeamPage() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {u.lastLoginAt ? formatRelative(u.lastLoginAt, now) : "never"}
+                        <p className={u.mfaEnabledAt ? "text-[11px] text-success-ink" : "text-[11px] text-muted-foreground"}>{u.mfaEnabledAt ? "two-step on" : "password only"}</p>
                         {isLocked && <Badge variant="warning" className="ml-1"><Lock /> locked</Badge>}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
                           <UserDialogButton tenants={tenants} initial={{ id: u.id, name: u.name ?? "", email: u.email, role: u.role, tenantId: u.tenantId, domains: u.domains, title: u.title ?? "" }} />
-                          <UserRowControls userId={u.id} active={u.active} self={u.id === viewer.id} />
+                          <UserRowControls userId={u.id} active={u.active} self={u.id === viewer.id} mfa={!!u.mfaEnabledAt} />
                         </div>
                       </TableCell>
                     </TableRow>

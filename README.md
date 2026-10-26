@@ -43,7 +43,7 @@ See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit togeth
 - **Framework:** Next.js 16 (App Router, Server Actions, `after()` for background work), React 19, TypeScript.
 - **UI:** Tailwind CSS 4 and shadcn/ui primitives, with light and dark themes. Charts use ECharts; process graphs use Cytoscape.
 - **Data:** Prisma + PostgreSQL 16, TanStack Query.
-- **Auth:** Auth.js credentials, with lockout after repeated failures. Every page and Server Action re-checks the session, the role's permissions and the client scope.
+- **Auth:** Auth.js credentials with optional or required two-step sign-in (authenticator app, recovery codes) and lockout after repeated failures, plus single sign-on for staff with any OpenID Connect provider. Every page and Server Action re-checks the session, the role's permissions and the client scope.
 - **AI:** `@anthropic-ai/sdk` with structured outputs, plus any OpenAI-compatible local server.
 - **Tests:** Vitest unit tests, plus a Postgres-backed integration suite.
 
@@ -139,7 +139,8 @@ Response connectors receive `POST`s with an `x-helios-timestamp` header and an `
 ## Security notes
 
 - **Authorization:** every page and Server Action checks the session, the role's permission and the client scope. Out-of-scope records look like missing ones.
-- **Secrets:** integration secrets, AI provider keys and the provider keys under Settings are stored encrypted with AES-256-GCM. Ingest, agent and API tokens are stored only as SHA-256 hashes.
+- **Secrets:** integration secrets, AI provider keys and the provider keys under Settings are stored encrypted with AES-256-GCM; each client's are sealed with its own data key, wrapped by a master key that AWS KMS can protect. Ingest, agent and API tokens are stored only as SHA-256 hashes.
+- **Tenant isolation:** besides the application's filters, Postgres row-level policies keep client sessions and client API tokens to their own rows. Run the app as a non-superuser database role (or set `HELIOS_DB_TENANT_ROLE`).
 - **Prompt injection:** evidence is spotlighted as untrusted data, scanned for text aimed at the AI, and steered cases go to a person. The scanner is pattern-based, so the policy, not the scanner, is what stops a fooled model.
 - **AI containment:** it never acts on a target that isn't in the case evidence. Account actions and process kills always need a human. Clients can cap autonomy for their estate.
 - **Audit log:** appends serialize on a Postgres advisory lock, so the chain can't fork. Records referenced by audit entries can't be deleted.

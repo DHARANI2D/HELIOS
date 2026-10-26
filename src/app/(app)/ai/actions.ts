@@ -115,7 +115,7 @@ export async function testProviderAction(id: string) {
     return result;
   }
   const row = await db.aiProvider.findUniqueOrThrow({ where: { id } });
-  const result = await providerFromRow(row).check();
+  const result = await (await providerFromRow(row)).check();
   await db.aiProvider.update({ where: { id }, data: { lastCheckedAt: new Date(), lastCheckOk: result.ok, lastCheckMessage: result.message.slice(0, 300) } });
   await logAction({ actorId: user.id, action: "ai.provider_tested", detail: { providerId: id, ok: result.ok } });
   revalidate();

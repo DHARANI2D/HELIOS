@@ -69,3 +69,25 @@ export async function setAiCapAction(tenantId: string, cap: string) {
   revalidatePath(`/tenants/${tenantId}`);
   revalidatePath("/");
 }
+
+// A client's own data key: rotate it (credentials re-sealed), or destroy it
+// when offboarding a suspended client (its stored credentials become unreadable).
+export async function rotateTenantKeyAction(tenantId: string) {
+  const user = await requirePermission("tenants.manage");
+  if (user.role !== "ADMIN") throw new Error("Forbidden: admin role required");
+  const { rotateTenantKey } = await import("@/lib/keys");
+  const r = await rotateTenantKey(tenantId, user.id);
+  revalidatePath(`/tenants/${tenantId}`);
+  return r;
+}
+
+export async function destroyTenantKeysAction(tenantId: string, confirmName: string) {
+  const user = await requirePermission("tenants.manage");
+  if (user.role !== "ADMIN") throw new Error("Forbidden: admin role required");
+  const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } });
+  if (confirmName.trim() !== tenant.name) throw new Error("Type the client's name exactly to confirm");
+  const { destroyTenantKeys } = await import("@/lib/keys");
+  const r = await destroyTenantKeys(tenantId, user.id);
+  revalidatePath(`/tenants/${tenantId}`);
+  return r;
+}

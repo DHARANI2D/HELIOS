@@ -73,3 +73,28 @@ export async function saveForensicsSettingsAction(input: z.input<typeof forensic
   await logAction({ actorId: user.id, action: "settings.forensics_changed", detail: { thresholds: s.thresholds, allowDomains: domains.length } });
   revalidate();
 }
+
+// ---------------------------------------------------------------- sign-in and encryption
+
+const securitySchema = z.object({ mfa: z.enum(["optional", "staff", "everyone"]), ssoOnlyForStaff: z.boolean() });
+
+export async function saveSecuritySettingsAction(input: z.input<typeof securitySchema>) {
+  const user = await requirePermission("settings.manage");
+  const s = securitySchema.parse(input);
+  const { SSO } = await import("@/lib/sso");
+  if (s.ssoOnlyForStaff && !SSO) throw new Error("Configure single sign-on (HELIOS_SSO_ISSUER and its client) before requiring it");
+  await setSetting("security.mfa", s.mfa, user.id);
+  await setSetting("security.ssoOnlyForStaff", s.ssoOnlyForStaff, user.id);
+  await logAction({ actorId: user.id, action: "security.settings_changed", detail: s });
+  revalidate();
+}
+
+// Clients' credentials still sealed with the master key move onto their own keys.
+export async function adoptClientKeysAction() {
+  const user = await requirePermission("settings.manage");
+  if (user.role !== "ADMIN") throw new Error("Forbidden: admin role required");
+  const { adoptClientKeys } = await import("@/lib/keys");
+  const moved = await adoptClientKeys(user.id);
+  revalidate();
+  return { moved };
+}

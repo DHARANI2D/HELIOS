@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { dbFor } from "@/lib/tenant-db";
 import { caseVisibility, canAccessCase } from "@/lib/access";
 import { can } from "@/lib/rbac";
 import { CASE_STATUSES, CLOSED_STATUSES } from "@/lib/cases/labels";
@@ -66,7 +67,7 @@ export async function listCases(p: ApiPrincipal, params: URLSearchParams) {
   if (q.source) filters.push({ sourceType: q.source });
   if (q.tenantId && !p.isClient) filters.push({ tenantId: q.tenantId });
   if (q.since) filters.push({ createdAt: { gte: q.since } });
-  const rows = await db.case.findMany({
+  const rows = await dbFor(p).case.findMany({
     where: { AND: filters },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: q.limit + 1,
@@ -83,7 +84,7 @@ async function visibleCase(p: ApiPrincipal, id: string) {
 
 export async function getCase(p: ApiPrincipal, id: string) {
   await visibleCase(p, id);
-  const c = await db.case.findUniqueOrThrow({
+  const c = await dbFor(p).case.findUniqueOrThrow({
     where: { id },
     include: {
       ...SUMMARY_INCLUDE,

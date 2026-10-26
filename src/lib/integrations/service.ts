@@ -3,7 +3,8 @@ import type { Integration, Prisma, UserRole } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
-import { hashToken, newToken, seal } from "@/lib/secrets";
+import { hashToken, newToken } from "@/lib/secrets";
+import { sealFor } from "@/lib/keys";
 import { maxSeverity } from "@/lib/severity";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
@@ -57,7 +58,7 @@ export async function onboardIntegration(input: OnboardInput, actorId: string) {
       name: input.name?.trim() || `${tool.vendor} ${tool.name}`,
       allowedRoles: input.allowedRoles?.length ? input.allowedRoles : category.defaultRoles,
       config: { telemetrySource: category.telemetry, ...(input.config ?? {}) } as Prisma.InputJsonValue,
-      secretCipher: Object.keys(secrets).length ? seal(JSON.stringify(secrets)) : null,
+      secretCipher: Object.keys(secrets).length ? await sealFor(input.tenantId, JSON.stringify(secrets)) : null,
       ingestTokenHash: tool.ingest ? hash : null,
       tokenPrefix: tool.ingest ? display : null,
       createdById: actorId,

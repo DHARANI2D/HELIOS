@@ -33,6 +33,12 @@ import { checkForwarderConfig, forwarderState, issueForwarderConfig, noteForward
 import { samplePayloadFor } from "@/lib/__tests__/fixtures/vendor-payloads";
 import type { Http } from "@/lib/connectors/http";
 import { seal } from "@/lib/secrets";
+import bcrypt from "bcryptjs";
+import { dbFor, tenantDb } from "@/lib/tenant-db";
+import { adoptClientKeys, destroyTenantKeys, openSealed, rotateTenantKey, sealFor } from "@/lib/keys";
+import { readSecrets } from "@/lib/integrations/dispatch";
+import { verifyCredentials } from "@/lib/credentials";
+import { newRecoveryCodes, newSecret, totp } from "@/lib/mfa";
 import { signPayload } from "@/lib/integrations/dispatch";
 import { invalidateCatalog } from "@/lib/integrations/tools";
 import { ingestTelemetry } from "@/lib/siem/service";
@@ -749,6 +755,89 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect((await checkSourceHealth(new Date())).opened).toBe(0);
     expect(await db.integration.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ quietSince: expect.any(Date), quietCaseId: null, status: "DEGRADED" });
     expect(await goLiveBlockers(tenant.id)).toEqual([expect.stringMatching(/^Retired Okta has been quiet since/)]);
+  });
+
+  it("isolates clients in the database itself, even when a query forgets its filter", async () => {
+    // Superusers bypass row-level security: then the scoped client switches to a plain role.
+    const [{ rolsuper }] = await db.$queryRaw<Array<{ rolsuper: boolean }>>`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`;
+    if (rolsuper) {
+      await db.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'helios_tenant') THEN CREATE ROLE helios_tenant NOLOGIN; END IF; END $$`);
+      await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO helios_tenant; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO helios_tenant`);
+      process.env.HELIOS_DB_TENANT_ROLE = "helios_tenant";
+    }
+    const a = await db.tenant.create({ data: { name: "Test · RLS A", slug: "test-rls-a" } });
+    const b = await db.tenant.create({ data: { name: "Test · RLS B", slug: "test-rls-b" } });
+    await createCase({ sourceType: "SIEM_ALERT", title: "RLS A case", severity: "LOW", tenantId: a.id, deferPipelines: true });
+    const bCase = await createCase({ sourceType: "SIEM_ALERT", title: "RLS B case", severity: "LOW", tenantId: b.id, deferPipelines: true });
+    await db.endpoint.create({ data: { tenantId: b.id, hostname: "RLS-B-01" } });
+
+    const asA = tenantDb(a.id);
+    // No tenant filter at all: Postgres returns only A's rows.
+    expect((await asA.case.findMany({ select: { title: true } })).map((c) => c.title)).toEqual(["RLS A case"]);
+    expect(await asA.case.findUnique({ where: { id: bCase.id } })).toBeNull();
+    expect(await asA.endpoint.count()).toBe(0);
+    // Nor can A write a row into B.
+    await expect(asA.endpoint.create({ data: { tenantId: b.id, hostname: "RLS-SNEAK" } })).rejects.toThrow(/row-level security/);
+    // Staff and background work are unscoped.
+    expect(await db.case.count({ where: { tenantId: { in: [a.id, b.id] } } })).toBe(2);
+    expect(dbFor({ isClient: false, tenantId: null })).toBe(db);
+    delete process.env.HELIOS_DB_TENANT_ROLE;
+  });
+
+  it("seals each client's credentials with its own key, rotates it, and can destroy it", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Keys", slug: "test-keys" } });
+    const other = await db.tenant.create({ data: { name: "Test · Keys other", slug: "test-keys-other" } });
+    const sealed = await sealFor(tenant.id, "client-secret-1");
+    expect(sealed.startsWith("v2.")).toBe(true);
+    expect(await openSealed(sealed)).toBe("client-secret-1");
+    // Bound to its client and key: moved under another client's key it doesn't open.
+    const foreign = await sealFor(other.id, "x");
+    await expect(openSealed(`v2.${foreign.split(".")[1]}.${sealed.split(".").slice(2).join(".")}`)).rejects.toThrow();
+    expect((await sealFor(null, "platform")).startsWith("v1.")).toBe(true);
+
+    // Older credentials sealed with the master key move onto the client's key.
+    const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "okta_workforce" }, adminId);
+    await db.integration.update({ where: { id: integration.id }, data: { secretCipher: seal(JSON.stringify({ connector: { apiToken: "okta-token" } })) } });
+    expect(await adoptClientKeys(adminId)).toBeGreaterThanOrEqual(1);
+    const adopted = await db.integration.findUniqueOrThrow({ where: { id: integration.id } });
+    expect(adopted.secretCipher!.startsWith("v2.")).toBe(true);
+    expect((await readSecrets(adopted.secretCipher)).connector?.apiToken).toBe("okta-token");
+
+    const before = adopted.secretCipher!.split(".")[1];
+    expect((await rotateTenantKey(tenant.id, adminId)).resealed).toBe(1);
+    const rotated = await db.integration.findUniqueOrThrow({ where: { id: integration.id } });
+    expect(rotated.secretCipher!.split(".")[1]).not.toBe(before);
+    expect((await readSecrets(rotated.secretCipher)).connector?.apiToken).toBe("okta-token");
+    expect(await db.tenantKey.count({ where: { tenantId: tenant.id, retiredAt: { not: null } } })).toBe(1);
+
+    await expect(destroyTenantKeys(tenant.id, adminId)).rejects.toThrow(/Suspend/);
+    await db.tenant.update({ where: { id: tenant.id }, data: { status: "SUSPENDED" } });
+    await destroyTenantKeys(tenant.id, adminId);
+    expect((await db.integration.findUniqueOrThrow({ where: { id: integration.id } })).secretCipher).toBeNull();
+    await expect(openSealed(sealed)).rejects.toThrow(/destroyed|no longer exists/);
+  });
+
+  it("asks for a second step once it's on, refuses replays, and takes a recovery code once", async () => {
+    const password = "Sign-in-test-2026!";
+    const user = await db.user.create({ data: { email: "mfa@test.local", name: "MFA Test", role: "TRIAGE_ANALYST", passwordHash: await bcrypt.hash(password, 4) } });
+    expect(await verifyCredentials(user.email, password, undefined)).toMatchObject({ id: user.id });
+    expect(await verifyCredentials(user.email, "wrong", undefined)).toBeNull();
+
+    const secret = newSecret();
+    const { codes, hashes } = newRecoveryCodes();
+    await db.user.update({ where: { id: user.id }, data: { mfaSecretCipher: seal(secret), mfaEnabledAt: new Date(), mfaRecoveryHashes: hashes } });
+    await expect(verifyCredentials(user.email, password, undefined)).rejects.toMatchObject({ code: "mfa_required" });
+    const code = totp(secret);
+    expect(await verifyCredentials(user.email, password, code)).toMatchObject({ id: user.id });
+    await expect(verifyCredentials(user.email, password, code)).rejects.toMatchObject({ code: "mfa_invalid" });
+    expect(await verifyCredentials(user.email, password, codes[0])).toMatchObject({ id: user.id });
+    await expect(verifyCredentials(user.email, password, codes[0])).rejects.toMatchObject({ code: "mfa_invalid" });
+    expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).mfaRecoveryHashes).toHaveLength(9);
+    // Wrong second steps count toward the lockout like wrong passwords (a success resets the count).
+    for (let i = 0; i < 4; i++) await verifyCredentials(user.email, password, "000000").catch(() => undefined);
+    expect((await db.user.findUniqueOrThrow({ where: { id: user.id } })).lockedUntil).not.toBeNull();
+    expect(await verifyCredentials(user.email, password, totp(secret, new Date(Date.now() + 30_000)))).toBeNull();
+    expect(await db.auditLog.count({ where: { action: "auth.sign_in_failed", actorId: user.id } })).toBe(7);
   });
 
   it("stores provider keys sealed, preferring them over the environment", async () => {

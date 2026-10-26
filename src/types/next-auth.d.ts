@@ -5,6 +5,8 @@ declare module "next-auth" {
     user: {
       id: string;
       role: string;
+      // How this session signed in: "sso" leaves MFA to the identity provider.
+      via?: "sso" | "password";
     } & DefaultSession["user"];
   }
 
@@ -17,5 +19,6 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id?: string;
     role?: string;
+    via?: "sso" | "password";
   }
 }

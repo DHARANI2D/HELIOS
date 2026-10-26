@@ -184,7 +184,7 @@ export async function resolveForClient(key: AgentKey, profile: AgentProfileView,
   }
 
   const row = chosen.id ? byId.get(chosen.id)! : null;
-  const provider = row ? providerFromRow(row, chosen.source === "profile" || chosen.source === "platform" ? profile.model : null) : envClaude(profile);
+  const provider = row ? await providerFromRow(row, chosen.source === "profile" || chosen.source === "platform" ? profile.model : null) : envClaude(profile);
   const redact = !!rules?.redactPii && !provider.isLocal;
 
   // A model the client picked (rather than the SOC) acts on its own only

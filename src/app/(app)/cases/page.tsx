@@ -3,6 +3,7 @@ import { Activity, Bot, Inbox, Radar, ShieldAlert, Timer, Workflow } from "lucid
 import type { CaseSeverity, CaseSource, Prisma, SecurityDomain } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { dbFor } from "@/lib/tenant-db";
 import { pageGuard, type SessionUser } from "@/lib/session";
 import { caseScope, selectedTenantId } from "@/lib/access";
 import { can, DOMAIN_LABEL, SECURITY_DOMAINS } from "@/lib/rbac";
@@ -45,12 +46,14 @@ async function getStreamStats(scope: Prisma.CaseWhereInput, user: SessionUser) {
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const tenant = user.isClient ? user.tenantId : await selectedTenantId(user);
   const eventScope = tenant ? { tenantId: tenant } : {};
+  // Client sessions read through row-level isolation as well as their filters.
+  const q = dbFor(user);
   const [openCount, detections24h, events24h, awaiting, slaRisk] = await Promise.all([
-    db.case.count({ where: { AND: [scope, { status: { notIn: CLOSED_STATUSES } }] } }),
+    q.case.count({ where: { AND: [scope, { status: { notIn: CLOSED_STATUSES } }] } }),
     db.detection.count({ where: { createdAt: { gte: since }, case: scope } }),
-    db.securityEvent.count({ where: { ingestedAt: { gte: since }, ...eventScope } }),
-    db.case.count({ where: { AND: [scope, { status: "AWAITING_APPROVAL" }] } }),
-    db.case.count({ where: { AND: [scope, caseWhere({ queue: "sla", now }), { status: { notIn: CLOSED_STATUSES } }] } }),
+    q.securityEvent.count({ where: { ingestedAt: { gte: since }, ...eventScope } }),
+    q.case.count({ where: { AND: [scope, { status: "AWAITING_APPROVAL" }] } }),
+    q.case.count({ where: { AND: [scope, caseWhere({ queue: "sla", now }), { status: { notIn: CLOSED_STATUSES } }] } }),
   ]);
   return { openCount, detections24h, events24h, awaiting, slaRisk, now };
 }
@@ -74,7 +77,7 @@ export default async function CasesPage({ searchParams }: PageProps<"/cases">) {
   const where: Prisma.CaseWhereInput = { AND: [scope, caseWhere({ sourceType: source, severity, status, q, technique, domain, queue, viewerId: user.id, now: stats.now })] };
 
   const [cases, total, tenantId] = await Promise.all([
-    db.case.findMany({
+    dbFor(user).case.findMany({
       where,
       orderBy: queue === "sla" ? [{ slaDueAt: "asc" }] : [{ createdAt: "desc" }],
       skip: (page - 1) * PAGE_SIZE,
@@ -85,7 +88,7 @@ export default async function CasesPage({ searchParams }: PageProps<"/cases">) {
         _count: { select: { detections: true } },
       },
     }),
-    db.case.count({ where }),
+    dbFor(user).case.count({ where }),
     user.isClient ? Promise.resolve(user.tenantId) : selectedTenantId(user),
   ]);
   const tenantName = tenantId ? (await db.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }))?.name ?? null : null;

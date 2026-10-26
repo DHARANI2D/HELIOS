@@ -12,6 +12,29 @@
   - staff can focus on one client through the tenant switcher (`helios-tenant` cookie).
 - **Case access.** `assertCaseAccess` makes an out-of-scope case look like a missing one.
 
+### Platform security (`lib/credentials.ts`, `lib/mfa.ts`, `lib/sso.ts`, `lib/tenant-db.ts`, `lib/keys.ts`)
+
+- **Two-step sign-in.** TOTP with an authenticator app (RFC 6238: SHA-1, 30-second steps, six digits, one step of drift).
+  - **Codes:** a step that was accepted can't be used again. Ten recovery codes are kept only as hashes, and each works once.
+  - **Lockout:** wrong codes count toward the five-failure lockout like wrong passwords.
+  - **Enforcement:** the `security.mfa` setting requires it for staff or for everyone. An account it applies to lands on `/account/security`, outside the app shell, and every page and Server Action refuses it until it has set it up.
+  - **Recovery:** admins reset it for a lost phone.
+  - **Audit:** every sign-in, failure, recovery code used and change is in the audit log.
+- **Single sign-on.** Staff can sign in with any OpenID Connect provider, set with `HELIOS_SSO_ISSUER`, `HELIOS_SSO_CLIENT_ID`, `HELIOS_SSO_CLIENT_SECRET` and `HELIOS_SSO_NAME`.
+  - **Who:** only existing, active staff accounts, matched by verified email. SSO creates no accounts and admits no client users.
+  - **MFA:** the identity provider enforces it, so an SSO session satisfies HELIOS's MFA requirement.
+  - **SSO only:** `security.ssoOnlyForStaff` turns off password sign-in for staff.
+- **Tenant isolation in the database.** Postgres row-level policies on the 15 tables that carry a `tenantId` (cases, events, endpoints, integrations, response actions, AI runs, rulebooks and the rest).
+  - **How:** `tenantDb(id)` runs each query in a transaction that first sets `helios.tenant_id`, so Postgres returns and accepts only that client's rows, even when a query forgets its filter. With the setting unset (staff, background jobs) the policies allow everything.
+  - **Where:** client sessions and client API tokens read cases, endpoints and events through it (`dbFor(user)`), under the application's own filters.
+  - **Superusers:** they bypass row-level security. Run the app as a plain role (FORCE makes the policies apply to the owner), or set `HELIOS_DB_TENANT_ROLE` to a plain role the scoped transactions switch to.
+  - **Not covered:** tables reached only through a case (detections, timeline, comments) have no policy of their own.
+- **Envelope encryption.** Each client has its own 256-bit data key (`tenant_keys`), stored only wrapped by a key derived from the master key.
+  - **What it seals:** that client's integration credentials and its own AI provider keys (`v2.<keyId>.…`, with the client and key bound in as associated data). Platform secrets stay on the master key (`v1.…`).
+  - **Admin actions:** rotate a client's key (credentials re-sealed, old key retired), and move older credentials onto their clients' keys.
+  - **Offboarding:** destroying a suspended client's keys leaves its stored credentials unreadable, from a backup too.
+  - **Master key:** `HELIOS_ENCRYPTION_KEY`, or `HELIOS_ENCRYPTION_KEY_KMS`, which holds it encrypted by AWS KMS. KMS decrypts it once at startup (`initKeyManagement`, SigV4 to `TrentService.Decrypt`) in the web process and the worker.
+
 ### Reference data in the database
 
 Plans, the price book, the tool catalog, currencies, model prices and threat feeds are tables. Only facts are seeded (`prisma/seed-data/`):

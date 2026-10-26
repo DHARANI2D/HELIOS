@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import type { Integration, PlaybookActionType } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { unseal } from "@/lib/secrets";
+import { openSealed } from "@/lib/keys";
 import { getCatalogTool } from "@/lib/integrations/tools";
 
 // Response connectors: a native connector (lib/connectors) calls the vendor's
@@ -53,10 +53,11 @@ export interface IntegrationSecrets {
   collector?: Record<string, string>;
 }
 
-export function readSecrets(cipher: string | null): IntegrationSecrets {
+// An integration's credentials; a client's are sealed with its own key (lib/keys).
+export async function readSecrets(cipher: string | null): Promise<IntegrationSecrets> {
   if (!cipher) return {};
   try {
-    return JSON.parse(unseal(cipher)) as IntegrationSecrets;
+    return JSON.parse(await openSealed(cipher)) as IntegrationSecrets;
   } catch {
     return {};
   }
@@ -125,7 +126,7 @@ export async function pingConnector(connector: Integration): Promise<DispatchRes
 
 async function postSigned(connector: Integration, payload: Record<string, unknown>): Promise<DispatchResult> {
   const config = (connector.config ?? {}) as IntegrationConfig;
-  const { webhookSecret } = readSecrets(connector.secretCipher);
+  const { webhookSecret } = await readSecrets(connector.secretCipher);
   const body = JSON.stringify(payload);
   const timestamp = String(Math.floor(Date.now() / 1000));
   try {

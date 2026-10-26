@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Building2, LogOut, Menu, Search } from "lucide-react";
+import { Building2, KeyRound, LogOut, Menu, Search } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 
 import { navFor, navItemFor } from "@/lib/nav";
@@ -153,6 +153,12 @@ export function AppTopbar({ viewer, tenants, selectedTenantId, notifications }: 
               <span className="text-sm">Theme</span>
               <ThemeToggle />
             </div>
+            <DropdownMenuItem asChild>
+              <Link href="/account/security">
+                <KeyRound />
+                Sign-in security
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/login" })}>
               <LogOut />
               Sign out

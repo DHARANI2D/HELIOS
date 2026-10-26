@@ -3,6 +3,7 @@ import { Laptop, Lock, ShieldAlert, ShieldCheck, TimerOff } from "lucide-react";
 import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { dbFor, type ScopedDb } from "@/lib/tenant-db";
 import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { selectedTenantId, tenantScope } from "@/lib/access";
@@ -32,7 +33,7 @@ function one(v: string | string[] | undefined) {
   return Array.isArray(v) ? v[0] : v;
 }
 
-async function loadEndpoints(scope: { tenantId?: string | null }, q: string | undefined, filter: string | undefined, cls: AssetClass | undefined) {
+async function loadEndpoints(client: ScopedDb, scope: { tenantId?: string | null }, q: string | undefined, filter: string | undefined, cls: AssetClass | undefined) {
   const now = new Date();
   const staleBefore = new Date(now.getTime() - STALE_DAYS * 24 * 60 * 60 * 1000);
   const where: Prisma.EndpointWhereInput = { ...scope };
@@ -41,12 +42,12 @@ async function loadEndpoints(scope: { tenantId?: string | null }, q: string | un
   if (filter === "stale") where.lastSeenAt = { lt: staleBefore };
   if (filter === "critical") where.criticality = "critical";
 
-  const everything = await db.endpoint.findMany({ where: scope, select: { id: true, protections: true, isolated: true, lastSeenAt: true, os: true, assetClass: true, assetType: true } });
+  const everything = await client.endpoint.findMany({ where: scope, select: { id: true, protections: true, isolated: true, lastSeenAt: true, os: true, assetClass: true, assetType: true } });
   const classOf = new Map(everything.map((e) => [e.id, endpointClass(e)]));
   // Device controls apply to computers, servers and phones only.
   const all = everything.filter((e) => DEVICE_CLASSES.includes(classOf.get(e.id)!));
   if (cls) where.id = { in: everything.filter((e) => classOf.get(e.id) === cls).map((e) => e.id).slice(0, 5000) };
-  const endpoints = await db.endpoint.findMany({ where, orderBy: [{ isolated: "desc" }, { lastSeenAt: { sort: "desc", nulls: "last" } }], take: 200, include: { tenant: { select: { name: true, isTest: true } } } });
+  const endpoints = await client.endpoint.findMany({ where, orderBy: [{ isolated: "desc" }, { lastSeenAt: { sort: "desc", nulls: "last" } }], take: 200, include: { tenant: { select: { name: true, isTest: true } } } });
   const byClass = ASSET_CLASSES.map((c) => {
     const rows = everything.filter((e) => classOf.get(e.id) === c.key);
     const types = new Map<string, number>();
@@ -94,7 +95,7 @@ export default async function EndpointsPage({ searchParams }: PageProps<"/endpoi
   const filter = one(sp.filter);
   const cls = isAssetClass(one(sp.class)) ? (one(sp.class) as AssetClass) : undefined;
   const scope = await tenantScope(user);
-  const [data, tenants, defaultTenantId] = await Promise.all([loadEndpoints(scope, q, filter, cls), tenantOptions(), selectedTenantId(user)]);
+  const [data, tenants, defaultTenantId] = await Promise.all([loadEndpoints(dbFor(user), scope, q, filter, cls), tenantOptions(), selectedTenantId(user)]);
   const href = (c: AssetClass | undefined) => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);

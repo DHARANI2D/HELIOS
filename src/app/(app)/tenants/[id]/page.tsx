@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { forbidden, notFound } from "next/navigation";
-import { ArrowLeft, Bot, Clock, Laptop, Plug, ShieldAlert, ShieldCheck, Timer, TrendingUp, Users } from "lucide-react";
+import { ArrowLeft, Bot, Clock, KeySquare, Laptop, Plug, ShieldAlert, ShieldCheck, Timer, TrendingUp, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -21,6 +21,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SeverityBadge, StatusBadge } from "@/components/shared/case-badges";
 import { AiConsentSelect, TenantFormButton } from "@/components/tenants/tenant-form";
+import { TenantKeys } from "@/components/tenants/tenant-keys";
 
 async function loadTenant(id: string) {
   const now = new Date();
@@ -35,15 +36,16 @@ async function loadTenant(id: string) {
     },
   });
   if (!tenant) return null;
-  const [metrics, openCases, isolated, plans, health, blockers] = await Promise.all([
+  const [metrics, openCases, isolated, plans, health, blockers, key] = await Promise.all([
     serviceMetrics({ tenantId: id }, since, now),
     db.case.findMany({ where: { tenantId: id, status: { notIn: CLOSED_STATUSES } }, orderBy: [{ severity: "desc" }, { createdAt: "desc" }], take: 10 }),
     db.endpoint.count({ where: { tenantId: id, isolated: true } }),
     listPlans(),
     sourceHealth(tenant.integrations.filter((i) => i.enabled), now),
     tenant.status === "ONBOARDING" ? goLiveBlockers(id, now) : Promise.resolve([]),
+    db.tenantKey.findFirst({ where: { tenantId: id }, orderBy: { version: "desc" }, select: { version: true, createdAt: true, destroyedAt: true } }),
   ]);
-  return { now, tenant, metrics, openCases, isolated, plans, health, blockers };
+  return { now, tenant, metrics, openCases, isolated, plans, health, blockers, key };
 }
 
 export default async function TenantPage({ params }: PageProps<"/tenants/[id]">) {
@@ -53,7 +55,7 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
   if (!own && !can(user, "tenants.view")) forbidden();
   const data = await loadTenant(id);
   if (!data) notFound();
-  const { now, tenant, metrics, openCases, isolated, plans, health, blockers } = data;
+  const { now, tenant, metrics, openCases, isolated, plans, health, blockers, key } = data;
   const plan = tenant.plan ? parsePlan(tenant.plan) : null;
   const canEditConsent = can(user, "tenants.manage") || (own && user.role === "CLIENT_ADMIN");
 
@@ -256,6 +258,18 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
             )}
           </CardContent>
         </Card>
+
+        {user.role === "ADMIN" && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><KeySquare className="size-4" /> Encryption key</CardTitle>
+              <CardDescription>This client&apos;s own key for its stored credentials.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TenantKeys tenantId={tenant.id} name={tenant.name} version={key?.version ?? null} createdAt={key?.createdAt.toISOString() ?? null} destroyed={!!key?.destroyedAt} suspended={tenant.status === "SUSPENDED"} />
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

@@ -69,6 +69,11 @@ const SETTINGS = {
     malicious: Number(process.env.FORENSICS_MALICIOUS_THRESHOLD ?? 71),
     suspicious: Number(process.env.FORENSICS_SUSPICIOUS_THRESHOLD ?? 31),
   }),
+  // Who must use two-step sign-in (an authenticator app); SSO sign-ins
+  // leave it to the identity provider.
+  "security.mfa": z.enum(["optional", "staff", "everyone"]).default("optional"),
+  // With SSO configured, staff can't sign in with a password.
+  "security.ssoOnlyForStaff": z.boolean().default(false),
   "secret.virustotal": sealedSecret,
   "secret.abuseipdb": sealedSecret,
   "secret.mxtoolbox": sealedSecret,

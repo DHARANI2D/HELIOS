@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, Ban, Bot, Building2, Crosshair, Download, Eye, Fingerprint, Link2, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
 
 import { db } from "@/lib/db";
+import { dbFor } from "@/lib/tenant-db";
 import { pageGuard, type SessionUser } from "@/lib/session";
 import { assertCaseAccess } from "@/lib/access";
 import { can, roleLabel } from "@/lib/rbac";
@@ -57,7 +58,7 @@ const VERDICT_TONE: Record<string, string> = {
 
 async function loadCasePage(id: string, user: SessionUser) {
   const now = new Date();
-  const kase = await db.case.findUniqueOrThrow({
+  const kase = await dbFor(user).case.findUniqueOrThrow({
     where: { id },
     include: {
       tenant: { select: { id: true, name: true, plan: true, isTest: true } },

@@ -26,24 +26,24 @@ export interface NativeResult {
 
 // The native connector set up on an integration, or null; with what's
 // missing when it's chosen but incomplete.
-export function nativeSetup(i: Pick<Integration, "config" | "secretCipher">): { connector: NativeConnector; missing: string[]; dryRun: boolean } | null {
+export async function nativeSetup(i: Pick<Integration, "config" | "secretCipher">): Promise<{ connector: NativeConnector; missing: string[]; dryRun: boolean } | null> {
   const config = (i.config ?? {}) as IntegrationConfig;
   const connector = connectorByKey(config.connector);
   if (!connector) return null;
-  const values = { ...(config.connectorConfig ?? {}), ...(readSecrets(i.secretCipher).connector ?? {}) };
+  const values = { ...(config.connectorConfig ?? {}), ...((await readSecrets(i.secretCipher)).connector ?? {}) };
   const missing = connector.fields.filter((f) => f.required && !values[f.key]).map((f) => f.label);
   return { connector, missing, dryRun: config.connectorMode === "dry_run" };
 }
 
-export function contextFor(i: Pick<Integration, "id" | "config" | "secretCipher">, http: Http = createHttp()): ConnectorCtx {
+export async function contextFor(i: Pick<Integration, "id" | "config" | "secretCipher">, http: Http = createHttp()): Promise<ConnectorCtx> {
   const config = (i.config ?? {}) as IntegrationConfig;
-  return { config: config.connectorConfig ?? {}, secrets: readSecrets(i.secretCipher).connector ?? {}, http, cacheKey: i.id };
+  return { config: config.connectorConfig ?? {}, secrets: (await readSecrets(i.secretCipher)).connector ?? {}, http, cacheKey: i.id };
 }
 
 export async function findNativeConnector(tenantId: string | null, actionType: PlaybookActionType) {
   const candidates = await db.integration.findMany({ where: { tenantId, enabled: true, status: { not: "DISCONNECTED" } }, orderBy: { createdAt: "asc" } });
   for (const integration of candidates) {
-    const setup = nativeSetup(integration);
+    const setup = await nativeSetup(integration);
     if (setup && !setup.missing.length && setup.connector.actions.includes(actionType)) return { integration, ...setup };
   }
   return undefined;
@@ -59,7 +59,7 @@ export async function runNative(
   req: { action: PlaybookActionType; target: string; idempotencyKey: string; comment: string; dryRun?: boolean },
   http?: Http,
 ): Promise<NativeResult> {
-  const ctx = contextFor(integration, http);
+  const ctx = await contextFor(integration, http);
   const base = { dispatched: true as const, integration: integration.name, integrationId: integration.id, native: connector.key };
   const request = { ...req, ctx };
   try {
@@ -85,10 +85,10 @@ export async function runNative(
 
 export async function verifyNative(integrationId: string, action: PlaybookActionType, ref: VendorRef, http?: Http): Promise<Verification> {
   const integration = await db.integration.findUnique({ where: { id: integrationId } });
-  const setup = integration && nativeSetup(integration);
+  const setup = integration && (await nativeSetup(integration));
   if (!integration || !setup) return { state: "failed", message: "The connector that carried this out is gone" };
   try {
-    return await setup.connector.verify({ action, target: "", ctx: contextFor(integration, http) }, ref);
+    return await setup.connector.verify({ action, target: "", ctx: await contextFor(integration, http) }, ref);
   } catch (err) {
     // A failed check isn't a failed action: try again on the next round.
     return { state: "pending", message: err instanceof ConnectorError ? err.message : String(err) };
@@ -96,11 +96,11 @@ export async function verifyNative(integrationId: string, action: PlaybookAction
 }
 
 export async function checkNative(integration: Integration, http?: Http) {
-  const setup = nativeSetup(integration);
+  const setup = await nativeSetup(integration);
   if (!setup) return { ok: false, message: "No native connector chosen for this tool" };
   if (setup.missing.length) return { ok: false, message: `Missing: ${setup.missing.join(", ")}` };
   try {
-    const result = await setup.connector.check(contextFor(integration, http));
+    const result = await setup.connector.check(await contextFor(integration, http));
     await health(integration, result.ok, result.ok ? undefined : result.message);
     return result;
   } catch (err) {

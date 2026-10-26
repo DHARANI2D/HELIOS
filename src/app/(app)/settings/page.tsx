@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, Mail, MonitorSmartphone, Users } from "lucide-react";
+import { Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, LockKeyhole, Mail, MonitorSmartphone, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -8,6 +8,9 @@ import { PLATFORM_SECRETS, platformSecretStatus, type PlatformSecret } from "@/l
 import { domainWhitelist } from "@/lib/forensics/body";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CompanyForm, EnvironmentControl, ForensicsSettingsForm, SecretsPanel, SiteForm } from "@/components/settings/settings-forms";
+import { SecuritySettings } from "@/components/settings/security-settings";
+import { SSO } from "@/lib/sso";
+import { keyReport } from "@/lib/keys";
 
 const ELSEWHERE = [
   { href: "/ai", icon: Bot, title: "AI agents", text: "Providers (online and local models), agent profiles, autonomy and the kill switch" },
@@ -19,7 +22,7 @@ const ELSEWHERE = [
 
 export default async function SettingsPage() {
   const user = await pageGuard("settings.manage");
-  const [company, environment, testClients, secrets, thresholds, allowDomains, site] = await Promise.all([
+  const [company, environment, testClients, secrets, thresholds, allowDomains, site, mfa, ssoOnly, staffWithoutMfa, keys] = await Promise.all([
     getSetting("company.profile"),
     getSetting("platform.environment"),
     db.tenant.count({ where: { isTest: true } }),
@@ -27,6 +30,10 @@ export default async function SettingsPage() {
     getSetting("forensics.thresholds"),
     getSetting("forensics.allowDomains"),
     getSetting("site.public"),
+    getSetting("security.mfa"),
+    getSetting("security.ssoOnlyForStaff"),
+    db.user.count({ where: { active: true, tenantId: null, mfaEnabledAt: null } }),
+    keyReport(),
   ]);
   const rows = (Object.keys(PLATFORM_SECRETS) as PlatformSecret[]).map((name) => ({ name, ...PLATFORM_SECRETS[name], status: secrets[name] }));
 
@@ -39,6 +46,16 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <EnvironmentControl environment={environment} testClients={testClients} canChange={user.role === "ADMIN"} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><LockKeyhole className="size-4" /> Sign-in and encryption</CardTitle>
+          <CardDescription>Two-step sign-in, single sign-on for staff, and how stored credentials are encrypted.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SecuritySettings mfa={mfa} ssoOnlyForStaff={ssoOnly} sso={SSO?.name ?? null} staffWithoutMfa={staffWithoutMfa} keys={keys} canEdit isAdmin={user.role === "ADMIN"} />
         </CardContent>
       </Card>
 

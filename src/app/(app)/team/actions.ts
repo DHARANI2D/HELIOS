@@ -89,3 +89,13 @@ export async function resetPasswordAction(userId: string) {
   revalidatePath("/team");
   return { email: user.email, password };
 }
+
+// For a lost phone: turns two-step sign-in off for the account, which then
+// sets it up again at its next sign-in if the organization requires it.
+export async function resetMfaAction(userId: string) {
+  const admin = await requirePermission("users.manage");
+  if (userId === admin.id) throw new Error("Ask another admin to reset your own two-step sign-in");
+  await db.user.update({ where: { id: userId }, data: { mfaEnabledAt: null, mfaSecretCipher: null, mfaRecoveryHashes: [], mfaLastStep: null } });
+  await logAction({ actorId: admin.id, action: "auth.mfa_reset", detail: { userId } });
+  revalidatePath("/team");
+}

@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
-import { seal } from "@/lib/secrets";
+import { sealFor } from "@/lib/keys";
 import { can } from "@/lib/rbac";
 import { requirePermission, requireUser, type SessionUser } from "@/lib/session";
 import { AGENT_KEYS, type AgentKey } from "@/lib/ai/catalog";
@@ -57,7 +57,8 @@ export async function saveClientProviderAction(tenantId: string, input: z.input<
     region: p.region || null,
     tenantId,
     isDefault: false,
-    ...(p.apiKey ? { apiKeyCipher: seal(p.apiKey) } : {}),
+    // Sealed with the client's own data key (lib/keys).
+    ...(p.apiKey ? { apiKeyCipher: await sealFor(tenantId, p.apiKey) } : {}),
   };
   const saved = p.id ? await db.aiProvider.update({ where: { id: p.id }, data }) : await db.aiProvider.create({ data });
   await logAction({ actorId: user.id, action: p.id ? "ai.client_provider_updated" : "ai.client_provider_added", detail: { tenantId, providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, region: saved.region, keyChanged: !!p.apiKey } });
@@ -78,7 +79,7 @@ export async function testClientProviderAction(tenantId: string, id: string) {
   const user = await aiActor(tenantId);
   const row = await db.aiProvider.findFirst({ where: { id, tenantId } });
   if (!row) throw new Error("Not found");
-  const result = await providerFromRow(row).check();
+  const result = await (await providerFromRow(row)).check();
   await db.aiProvider.update({ where: { id }, data: { lastCheckedAt: new Date(), lastCheckOk: result.ok, lastCheckMessage: result.message.slice(0, 300) } });
   await logAction({ actorId: user.id, action: "ai.provider_tested", detail: { tenantId, providerId: id, ok: result.ok } });
   done();

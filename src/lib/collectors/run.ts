@@ -28,9 +28,9 @@ export const collectorSetup = (i: Pick<Integration, "config">) => ((i.config ?? 
 
 // Collector credentials share the integration's connector credentials where
 // the field names match (one app registration for responding and reading).
-export function collectorContext(i: Pick<Integration, "id" | "config" | "secretCipher">, http: Http = createHttp()): ConnectorCtx {
+export async function collectorContext(i: Pick<Integration, "id" | "config" | "secretCipher">, http: Http = createHttp()): Promise<ConnectorCtx> {
   const config = (i.config ?? {}) as IntegrationConfig & { collector?: CollectorSetup };
-  const secrets = readSecrets(i.secretCipher);
+  const secrets = await readSecrets(i.secretCipher);
   return { config: { ...(config.connectorConfig ?? {}), ...(config.collector?.config ?? {}) }, secrets: { ...(secrets.connector ?? {}), ...(secrets.collector ?? {}) }, http, cacheKey: `${i.id}:collector` };
 }
 
@@ -56,7 +56,7 @@ export interface PollSummary {
 export async function pollStream(integration: Integration, stream: CollectorStream, now = new Date(), http?: Http): Promise<PollSummary> {
   const key = { integrationId_stream: { integrationId: integration.id, stream: stream.key } };
   const checkpoint = await db.collectorCheckpoint.upsert({ where: key, update: {}, create: { integrationId: integration.id, stream: stream.key } });
-  const ctx = collectorContext(integration, http);
+  const ctx = await collectorContext(integration, http);
   let cursor = checkpoint.cursor;
   let records = 0;
   let pages = 0;
@@ -97,7 +97,7 @@ export async function runDueCollectors(now = new Date(), http?: Http) {
   for (const integration of integrations) {
     const setup = enabledStreams(integration);
     if (!setup?.streams.length) continue;
-    if (missingFields(setup.collector, collectorContext(integration)).length) continue;
+    if (missingFields(setup.collector, await collectorContext(integration)).length) continue;
     for (const stream of setup.streams) {
       const cp = await db.collectorCheckpoint.findUnique({ where: { integrationId_stream: { integrationId: integration.id, stream: stream.key } } });
       if (cp && cp.nextPollAt > now) continue;
@@ -116,7 +116,7 @@ export async function runDueCollectors(now = new Date(), http?: Http) {
 export async function testCollector(integration: Integration, setup: CollectorSetup, actorId: string, http?: Http) {
   const collector = collectorByKey(setup.key) ?? collectorForTool(integration.vendor);
   if (!collector) throw new Error("This tool has no log collector");
-  const ctx = collectorContext({ ...integration, config: { ...((integration.config ?? {}) as object), collector: setup } as unknown as Prisma.JsonValue }, http);
+  const ctx = await collectorContext({ ...integration, config: { ...((integration.config ?? {}) as object), collector: setup } as unknown as Prisma.JsonValue }, http);
   const missing = missingFields(collector, ctx);
   if (missing.length) return [{ stream: "", ok: false, records: 0, pages: 0, message: `Set ${missing.join(", ")}` }];
   const out: PollSummary[] = [];

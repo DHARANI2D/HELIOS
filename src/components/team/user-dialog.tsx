@@ -3,11 +3,11 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { KeyRound, Loader2, Pencil, UserPlus } from "lucide-react";
+import { KeyRound, Loader2, Pencil, ShieldOff, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import type { SecurityDomain, UserRole } from "@prisma/client";
 
-import { inviteUserAction, resetPasswordAction, setUserActiveAction, updateUserAction } from "@/app/(app)/team/actions";
+import { inviteUserAction, resetMfaAction, resetPasswordAction, setUserActiveAction, updateUserAction } from "@/app/(app)/team/actions";
 import { DOMAIN_LABEL, ROLES, ROLE_ORDER, SECURITY_DOMAINS } from "@/lib/rbac";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -157,7 +157,7 @@ export function UserDialogButton({ initial, tenants }: { initial?: UserDraft; te
   );
 }
 
-export function UserRowControls({ userId, active, self }: { userId: string; active: boolean; self: boolean }) {
+export function UserRowControls({ userId, active, self, mfa }: { userId: string; active: boolean; self: boolean; mfa: boolean }) {
   const router = useRouter();
   const [creds, setCreds] = React.useState<{ email: string; password: string } | null>(null);
   const toggle = useMutation({
@@ -170,8 +170,21 @@ export function UserRowControls({ userId, active, self }: { userId: string; acti
     onSuccess: (r) => setCreds(r),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
+  const resetMfa = useMutation({
+    mutationFn: () => resetMfaAction(userId),
+    onSuccess: () => {
+      toast.success("Two-step sign-in reset: they set it up again at their next sign-in");
+      router.refresh();
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
+  });
   return (
     <div className="flex items-center justify-end gap-1">
+      {mfa && !self && (
+        <Button size="icon" variant="ghost" className="size-7" aria-label="Reset two-step sign-in" title="Reset two-step sign-in (lost phone)" onClick={() => resetMfa.mutate()} disabled={resetMfa.isPending}>
+          {resetMfa.isPending ? <Loader2 className="animate-spin" /> : <ShieldOff />}
+        </Button>
+      )}
       <Button size="icon" variant="ghost" className="size-7" aria-label="Reset password" onClick={() => reset.mutate()} disabled={reset.isPending}>
         {reset.isPending ? <Loader2 className="animate-spin" /> : <KeyRound />}
       </Button>

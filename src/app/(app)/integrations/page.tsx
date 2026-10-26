@@ -63,6 +63,8 @@ export default async function IntegrationsPage() {
     listCatalogTools({ includeInactive: true }),
   ]);
   const toolByKey = new Map(catalog.map((t) => [t.key, t]));
+  // Which credential fields are filled in (the values never reach the browser).
+  const secretsOf = new Map(await Promise.all(integrations.map(async (i) => [i.id, await readSecrets(i.secretCipher)] as const)));
   const ids = integrations.map((i) => i.id);
   const [health, checkpoints, deadLetters, waiting, failed24h] = await Promise.all([
     sourceHealth(integrations, now),
@@ -213,7 +215,7 @@ export default async function IntegrationsPage() {
                             {(() => {
                               const native = connectorForTool(i.vendor);
                               if (!native || i.category === "chatops") return null;
-                              const secrets = readSecrets(i.secretCipher).connector ?? {};
+                              const secrets = secretsOf.get(i.id)?.connector ?? {};
                               return (
                                 <NativeConnectorButton
                                   integrationId={i.id}
@@ -232,7 +234,7 @@ export default async function IntegrationsPage() {
                               const collector = collectorForTool(i.vendor);
                               if (!collector) return null;
                               const setup = collectorSetup(i);
-                              const secrets = readSecrets(i.secretCipher);
+                              const secrets = secretsOf.get(i.id) ?? {};
                               const stored = { ...(secrets.connector ?? {}), ...(secrets.collector ?? {}) };
                               return (
                                 <LogCollectorButton

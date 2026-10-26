@@ -1,14 +1,20 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
-import bcrypt from "bcryptjs";
 
 import { db } from "@/lib/db";
+import { logAction } from "@/lib/audit";
+import { isClientRole } from "@/lib/rbac";
+import { SSO } from "@/lib/sso";
+import { SignInStep, verifyCredentials } from "@/lib/credentials";
 
-// Five wrong passwords lock the account for 15 minutes. The lockout is per
-// account, so a password-spraying run against many accounts still trips it.
-const MAX_FAILED_LOGINS = 5;
-const LOCKOUT_MS = 15 * 60 * 1000;
+// The sign-in form reads these codes to ask for the next step (lib/credentials).
+class StepRequired extends CredentialsSignin {
+  constructor(code: string) {
+    super();
+    this.code = code;
+  }
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(db),
@@ -22,41 +28,53 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        code: { label: "Code", type: "text" },
       },
       authorize: async (credentials) => {
-        const email = credentials?.email as string | undefined;
-        const password = credentials?.password as string | undefined;
-        if (!email || !password) return null;
-
-        const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() }, include: { tenant: { select: { status: true } } } });
-        if (!user?.passwordHash || !user.active || user.tenant?.status === "SUSPENDED") return null;
-        if (user.lockedUntil && user.lockedUntil > new Date()) return null;
-
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) {
-          const failed = user.failedLogins + 1;
-          await db.user.update({
-            where: { id: user.id },
-            data: failed >= MAX_FAILED_LOGINS ? { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : { failedLogins: failed },
-          });
-          return null;
+        try {
+          return await verifyCredentials(credentials?.email as string | undefined, credentials?.password as string | undefined, (credentials?.code as string | undefined)?.trim());
+        } catch (err) {
+          if (err instanceof SignInStep) throw new StepRequired(err.code);
+          throw err;
         }
-        await db.user.update({ where: { id: user.id }, data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() } });
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-        };
       },
     }),
+    ...(SSO
+      ? [
+          {
+            id: SSO.id,
+            name: SSO.name,
+            type: "oidc" as const,
+            issuer: SSO.issuer,
+            clientId: process.env.HELIOS_SSO_CLIENT_ID,
+            clientSecret: process.env.HELIOS_SSO_CLIENT_SECRET,
+            // The company's own identity provider vouches for the address.
+            allowDangerousEmailAccountLinking: true,
+            checks: ["pkce" as const, "state" as const],
+          },
+        ]
+      : []),
   ],
   callbacks: {
-    jwt: async ({ token, user }) => {
+    signIn: async ({ account, profile, user }) => {
+      if (account?.provider !== "sso") return true;
+      const email = String(profile?.email ?? user.email ?? "").toLowerCase();
+      if (!email || profile?.email_verified === false) return "/login?error=sso_unverified";
+      const staff = await db.user.findUnique({ where: { email } });
+      // No new accounts from SSO, and no client accounts: invite people first.
+      if (!staff || !staff.active || staff.tenantId || isClientRole(staff.role)) {
+        await logAction({ action: "auth.sso_refused", detail: { email, reason: !staff ? "no account" : !staff.active ? "inactive" : "client account" } });
+        return "/login?error=sso_unknown";
+      }
+      await db.user.update({ where: { id: staff.id }, data: { lastLoginAt: new Date(), failedLogins: 0, lockedUntil: null } });
+      await logAction({ actorId: staff.id, action: "auth.signed_in", detail: { method: "sso", issuer: SSO?.issuer } });
+      return true;
+    },
+    jwt: async ({ token, user, account }) => {
       if (user) {
         token.id = user.id;
         token.role = (user as { role?: string }).role;
+        token.via = account?.provider === "sso" ? "sso" : "password";
       }
       return token;
     },
@@ -64,6 +82,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as string;
+        session.user.via = token.via;
       }
       return session;
     },

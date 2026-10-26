@@ -1,14 +1,30 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 
 // AES-256-GCM sealing for credentials stored in the database (AI provider
-// API keys, tool integration secrets). The key comes from
-// HELIOS_ENCRYPTION_KEY (32 bytes, base64) or, failing that, is derived from
-// AUTH_SECRET with HKDF — so a database dump alone never yields a usable
-// credential. Rotating the key requires re-entering stored secrets.
+// API keys, tool integration secrets). The master key comes from
+// HELIOS_ENCRYPTION_KEY_KMS (a 32-byte key encrypted by AWS KMS, decrypted
+// once at startup by lib/keys), HELIOS_ENCRYPTION_KEY (32 bytes, base64)
+// or, failing those, is derived from AUTH_SECRET with HKDF — so a database
+// dump alone never yields a usable credential. Clients' credentials are
+// sealed with their own data keys under this one (lib/keys).
 
 const VERSION = "v1";
 
+let kmsRoot: Buffer | null = null;
+
+// The master key as KMS returned it; lib/keys calls this at startup.
+export function setKmsRootKey(key: Buffer) {
+  if (key.length !== 32) throw new Error("The KMS-protected master key must be 32 bytes");
+  kmsRoot = key;
+}
+
+export const masterKeySource = () => (process.env.HELIOS_ENCRYPTION_KEY_KMS ? "aws-kms" : process.env.HELIOS_ENCRYPTION_KEY ? "environment" : "derived-from-auth-secret");
+
 function rootSecret(): Buffer | string {
+  if (process.env.HELIOS_ENCRYPTION_KEY_KMS) {
+    if (!kmsRoot) throw new Error("The KMS-protected master key isn't loaded yet");
+    return kmsRoot;
+  }
   const explicit = process.env.HELIOS_ENCRYPTION_KEY;
   if (explicit) {
     const buf = Buffer.from(explicit, "base64");
@@ -27,6 +43,11 @@ function key(): Buffer {
 
 // An HMAC-SHA256 under a key derived for one purpose (e.g. signing the
 // forwarder configurations HELIOS issues), never the sealing key itself.
+// A key for one purpose (wrapping clients' data keys), never the sealing key itself.
+export function derivedKey(purpose: string): Buffer {
+  return Buffer.from(hkdfSync("sha256", rootSecret(), "helios-keys", purpose, 32));
+}
+
 export function signFor(purpose: string, data: string): string {
   const k = Buffer.from(hkdfSync("sha256", rootSecret(), "helios-signing", purpose, 32));
   return createHmac("sha256", k).update(data).digest("hex");

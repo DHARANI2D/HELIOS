@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { requirePermission, type SessionUser } from "@/lib/session";
 import { ROLE_ORDER } from "@/lib/rbac";
-import { seal } from "@/lib/secrets";
+import { sealFor } from "@/lib/keys";
 import { resolveTenantInput } from "@/lib/tenants";
 import { getCatalogTool } from "@/lib/integrations/tools";
 import { pingConnector } from "@/lib/integrations/dispatch";
@@ -95,7 +95,7 @@ export async function updateIntegrationAction(id: string, input: z.input<typeof 
   const integration = await integrationInScope(user, id);
   const data = accessSchema.parse(input);
   const config = { ...((integration.config ?? {}) as IntegrationConfig), responseWebhookUrl: data.responseWebhookUrl || undefined };
-  const secrets = { ...readSecrets(integration.secretCipher) };
+  const secrets = { ...(await readSecrets(integration.secretCipher)) };
   if (data.webhookSecret) secrets.webhookSecret = data.webhookSecret;
   if (data.chatWebhookUrl) secrets.chatWebhookUrl = data.chatWebhookUrl;
   await db.$transaction([
@@ -105,7 +105,7 @@ export async function updateIntegrationAction(id: string, input: z.input<typeof 
       data: {
         allowedRoles: data.allowedRoles,
         config: config as never,
-        secretCipher: Object.keys(secrets).length ? seal(JSON.stringify(secrets)) : null,
+        secretCipher: Object.keys(secrets).length ? await sealFor(integration.tenantId, JSON.stringify(secrets)) : null,
         assignments: { create: data.assignedUserIds.map((userId) => ({ userId })) },
       },
     }),
@@ -150,7 +150,7 @@ export async function saveNativeConnectorAction(id: string, input: z.input<typeo
     if (v && /url|base|host/i.test(f.key) && !/^https:\/\//.test(v)) throw new Error(`${f.label} must start with https://`);
   }
   const config = { ...((integration.config ?? {}) as IntegrationConfig) };
-  const secrets = { ...readSecrets(integration.secretCipher) };
+  const secrets = { ...(await readSecrets(integration.secretCipher)) };
   const plain: Record<string, string> = { ...(config.connectorConfig ?? {}) };
   const hidden: Record<string, string> = { ...(secrets.connector ?? {}) };
   for (const f of connector.fields) {
@@ -168,7 +168,7 @@ export async function saveNativeConnectorAction(id: string, input: z.input<typeo
   config.connectorConfig = plain;
   config.credentialExpiresAt = data.credentialExpiresAt || undefined;
   secrets.connector = hidden;
-  await db.integration.update({ where: { id }, data: { config: config as never, secretCipher: seal(JSON.stringify(secrets)) } });
+  await db.integration.update({ where: { id }, data: { config: config as never, secretCipher: await sealFor(integration.tenantId, JSON.stringify(secrets)) } });
   const { forgetToken } = await import("@/lib/connectors/http");
   forgetToken(id);
   await logAction({ actorId: user.id, action: "integration.native_connector_saved", detail: { integrationId: id, connector: connector.key, on: data.on, mode: data.mode, fields: Object.keys(plain), secretsSet: Object.keys(hidden) } });
@@ -209,7 +209,7 @@ export async function saveCollectorAction(id: string, input: z.input<typeof coll
   if (data.on && !streams.length) throw new Error("Pick at least one log to collect");
   const shared = new Set((connectorForTool(integration.vendor)?.fields ?? []).map((f) => f.key));
   const config = { ...((integration.config ?? {}) as IntegrationConfig & { collector?: { key: string; streams: string[]; config?: Record<string, string> } }) };
-  const secrets = { ...readSecrets(integration.secretCipher) };
+  const secrets = { ...(await readSecrets(integration.secretCipher)) };
   const connectorPlain = { ...(config.connectorConfig ?? {}) };
   const connectorHidden = { ...(secrets.connector ?? {}) };
   const ownPlain = { ...(config.collector?.config ?? {}) };
@@ -235,7 +235,7 @@ export async function saveCollectorAction(id: string, input: z.input<typeof coll
   config.collector = data.on ? { key: collector.key, streams, config: ownPlain } : { key: collector.key, streams: [], config: ownPlain };
   secrets.connector = connectorHidden;
   secrets.collector = ownHidden;
-  await db.integration.update({ where: { id }, data: { config: config as never, secretCipher: seal(JSON.stringify(secrets)) } });
+  await db.integration.update({ where: { id }, data: { config: config as never, secretCipher: await sealFor(integration.tenantId, JSON.stringify(secrets)) } });
   // Start right away rather than at the next tick.
   if (data.on) await db.collectorCheckpoint.updateMany({ where: { integrationId: id }, data: { nextPollAt: new Date(), failures: 0 } });
   const { forgetToken } = await import("@/lib/connectors/http");

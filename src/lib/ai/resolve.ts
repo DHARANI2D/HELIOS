@@ -1,7 +1,7 @@
 import type { AiAgentProfile, AiProvider, CaseSeverity } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { unseal } from "@/lib/secrets";
+import { openSealed } from "@/lib/keys";
 import { AGENT_TYPES, type AgentKey } from "@/lib/ai/catalog";
 import type { Effort, LlmProvider } from "@/lib/ai/provider";
 import { anthropicProvider } from "@/lib/ai/anthropic";
@@ -55,9 +55,10 @@ function forcedBuiltin(key: AgentKey) {
   return false;
 }
 
-export function providerFromRow(row: AiProvider, modelOverride?: string | null): LlmProvider {
+export async function providerFromRow(row: AiProvider, modelOverride?: string | null): Promise<LlmProvider> {
   const model = modelOverride || row.model;
-  const apiKey = row.apiKeyCipher ? unseal(row.apiKeyCipher) : undefined;
+  // A client's own key is sealed with that client's data key (lib/keys).
+  const apiKey = row.apiKeyCipher ? await openSealed(row.apiKeyCipher) : undefined;
   if (row.kind === "anthropic") return anthropicProvider({ name: row.name, model, apiKey });
   if (!row.baseUrl) throw new Error(`Provider ${row.name} has no base URL`);
   return openAiCompatibleProvider({ name: row.name, baseUrl: row.baseUrl, model, apiKey, isLocal: row.isLocal });

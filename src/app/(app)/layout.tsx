@@ -13,6 +13,7 @@ import { CommandPalette } from "@/components/shell/command-palette";
 export default async function AppShellLayout({ children }: LayoutProps<"/">) {
   const user = await currentUser();
   if (!user) redirect("/login");
+  if (user.mfaPending) redirect("/account/security");
 
   const [tenants, selected, environment, ownTenant, company] = await Promise.all([
     user.isClient ? Promise.resolve([]) : db.tenant.findMany({ where: { status: { not: "SUSPENDED" } }, select: { id: true, name: true, isTest: true }, orderBy: { name: "asc" } }),
