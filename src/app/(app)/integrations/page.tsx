@@ -23,6 +23,13 @@ import { OnboardWizard } from "@/components/integrations/onboard-wizard";
 import { IntegrationControls } from "@/components/integrations/integration-controls";
 import { NativeConnectorButton } from "@/components/integrations/native-connector";
 import { connectorForTool, connectorInfo } from "@/lib/connectors/registry";
+import { collectorForTool, collectorInfo } from "@/lib/collectors/registry";
+import { collectorSetup } from "@/lib/collectors/run";
+import { DATA_CATEGORIES, sourceHealth } from "@/lib/ingest/health";
+import { forwarderState } from "@/lib/forwarder/service";
+import { LogCollectorButton } from "@/components/integrations/log-collector";
+import { ForwarderButton } from "@/components/integrations/forwarder-config";
+import { LogSources, type SourceRow } from "@/components/integrations/log-sources";
 
 const STATUS_VARIANT: Record<IntegrationStatus, "success" | "warning" | "outline" | "destructive"> = {
   CONNECTED: "success",
@@ -56,6 +63,22 @@ export default async function IntegrationsPage() {
     listCatalogTools({ includeInactive: true }),
   ]);
   const toolByKey = new Map(catalog.map((t) => [t.key, t]));
+  const ids = integrations.map((i) => i.id);
+  const [health, checkpoints, deadLetters, waiting, failed24h] = await Promise.all([
+    sourceHealth(integrations, now),
+    db.collectorCheckpoint.findMany({ where: { integrationId: { in: ids } } }),
+    db.ingestDeadLetter.findMany({ where: { integrationId: { in: ids }, replayedAt: null }, orderBy: { createdAt: "desc" }, take: 50, include: { integration: { select: { name: true } } } }),
+    db.ingestBatch.count({ where: { integrationId: { in: ids }, status: { in: ["QUEUED", "PROCESSING"] } } }),
+    db.ingestBatch.count({ where: { integrationId: { in: ids }, status: "FAILED", finishedAt: { gte: new Date(now.getTime() - 86_400_000) } } }),
+  ]);
+  const sources: SourceRow[] = integrations
+    .filter((i) => i.enabled && (DATA_CATEGORIES.has(i.category) || i.lastEventAt))
+    .map((i) => {
+      const h = health.get(i.id)!;
+      const setup = collectorSetup(i);
+      const via = setup?.streams.length ? `pulled: ${collectorForTool(i.vendor)?.label ?? "collector"}` : toolByKey.get(i.vendor)?.ingest === "forwarder" ? "forwarder" : "pushed to the ingest URL";
+      return { id: i.id, name: i.name, tenant: i.tenant?.name ?? null, state: h.state, lastEventAt: h.lastEventAt?.toISOString() ?? null, lastHour: h.lastHour, perHour7d: h.perHour7d, hours: h.hours, limitMinutes: h.limitMinutes, setting: i.quietAfterMinutes, quietCaseId: h.quietCaseId, via };
+    });
   const team = staff.map((u) => ({ id: u.id, name: u.name ?? u.email, role: roleLabel(u.role) }));
 
   const connected = integrations.filter((i) => i.status === "CONNECTED" && i.enabled).length;
@@ -116,6 +139,22 @@ export default async function IntegrationsPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Log sources</CardTitle>
+          <CardDescription>What each source has sent, hour by hour. Logs arrive three ways: pushed to the ingest URL, pulled by HELIOS from the vendor&apos;s API, or sent by the HELIOS forwarder.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LogSources
+            sources={sources}
+            queue={{ waiting, failed24h }}
+            deadLetters={deadLetters.map((d) => ({ id: d.id, integration: d.integration.name, reason: d.reason, raw: d.raw.slice(0, 400), createdAt: d.createdAt.toISOString() }))}
+            canManage={canManage}
+            now={now.toISOString()}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -188,6 +227,29 @@ export default async function IntegrationsPage() {
                                   canManage={canManage}
                                 />
                               );
+                            })()}
+                            {(() => {
+                              const collector = collectorForTool(i.vendor);
+                              if (!collector) return null;
+                              const setup = collectorSetup(i);
+                              const secrets = readSecrets(i.secretCipher);
+                              const stored = { ...(secrets.connector ?? {}), ...(secrets.collector ?? {}) };
+                              return (
+                                <LogCollectorButton
+                                  integrationId={i.id}
+                                  name={i.name}
+                                  info={collectorInfo(collector)}
+                                  enabled={setup?.streams ?? []}
+                                  values={Object.fromEntries(collector.fields.filter((f) => !f.secret).map((f) => [f.key, setup?.config?.[f.key] ?? config.connectorConfig?.[f.key] ?? ""]))}
+                                  secretsSet={collector.fields.filter((f) => f.secret && stored[f.key]).map((f) => f.key)}
+                                  streams={checkpoints.filter((c) => c.integrationId === i.id).map((c) => ({ key: c.stream, lastSuccessAt: c.lastSuccessAt?.toISOString() ?? null, lastError: c.lastError, records: c.records }))}
+                                  now={now.toISOString()}
+                                />
+                              );
+                            })()}
+                            {tool?.ingest === "forwarder" && (() => {
+                              const f = forwarderState(i);
+                              return <ForwarderButton integrationId={i.id} name={i.name} canManage={canManage} view={{ options: f?.options ?? null, currentHash: f?.current?.hash ?? null, issuedAt: f?.current?.issuedAt ?? null, seen: f?.seen ?? null }} />;
                             })()}
                             <IntegrationControls
                               id={i.id}

@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 // quote request from the website) fans
 // out through notify(); the bell in the top bar polls for them.
 
-export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla" | "lead" | "rulebook";
+export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla" | "lead" | "rulebook" | "ingest";
 
 export interface NotifyInput {
   kind: NotificationKind;

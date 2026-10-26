@@ -161,8 +161,12 @@ Timers in the server process:
 | Time-box rollbacks | Minute |
 | Credential reminders | 6 hours |
 | Ladder review | Hour |
+| Ingest queue (backstop for the kick after each enqueue) | 2 seconds |
+| Pull collectors (each stream on its own interval) | 30 seconds |
+| Source health | 5 minutes |
+| Finished-batch cleanup | Hour |
 
-Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them.
+Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them. With `HELIOS_INGEST_WORKER=external`, the last four run in `npm run worker` (`src/worker.ts`) instead of the web process; any number of workers can run.
 
 ### Response actions (`lib/response`)
 
@@ -199,10 +203,41 @@ Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable th
 ### Integrations (`lib/integrations`)
 
 - **Onboarding.** Onboarding a catalog tool (`getCatalogTool`, DB-backed with a 30s memo) issues an ingest token. The token is shown once and only its hash is stored. Secrets are sealed with AES-256-GCM.
-- **Ingest.** `POST /api/ingest/<id>` maps each vendor's own payload with `mappers.ts`:
+- **Mapping.** A batch's records are mapped with `mappers.ts`, by the tool's format or the pull stream's:
   - vendor alerts become cases, correlated per host or user;
-  - raw telemetry goes through SIEM detection;
+  - telemetry goes through SIEM detection, as OCSF events (below);
   - inventory updates the endpoint list with the controls that tool provides.
+
+### Log collection (`lib/ingest`, `lib/collectors`, `lib/forwarder`, `lib/ocsf`)
+
+Logs arrive three ways, all into one durable queue:
+
+1. **Push:** `POST /api/ingest/<id>` with the tool's ingest token, plain or gzip. The edge only authenticates, checks the body parses, and stores the raw batch (`ingest_batches`): 202 with the batch id. A client with 200 batches waiting gets 429 with Retry-After, so one noisy client can't starve the others.
+2. **Pull:** collectors poll vendor APIs with the client's read-only credentials. Each stream meets one contract (`poll(cursor)` returns records, the next checkpoint, whether more is ready, and for queues a `commit` that deletes or acknowledges only after the records are queued). The checkpoint (`collector_checkpoints`) moves page by page; failures back off, doubling to 30 minutes, and three in a row mark the integration degraded. A test read changes nothing at the vendor.
+
+   | Collector | Streams |
+   |---|---|
+   | Microsoft Entra ID | Sign-ins, directory audits, risk detections (Graph v1.0) |
+   | Microsoft Defender XDR | Alerts (Graph `security/alerts_v2`) |
+   | CrowdStrike Falcon | Alerts (alerts v2 query, then entities) |
+   | SentinelOne | Threats (v2.1, cursor paging) |
+   | Okta | System Log (polling mode, the next link is the checkpoint) |
+   | Google Workspace | Login audit (Reports API, service account with domain-wide delegation) |
+   | AWS CloudTrail | Trail files named in SQS notifications, read from S3, messages deleted after queueing (SigV4) |
+   | Azure Activity Log | Subscription activity (Azure Monitor REST) |
+   | Google Cloud audit logs | A Pub/Sub subscription on a log sink, acknowledged after queueing |
+
+   Collectors share credentials with the tool's response connector where field names match, so one app registration serves both. Time-window streams reach back past the checkpoint (15 minutes for Graph, two hours for Google's Reports API) because logs arrive late; the overlap's repeats are dropped at storage. Every call is written against the vendor's documentation (Graph's docs repository, FalconPy's endpoint definitions, the Okta polling rules); the SigV4 signer reproduces AWS's published test vector. SentinelOne's API reference is behind its console and wasn't available. Check each collector against a lab tenant before production.
+3. **Forwarder:** a stock Fluent Bit (3.x or later) running a configuration HELIOS generates from the onboarding answers. It reads syslog over UDP or TCP (RFC 3164 or 5424), Windows event logs (Security, System, Sysmon, PowerShell script blocks, each with an event filter) and tailed files. It buffers to disk and sends gzip JSON lines over HTTPS. The token comes from an environment variable, never the file. The file is hashed and signed (an HMAC under a key derived for that purpose). The forwarder sends the hash with every request (`X-Helios-Config`), so HELIOS shows whether each forwarder runs the current configuration, an older one, or one it didn't issue, and notifies the SOC when that changes. Anyone can paste a file to check it against its signature. None of this stops an administrator of the box from editing it; source health catches a forwarder that goes quiet.
+
+**Workers** (`queue.ts`) claim batches with `FOR UPDATE SKIP LOCKED`, taking tenants in turn. They map, enrich and detect; a failed batch retries with backoff (30 s, 60 s), then fails whole into the dead-letter queue. Records no mapper can read (not an object, no readable timestamp) go to `ingest_dead_letters` as received, and the integrations page replays them. Processed batches keep their result for a week; the payload is cleared.
+
+**OCSF.** Every stored event carries its OCSF 1.9 form (`security_events.ocsf`, `classUid`): Authentication, Account Change, Process, File System, Network, HTTP, DNS, API Activity, Detection Finding, or Base Event. Sources mapped OCSF-first derive the flat columns the detectors read from it (`columnsFromOcsf`). These are Windows events, syslog (CEF, OPNsense/pfSense filterlog, FortiGate and other key=value logs, OpenSSH), Entra sign-ins and audits, Okta, Google Workspace, CloudTrail, Google Cloud audit logs and the Azure Activity Log. The original telemetry adapters, uploaded investigation logs and governance decisions are written as columns, and their OCSF form is derived (`ocsfFromColumns`). Fields with no OCSF home stay in `metadata` (OCSF's `unmapped`). The source's own event id goes in `sourceEventId`, unique per integration, so a re-poll or resend is stored once. Syslog has no id, so its id is a hash of host, receive time and text. Windows fields are read by name when Fluent Bit sends `EventData`, otherwise by template position for Security events, and from the rendered message for Sysmon. Check positions against a lab forwarder before relying on a new event id.
+
+**Source health** (`health.ts`) counts each source's events per hour (`source_health_hours`). A source silent longer than its limit opens a case of its own (HIGH for an EDR, identity provider or forwarder, T1562), because attackers often stop logging first. When the source is back, the case gets a timeline entry; an analyst closes it.
+- **Limit:** the integration's own setting (0 = never). The default is two hours for telemetry, or a day when its median is under two events an hour since it started sending. Alert-only feeds (EDR alerts) aren't watched unless set.
+- **Old silences:** a source silent for over a week when first checked is marked quiet without a case.
+- **Go-live:** a client can't move from onboarding to active until every data source has sent something in the last day and none is quiet.
 
 ## One write path
 
@@ -329,7 +364,8 @@ An empty trigger never matches.
 
 ## Data model notes
 
-- `SecurityEvent` is the one telemetry table for SIEM ingestion and investigation evidence. Tables are separated by `platform` / `batchId`; investigation events carry their `caseId`.
+- `SecurityEvent` is the one telemetry table for SIEM ingestion and investigation evidence. Tables are separated by `platform` / `batchId`; investigation events carry their `caseId`. Every row has its OCSF form (`ocsf`, `classUid`); `(integrationId, sourceEventId)` is unique.
+- `IngestBatch` is the queue between the ingest edge and the workers; `IngestDeadLetter` keeps unreadable records; `CollectorCheckpoint` is where each pull stream got to; `SourceHealthHour` counts events per source per hour.
 - `Detection.fingerprint` is unique and nullable: SIEM detections set it, while other sources may leave it empty.
 - `PlaybookExecution.triggeredBy` is `auto`, `manual` or `retroactive`; failures record `error`.
 - `ApiToken` stores only `tokenHash` and a short `prefix`; `Tenant.isTest` marks test clients.

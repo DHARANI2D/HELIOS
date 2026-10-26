@@ -1,6 +1,7 @@
 import type { Agent, CaseSeverity, DetectionSource } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { rowFromColumns } from "@/lib/ocsf/rows";
 import { logAction } from "@/lib/audit";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
 import { appendToCase, createCase } from "@/lib/cases/writer";
@@ -87,17 +88,19 @@ export async function evaluateAgentAction(agent: Agent, event: ActionEvent, envi
 
   const now = new Date();
   const securityEvent = await db.securityEvent.create({
-    data: {
-      timestamp: now,
-      source: "cloud",
-      platform: "helios-governance",
-      eventType: `agent.${result.decision.toLowerCase()}`,
-      userName: agent.name,
-      service: event.name,
-      severityHint: result.decision === "ALLOW" ? "info" : severityFor(result).toLowerCase(),
-      tenantId: agent.tenantId,
-      metadata: JSON.parse(JSON.stringify({ agentId: agent.id, environment, decision: result.decision, layer, reason: result.reason, action: event, trustBefore, trust })),
-    },
+    data: rowFromColumns(
+      {
+        timestamp: now,
+        source: "cloud",
+        platform: "helios-governance",
+        eventType: `agent.${result.decision.toLowerCase()}`,
+        userName: agent.name,
+        service: event.name,
+        severityHint: result.decision === "ALLOW" ? "info" : severityFor(result).toLowerCase(),
+        metadata: JSON.parse(JSON.stringify({ agentId: agent.id, environment, decision: result.decision, layer, reason: result.reason, action: event, trustBefore, trust, status: result.decision === "DENY" ? "DENIED" : "SUCCESS" })),
+      },
+      { tenantId: agent.tenantId },
+    ),
   });
 
   let caseId: string | null = null;

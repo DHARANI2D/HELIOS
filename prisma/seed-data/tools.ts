@@ -174,6 +174,13 @@ export const CATALOG_TOOLS: SeedTool[] = [
     priceUnit: "user", listPrice: 5, priceSource: "SSO from $2 + MFA from $3 per user per month — okta.com/pricing",
   },
   {
+    key: "google_workspace", name: "Workspace", vendor: "Google", category: "identity",
+    description: "Google Workspace sign-ins and account warnings from the Admin SDK Reports API.",
+    controls: ["mfa"], actions: [],
+    ingest: "google_workspace", platforms: ["Google Workspace"], deployment: "cloud", offlineCapable: false,
+    priceUnit: "user", listPrice: null, priceSource: QUOTE_ONLY,
+  },
+  {
     key: "duo_advantage", name: "Duo Advantage", vendor: "Cisco", category: "identity",
     description: "MFA with device trust and risk-based authentication.",
     controls: ["mfa"], actions: ["DISABLE_USER", "ENABLE_USER"],
@@ -226,11 +233,39 @@ export const CATALOG_TOOLS: SeedTool[] = [
     priceUnit: "gb", listPrice: null, priceSource: QUOTE_ONLY,
   },
   {
+    key: "helios_forwarder", name: "HELIOS log forwarder", vendor: "HELIOS", category: "siem",
+    description: "A HELIOS-configured Fluent Bit that collects syslog from firewalls and network gear, Windows event logs and log files, buffers to disk and sends them compressed over HTTPS.",
+    controls: ["siem"], actions: [],
+    ingest: "forwarder", platforms: ["Windows", "Linux"], deployment: "self-hosted", offlineCapable: true,
+    priceUnit: "flat", listPrice: 0, priceSource: "Fluent Bit is open source (Apache 2.0); part of the HELIOS service plan",
+  },
+  {
     key: "helios_siem", name: "HELIOS built-in detection", vendor: "HELIOS", category: "siem",
     description: "This platform's own detection engine and telemetry store.",
     controls: ["siem"], actions: [],
     ingest: "generic", platforms: ["Any"], deployment: "hybrid", offlineCapable: true,
     priceUnit: "gb", listPrice: 0, priceSource: "Part of the HELIOS service plan",
+  },
+  {
+    key: "aws_cloudtrail", name: "CloudTrail", vendor: "AWS", category: "cloud",
+    description: "AWS account activity: console sign-ins and every management API call, collected from the trail's S3 bucket through an SQS queue.",
+    controls: ["cspm"], actions: [],
+    ingest: "cloudtrail", platforms: ["AWS"], deployment: "cloud", offlineCapable: false,
+    priceUnit: "flat", listPrice: 0, priceSource: "The first copy of management events is free; data events and extra trails are billed by AWS",
+  },
+  {
+    key: "azure_activity", name: "Azure Activity Log", vendor: "Microsoft", category: "cloud",
+    description: "Control-plane activity across Azure subscriptions: who created, changed or deleted which resource.",
+    controls: ["cspm"], actions: [],
+    ingest: "azure_activity", platforms: ["Azure"], deployment: "cloud", offlineCapable: false,
+    priceUnit: "flat", listPrice: 0, priceSource: "Included with every Azure subscription (90 days)",
+  },
+  {
+    key: "gcp_audit_logs", name: "Cloud Audit Logs", vendor: "Google", category: "cloud",
+    description: "Google Cloud admin activity audit logs, routed to a Pub/Sub topic for HELIOS to pull.",
+    controls: ["cspm"], actions: [],
+    ingest: "gcp_audit", platforms: ["Google Cloud"], deployment: "cloud", offlineCapable: false,
+    priceUnit: "flat", listPrice: 0, priceSource: "Admin Activity logs are free; Pub/Sub usage is billed by Google",
   },
   // --- Backup
   {

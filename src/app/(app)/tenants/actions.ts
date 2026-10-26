@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { startShadowMode } from "@/lib/shadow/service";
+import { goLiveBlockers } from "@/lib/ingest/health";
 import { logAction } from "@/lib/audit";
 import { requirePermission, requireUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
@@ -34,8 +35,15 @@ export async function saveTenantAction(input: z.input<typeof tenantSchema>, tena
   const fields = { ...data, contactEmail: data.contactEmail || null, industry: data.industry || null, contactName: data.contactName || null, notes: data.notes || null };
   let saved;
   if (tenantId) {
+    // Going live needs every log source sending: a pilot can't start with dead sources.
+    const before = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { status: true } });
+    if (data.status === "ACTIVE" && before.status !== "ACTIVE") {
+      const blockers = await goLiveBlockers(tenantId);
+      if (blockers.length) throw new Error(`Not ready to go live: ${blockers.join("; ")}`);
+    }
     saved = await db.tenant.update({ where: { id: tenantId }, data: fields });
   } else {
+    if (data.status === "ACTIVE") throw new Error("A new client starts in onboarding: it goes live once its log sources are sending");
     let slug = slugify(data.name);
     if (await db.tenant.findUnique({ where: { slug } })) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     saved = await db.tenant.create({ data: { ...fields, slug, ...(plan ? { aiAutonomyCap: plan.defaultAutonomyCap } : {}) } });

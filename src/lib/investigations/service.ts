@@ -3,6 +3,7 @@ import { unzipSync, type Unzipped } from "fflate";
 import type { CaseSeverity, Prisma, SecurityEvent } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { rowFromColumns } from "@/lib/ocsf/rows";
 import { logAction } from "@/lib/audit";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
 import { findRelatedCases } from "@/lib/cases/related";
@@ -203,27 +204,28 @@ const SOURCE_FOR_TYPE = (eventType: string) =>
   AUTH_TYPES.has(eventType) ? "auth" : eventType.startsWith("network") || eventType === "dns_query" ? "network" : "endpoint";
 
 function toRow(e: UesEvent, caseId: string, batchId: string): Prisma.SecurityEventCreateManyInput {
-  return {
-    caseId,
-    batchId,
-    timestamp: e.timestamp,
-    source: SOURCE_FOR_TYPE(e.eventType),
-    platform: e.platform,
-    eventType: e.eventType,
-    userName: e.userName,
-    hostName: e.hostName,
-    processName: e.processName,
-    processPid: e.processPid,
-    parentProcessName: e.parentProcessName,
-    parentProcessPid: e.parentProcessPid,
-    commandLine: e.commandLine,
-    sourceIp: e.hostIp,
-    destIp: e.dstIp,
-    destPort: e.dstPort,
-    filePath: e.filePath,
-    fileHash: e.fileHash,
-    metadata: JSON.parse(JSON.stringify({ query: e.query, raw: e.raw })),
-  };
+  return rowFromColumns(
+    {
+      timestamp: e.timestamp,
+      source: SOURCE_FOR_TYPE(e.eventType),
+      platform: e.platform,
+      eventType: e.eventType,
+      userName: e.userName,
+      hostName: e.hostName,
+      processName: e.processName,
+      processPid: e.processPid,
+      parentProcessName: e.parentProcessName,
+      parentProcessPid: e.parentProcessPid,
+      commandLine: e.commandLine,
+      sourceIp: e.hostIp,
+      destIp: e.dstIp,
+      destPort: e.dstPort,
+      filePath: e.filePath,
+      fileHash: e.fileHash,
+      metadata: JSON.parse(JSON.stringify({ query: e.query, raw: e.raw })),
+    },
+    { caseId, batchId },
+  );
 }
 
 export function fromRow(row: SecurityEvent): UesEvent {

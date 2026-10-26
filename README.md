@@ -11,6 +11,7 @@
 | **Clients & plans** | Each client (tenant) has a service plan that sets its SLA targets, the most autonomy its AI agents may take, and what it pays. Client users get their own portal: incidents, endpoints, approvals, AI consent. |
 | **Roles** | 11 roles (platform admin, SOC manager, tier-1/2/3 analysts, threat hunter, detection engineer, auditor, account manager, client admin, client stakeholder). Navigation, queues and actions follow the role; analysts can be limited to security domains (endpoint, identity, email, network, cloud, AI agents). |
 | **Tools & integrations** | Onboard each client's EDR, antivirus, MDM, email security, identity, firewall, SIEM, backup, ticketing and chat tools. Tools are assigned per role or per person. Vendor alerts arrive on a per-tool ingest URL and become cases; hosts become the endpoint inventory with the protection each tool provides. |
+| **Log collection** | Logs are pushed to the ingest URL, pulled by HELIOS from vendor APIs (Entra ID sign-ins, audits and risk, Defender XDR, CrowdStrike, SentinelOne, Okta, Google Workspace, AWS CloudTrail, the Azure Activity Log, Google Cloud audit logs), or sent by the HELIOS forwarder, a signed Fluent Bit configuration for syslog, Windows event logs and files. Everything goes through a durable queue that takes clients in turn. Every event is stored once, in OCSF form, and unreadable records wait in a dead-letter queue to be replayed. A source that goes quiet opens a case, and a client can't go live while a source is dead. |
 | **Cases & alerts** | One queue for every source, with: <ul><li>tier-1/2/3 escalation;</li><li>assignment, watchers, @mentions and internal or client-visible discussion;</li><li>SLA clocks from the client's plan;</li><li>notifications;</li><li>correlation of related alerts into one case.</li></ul> |
 | **AI first responder** | On every new case an AI agent triages, explains its verdict with cited evidence, and proposes containment. A grounding check rejects targets the evidence doesn't contain. Evidence is treated as attacker-controlled: text aimed at the AI is flagged and escaped, a fooled model can't downgrade a case, and anything proposed from steered evidence waits for a person. A deterministic policy (kill switch, plan, client consent, the client's rulebook, its autonomy ladder, per-agent autonomy, allow-list, confidence bar, critical-endpoint guard, model evaluation, rate limit) decides what runs, what waits for approval, and what is only suggested, and records which rule decided. Agent types and models are chosen per agent: Claude online today, local or offline models (Ollama, LM Studio, vLLM) when you're ready. |
 | **Response actions** | Containment goes through native connectors that call the vendor's API with the client's own credentials (Defender for Endpoint, Entra ID, CrowdStrike Falcon, SentinelOne, Okta, Cloudflare), or through a signed webhook to your automation or SOAR. An action counts only once the vendor confirms it. Each connector can run in dry-run mode first. Repeated connector failures pause automation for that client, and IP blocks and account disables can be time-boxed. Without a connector, an action is left **to do by hand** and only counts once an analyst confirms they did it. Every action can be rolled back and is audited. |
@@ -77,6 +78,8 @@ None of the integrations is required. Provider keys can be saved under **Setting
 | MxToolbox key (`MXTOOLBOX_API_KEY`) | Email forensics skips sender-domain diagnostics |
 | `DETONATION_PROXY` (else `HTTPS_PROXY` / `HTTP_PROXY`) | Link detonation connects directly |
 
+The ingest workers (queue, pull collectors, source health) run in the web process. To run them on their own, set `HELIOS_INGEST_WORKER=external` on the web servers and run `npm run worker` (any number of them). `HELIOS_INGEST_MAX_PENDING` sets how many batches a client may have waiting (200).
+
 ### Test data
 
 ```bash
@@ -124,7 +127,7 @@ CI (`.github/workflows/ci.yml`) runs:
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /api/ingest/<integrationId>` | Bearer ingest token (shown once at onboarding) | A client tool pushes alerts, telemetry or inventory in its own format; inventory rows can carry `assetClass` and `assetType` (e.g. `network`/`firewall`, `iot_ot`/`plc`) |
+| `POST /api/ingest/<integrationId>` | Bearer ingest token (shown once at onboarding) | A client tool or the HELIOS forwarder pushes alerts, telemetry or inventory in its own format, plain or `Content-Encoding: gzip`; answered 202 with a batch id once queued (429 with Retry-After when the client's queue is full). Inventory rows can carry `assetClass` and `assetType` (e.g. `network`/`firewall`, `iot_ot`/`plc`) |
 | `POST /api/governance/evaluate` | Bearer agent token (shown once at identity issue) | A governed AI agent asks before acting |
 | `GET /api/threat-intel/blocklist` | — | Plain-text blocklist for firewalls to pull |
 | `GET /api/health` | — | Liveness and database check |

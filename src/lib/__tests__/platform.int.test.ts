@@ -25,7 +25,14 @@ import { GOLDEN } from "@/lib/ai/evals/golden";
 import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
 import { setCaseStatus } from "@/lib/cases/service";
 import { circuitBreakerFor, rollBackExpired, verifyInProgress } from "@/lib/connectors/safety";
-import { onboardIntegration } from "@/lib/integrations/service";
+import { ingestForIntegration, onboardIntegration } from "@/lib/integrations/service";
+import { QUEUE, QuotaError, drainQueue, enqueueBatch, replayDeadLetters } from "@/lib/ingest/queue";
+import { checkSourceHealth, goLiveBlockers, recordSourceEvents } from "@/lib/ingest/health";
+import { runDueCollectors } from "@/lib/collectors/run";
+import { checkForwarderConfig, forwarderState, issueForwarderConfig, noteForwarderConfig } from "@/lib/forwarder/service";
+import { samplePayloadFor } from "@/lib/__tests__/fixtures/vendor-payloads";
+import type { Http } from "@/lib/connectors/http";
+import { seal } from "@/lib/secrets";
 import { signPayload } from "@/lib/integrations/dispatch";
 import { invalidateCatalog } from "@/lib/integrations/tools";
 import { ingestTelemetry } from "@/lib/siem/service";
@@ -600,6 +607,148 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(await getSetting("platform.environment")).toBe("test");
     expect(await db.user.findUnique({ where: { email: "admin@helios.test" } })).toMatchObject({ role: "ADMIN" });
     expect(await db.auditLog.findFirst({ where: { action: "platform.environment_changed" } })).not.toBeNull();
+  });
+
+  it("queues pushed logs, maps them to OCSF, stores each event once and keeps what it can't read", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Logs", slug: "test-logs" } });
+    const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "helios_forwarder" }, adminId);
+    const records = samplePayloadFor({ ingest: "forwarder", category: "siem" }) as unknown[];
+    const payload = JSON.stringify([...records, "not a record", { EventID: 4624, Channel: "Security", TimeCreated: "whenever" }]);
+
+    const batch = await enqueueBatch(integration, payload, { channel: "forwarder" });
+    await drainQueue();
+    const done = await db.ingestBatch.findUniqueOrThrow({ where: { id: batch.id } });
+    expect(done).toMatchObject({ status: "DONE", payload: "", result: { received: 11, deadLettered: 2, telemetryEvents: 9 } });
+    const events = await db.securityEvent.findMany({ where: { integrationId: integration.id }, orderBy: { timestamp: "asc" } });
+    expect(events.map((e) => e.classUid)).toEqual(expect.arrayContaining([3002, 1007, 4001]));
+    expect(events.find((e) => e.classUid === 1007)).toMatchObject({ commandLine: "vssadmin.exe delete shadows /all /quiet", userName: "administrator", sourceEventId: "FIN-WS-04.corp.helios.test:Security:88111" });
+    expect((events[0].ocsf as { metadata: { version: string } }).metadata.version).toBe("1.9.0");
+    // Failed logons, a success, then shadow copies deleted by the same account: a case.
+    const kase = await db.case.findFirstOrThrow({ where: { tenantId: tenant.id }, include: { detections: true } });
+    expect(kase.detections.map((d) => d.ruleId)).toEqual(expect.arrayContaining([expect.stringMatching(/login_chain_sensitive_action/)]));
+
+    // Sent again: every event is already stored.
+    const again = await enqueueBatch(integration, JSON.stringify(records), { channel: "forwarder" });
+    await drainQueue();
+    expect((await db.ingestBatch.findUniqueOrThrow({ where: { id: again.id } })).result).toMatchObject({ telemetryEvents: 0, duplicates: 9 });
+    expect(await db.securityEvent.count({ where: { integrationId: integration.id } })).toBe(9);
+
+    // The unreadable records wait in the dead-letter queue and can be replayed.
+    const dead = await db.ingestDeadLetter.findMany({ where: { integrationId: integration.id } });
+    expect(dead.map((d) => d.reason).sort()).toEqual(["Not a JSON object", "Windows event 4624 has no readable TimeCreated"]);
+    expect(await replayDeadLetters(dead.map((d) => d.id), adminId)).toBe(2);
+    await drainQueue();
+    expect(await db.ingestDeadLetter.count({ where: { integrationId: integration.id, replayedAt: null } })).toBe(2);
+
+    // One noisy client can't fill the queue.
+    const limit = QUEUE.maxPendingPerTenant;
+    process.env.HELIOS_INGEST_KICK = "off";
+    QUEUE.maxPendingPerTenant = 1;
+    await enqueueBatch(integration, "[]", { channel: "push" });
+    await expect(enqueueBatch(integration, "[]", { channel: "push" })).rejects.toBeInstanceOf(QuotaError);
+    QUEUE.maxPendingPerTenant = limit;
+    delete process.env.HELIOS_INGEST_KICK;
+    await drainQueue();
+
+    // A disabled source's batches fail into the dead-letter queue, whole.
+    await db.integration.update({ where: { id: integration.id }, data: { enabled: false } });
+    const off = await enqueueBatch(integration, JSON.stringify(records.slice(0, 1)), { channel: "forwarder" });
+    await drainQueue();
+    expect(await db.ingestBatch.findUniqueOrThrow({ where: { id: off.id } })).toMatchObject({ status: "FAILED" });
+    expect(await db.ingestDeadLetter.count({ where: { batchId: off.id, reason: { contains: "disabled" } } })).toBe(1);
+    // Counted per hour as received: 11, 9 resent, 2 replayed (the disabled source's batch never reached a mapper).
+    expect(await db.sourceHealthHour.aggregate({ where: { integrationId: integration.id }, _sum: { events: true } })).toMatchObject({ _sum: { events: 22 } });
+  });
+
+  it("pulls logs through the queue on a schedule and keeps its checkpoint", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Pull", slug: "test-pull" } });
+    const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "entra_p2" }, adminId);
+    await db.integration.update({
+      where: { id: integration.id },
+      data: {
+        config: { ...(integration.config as object), connectorConfig: { tenantId: "t", clientId: "c" }, collector: { key: "entra_logs", streams: ["entra.signins"] } },
+        secretCipher: seal(JSON.stringify({ connector: { clientSecret: "s" } })),
+      },
+    });
+    const at = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    const signIns = [
+      ...Array.from({ length: 3 }, (_, i) => ({ id: `si-${i}`, createdDateTime: at(10 - i), userPrincipalName: "cfo@corp.helios.test", ipAddress: "203.0.113.90", status: { errorCode: 50126, failureReason: "Invalid username or password" }, location: { countryOrRegion: "RO" } })),
+      { id: "si-ok", createdDateTime: at(5), userPrincipalName: "cfo@corp.helios.test", ipAddress: "203.0.113.90", status: { errorCode: 0 }, location: { countryOrRegion: "RO" } },
+    ];
+    let fail = false;
+    const http = (async (url: string) => {
+      if (fail) throw new Error("graph.microsoft.com unreachable");
+      return { status: 200, headers: new Headers(), data: url.includes("login.microsoftonline.com") ? { access_token: "x", expires_in: 3600 } : { value: [...signIns].reverse() } };
+    }) as unknown as Http;
+    const [run] = await runDueCollectors(new Date(), http);
+    expect(run).toMatchObject({ stream: "entra.signins", ok: true, records: 4 });
+    await drainQueue();
+    const events = await db.securityEvent.findMany({ where: { integrationId: integration.id } });
+    expect(events).toHaveLength(4);
+    expect(events.every((e) => e.platform === "Microsoft Entra ID" && e.classUid === 3002)).toBe(true);
+    expect(events.filter((e) => e.eventType === "LOGIN_FAIL")).toHaveLength(3);
+    const cp = await db.collectorCheckpoint.findUniqueOrThrow({ where: { integrationId_stream: { integrationId: integration.id, stream: "entra.signins" } } });
+    expect(JSON.parse(cp.cursor!).since).toBe(signIns[3].createdDateTime);
+    expect(cp.nextPollAt.getTime()).toBeGreaterThan(Date.now());
+    // Not due again yet; a failure backs off and is recorded on the stream.
+    expect(await runDueCollectors(new Date(), http)).toEqual([]);
+    fail = true;
+    const where = { integrationId_stream: { integrationId: cp.integrationId, stream: cp.stream } };
+    await db.collectorCheckpoint.update({ where, data: { nextPollAt: new Date(0) } });
+    const [failed] = await runDueCollectors(new Date(), http);
+    expect(failed).toMatchObject({ ok: false, message: expect.stringMatching(/unreachable/) });
+    expect(await db.collectorCheckpoint.findUniqueOrThrow({ where })).toMatchObject({ failures: 1, cursor: cp.cursor });
+  });
+
+  it("knows which forwarder configuration each forwarder runs", async () => {
+    const { integration } = await onboardIntegration({ tenantId: null, vendor: "helios_forwarder", name: "Test forwarder" }, adminId);
+    // A forwarder can report before HELIOS has issued it anything.
+    await noteForwarderConfig(integration, "e".repeat(64));
+    expect(forwarderState(await db.integration.findUniqueOrThrow({ where: { id: integration.id } }))).toMatchObject({ seen: { status: "unknown" }, history: [] });
+    const options = { os: "linux" as const, syslog: { udpPort: 514, tcpPort: null, format: "rfc3164" as const }, windowsChannels: [], files: [], bufferLimitMb: 512 };
+    const first = await issueForwarderConfig(integration.id, options, { id: adminId });
+    const second = await issueForwarderConfig(integration.id, { ...options, bufferLimitMb: 1024 }, { id: adminId });
+    expect(checkForwarderConfig(second.text)).toMatchObject({ ok: true, hash: second.hash });
+    const seen = async (hash: string) => {
+      await noteForwarderConfig(await db.integration.findUniqueOrThrow({ where: { id: integration.id } }), hash);
+      return forwarderState(await db.integration.findUniqueOrThrow({ where: { id: integration.id } }))?.seen?.status;
+    };
+    expect(await seen(second.hash)).toBe("current");
+    expect(await seen(first.hash)).toBe("outdated");
+    expect(await seen("f".repeat(64))).toBe("unknown");
+    expect(await db.auditLog.count({ where: { action: "forwarder.config_drift" } })).toBe(3);
+  });
+
+  it("opens a case when a source goes quiet, notes when it's back, and holds go-live until sources send", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Health", slug: "test-health" } });
+    expect(await goLiveBlockers(tenant.id)).toEqual(["No log source is connected yet"]);
+    const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "okta_workforce" }, adminId);
+    expect(await goLiveBlockers(tenant.id)).toEqual([`${integration.name} hasn't sent anything yet`]);
+    const now = new Date();
+    // A steady source that stopped three hours ago.
+    for (let h = 4; h < 72; h++) await recordSourceEvents(integration.id, 40, new Date(now.getTime() - h * 3_600_000));
+    await db.integration.update({ where: { id: integration.id }, data: { lastEventAt: new Date(now.getTime() - 3 * 3_600_000) } });
+    expect((await checkSourceHealth(now)).opened).toBe(1);
+    const quiet = await db.integration.findUniqueOrThrow({ where: { id: integration.id } });
+    expect(quiet).toMatchObject({ status: "DEGRADED", quietSince: expect.any(Date) });
+    const kase = await db.case.findUniqueOrThrow({ where: { id: quiet.quietCaseId! }, include: { mitreTechniques: true } });
+    expect(kase).toMatchObject({ title: `Log source went quiet: ${integration.name}`, severity: "HIGH", tenantId: tenant.id });
+    expect(await goLiveBlockers(tenant.id)).toEqual([expect.stringMatching(/has been quiet since/)]);
+    // Checking again doesn't open another.
+    expect((await checkSourceHealth(now)).opened).toBe(0);
+
+    await ingestForIntegration(quiet, [{ eventType: "user.session.start", published: now.toISOString(), uuid: "health-1", actor: { alternateId: "a@x.test" }, outcome: { result: "SUCCESS" } }]);
+    expect((await checkSourceHealth(new Date())).resumed).toBe(1);
+    expect(await db.integration.findUniqueOrThrow({ where: { id: integration.id } })).toMatchObject({ quietSince: null, status: "CONNECTED" });
+    expect(await db.timelineEntry.count({ where: { caseId: kase.id, action: "source.resumed" } })).toBe(1);
+    expect(await goLiveBlockers(tenant.id)).toEqual([]);
+
+    // Silent for over a week: marked quiet, not raised as a new case.
+    const { integration: old } = await onboardIntegration({ tenantId: tenant.id, vendor: "okta_workforce", name: "Retired Okta" }, adminId);
+    await db.integration.update({ where: { id: old.id }, data: { lastEventAt: new Date(Date.now() - 8 * 86_400_000) } });
+    expect((await checkSourceHealth(new Date())).opened).toBe(0);
+    expect(await db.integration.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ quietSince: expect.any(Date), quietCaseId: null, status: "DEGRADED" });
+    expect(await goLiveBlockers(tenant.id)).toEqual([expect.stringMatching(/^Retired Okta has been quiet since/)]);
   });
 
   it("stores provider keys sealed, preferring them over the environment", async () => {

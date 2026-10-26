@@ -155,9 +155,9 @@ describe("roles", () => {
 
 describe("vendor alert mappers", () => {
   it("maps each vendor's own payload shape to alerts", () => {
-    const crowdstrike = recordsFrom(samplePayloadFor({ ingest: "crowdstrike", category: "edr" })).map((r) => mapRecord("crowdstrike", r, "endpoint"));
+    const crowdstrike = recordsFrom(samplePayloadFor({ ingest: "crowdstrike", category: "edr" })).flatMap((r) => mapRecord("crowdstrike", r, "endpoint"));
     expect(crowdstrike[0]).toMatchObject({ kind: "alert", alert: { severity: "CRITICAL", host: "FIN-LAPTOP-07" } });
-    const defender = recordsFrom(samplePayloadFor({ ingest: "defender", category: "edr" })).map((r) => mapRecord("defender", r, "endpoint"));
+    const defender = recordsFrom(samplePayloadFor({ ingest: "defender", category: "edr" })).flatMap((r) => mapRecord("defender", r, "endpoint"));
     expect(defender[0].kind).toBe("alert");
     if (defender[0].kind === "alert") expect(defender[0].alert.techniques).toEqual(expect.arrayContaining(["T1059.001"]));
   });

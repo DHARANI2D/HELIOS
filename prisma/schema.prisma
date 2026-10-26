@@ -321,10 +321,18 @@ model SecurityEvent {
   metadata          Json?
   tenantId          String?
   integrationId     String? // set when pushed through an onboarded tool's webhook
+  // The event in OCSF form and its class (lib/ocsf): sources mapped
+  // OCSF-first derive the columns above from it; the others derive it from them.
+  classUid          Int?
+  ocsf              Json?
+  // The source's own event id: an event pulled or sent twice is stored once.
+  sourceEventId     String?
 
   case   Case?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  @@unique([integrationId, sourceEventId])
+  @@index([tenantId, classUid, timestamp])
   @@index([tenantId, timestamp])
   @@index([timestamp])
   @@index([caseId])
@@ -697,14 +705,111 @@ model Integration {
   lastEventAt     DateTime?
   eventCount      Int               @default(0)
   lastError       String?
+  // Source health (lib/ingest/health): how long it may be silent before
+  // that is itself a finding (null: by category), and the open quiet spell.
+  quietAfterMinutes Int?
+  quietSince        DateTime?
+  quietCaseId       String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   tenant      Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   assignments IntegrationAssignment[]
+  batches     IngestBatch[]
+  deadLetters IngestDeadLetter[]
+  checkpoints CollectorCheckpoint[]
+  healthHours SourceHealthHour[]
 
   @@index([tenantId, category])
   @@map("integrations")
+}
+
+enum IngestBatchStatus {
+  QUEUED
+  PROCESSING
+  DONE
+  FAILED
+}
+
+// Raw batches between the ingest edge and the normalisers (lib/ingest): the
+// edge only authenticates, stamps and stores; workers map, enrich and detect.
+model IngestBatch {
+  id            String            @id @default(cuid())
+  tenantId      String?
+  integrationId String
+  channel       String // push | pull | forwarder
+  stream        String? // a pull collector's stream, e.g. entra.signins
+  // The mapper to read it with, when not the tool's own (a pull stream's).
+  format        String?
+  status        IngestBatchStatus @default(QUEUED)
+  // The body as received (after decompression); cleared once processed.
+  payload       String            @db.Text
+  bytes         Int
+  attempts      Int               @default(0)
+  availableAt   DateTime          @default(now())
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  error         String?
+  result        Json?
+  receivedAt    DateTime          @default(now())
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt])
+  @@index([tenantId, status])
+  @@index([integrationId, receivedAt])
+  @@map("ingest_batches")
+}
+
+// Where each pull-collector stream has got to (lib/collectors).
+model CollectorCheckpoint {
+  integrationId String
+  stream        String // e.g. entra.signins
+  cursor        String?   @db.Text
+  nextPollAt    DateTime  @default(now())
+  lastPolledAt  DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+  failures      Int       @default(0)
+  records       Int       @default(0)
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@id([integrationId, stream])
+  @@index([nextPollAt])
+  @@map("collector_checkpoints")
+}
+
+// Events stored per source per hour: the source-health chart and baseline.
+model SourceHealthHour {
+  integrationId String
+  hour          DateTime
+  events        Int      @default(0)
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@id([integrationId, hour])
+  @@map("source_health_hours")
+}
+
+// Records no mapper could read, kept as received so they can be fixed and replayed.
+model IngestDeadLetter {
+  id            String    @id @default(cuid())
+  tenantId      String?
+  integrationId String
+  batchId       String?
+  format        String?
+  reason        String
+  raw           String    @db.Text
+  createdAt     DateTime  @default(now())
+  replayedAt    DateTime?
+  replayedById  String?
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("ingest_dead_letters")
 }
 
 model IntegrationAssignment {

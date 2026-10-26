@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import type { SeverityHint, TelemetrySource, UnifiedEvent } from "@/lib/siem/types";
+import { rowFromColumns } from "@/lib/ocsf/rows";
 
 // Ported from signal-fusion's services/adapters/{auth,endpoint,network,cloud}
 // Adapter. Each normalizes one raw vendor-ish log into the UnifiedEvent shape.
@@ -105,28 +106,32 @@ export function normalize(source: TelemetrySource, raw: Raw): NormalizedEvent {
   }
 }
 
-// UnifiedEvent <-> SecurityEvent row mapping.
-export function toEventRow(event: NormalizedEvent, batchId: string): Prisma.SecurityEventCreateManyInput {
-  return {
-    batchId,
-    timestamp: event.timestamp,
-    source: event.source,
-    platform: "signal-fusion",
-    eventType: event.eventType,
-    userName: event.actor.user,
-    hostName: event.actor.host,
-    service: event.actor.service,
-    processName: event.actor.process,
-    commandLine: event.actor.process,
-    parentProcessName: (event.metadata.parentProcess as string | undefined) ?? undefined,
-    sourceIp: event.network.sourceIp,
-    destIp: event.network.destIp,
-    destPort: event.network.destPort,
-    geo: event.network.geo,
-    fileHash: (event.metadata.hash as string | undefined) ?? undefined,
-    severityHint: event.severityHint,
-    metadata: JSON.parse(JSON.stringify(event.metadata)),
-  };
+// UnifiedEvent <-> SecurityEvent row mapping. The row carries the event's
+// OCSF form too (lib/ocsf).
+export function toEventRow(event: NormalizedEvent, batchId: string, sourceEventId?: string): Prisma.SecurityEventCreateManyInput {
+  return rowFromColumns(
+    {
+      timestamp: event.timestamp,
+      source: event.source,
+      platform: "signal-fusion",
+      eventType: event.eventType,
+      userName: event.actor.user,
+      hostName: event.actor.host,
+      service: event.actor.service,
+      processName: event.actor.process,
+      commandLine: event.actor.process,
+      parentProcessName: (event.metadata.parentProcess as string | undefined) ?? undefined,
+      sourceIp: event.network.sourceIp,
+      destIp: event.network.destIp,
+      destPort: event.network.destPort,
+      geo: event.network.geo,
+      fileHash: (event.metadata.hash as string | undefined) ?? undefined,
+      severityHint: event.severityHint,
+      metadata: event.metadata,
+    },
+    { batchId },
+    sourceEventId,
+  );
 }
 
 export function fromEventRow(row: {
@@ -138,6 +143,7 @@ export function fromEventRow(row: {
   hostName: string | null;
   service: string | null;
   processName: string | null;
+  commandLine?: string | null;
   sourceIp: string | null;
   destIp: string | null;
   destPort: number | null;
@@ -152,7 +158,8 @@ export function fromEventRow(row: {
     eventType: row.eventType,
     actor: {
       user: row.userName ?? undefined,
-      process: row.processName ?? undefined,
+      // Detectors match on the command line where there is one.
+      process: row.commandLine ?? row.processName ?? undefined,
       service: row.service ?? undefined,
       host: row.hostName ?? undefined,
     },

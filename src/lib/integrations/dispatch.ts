@@ -49,6 +49,8 @@ export interface IntegrationSecrets {
   apiKey?: string;
   // A native connector's secret settings (client secret, API token).
   connector?: Record<string, string>;
+  // A pull collector's own secret settings, where they differ (lib/collectors).
+  collector?: Record<string, string>;
 }
 
 export function readSecrets(cipher: string | null): IntegrationSecrets {

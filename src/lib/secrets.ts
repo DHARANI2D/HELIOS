@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 
 // AES-256-GCM sealing for credentials stored in the database (AI provider
 // API keys, tool integration secrets). The key comes from
@@ -8,7 +8,7 @@ import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, ti
 
 const VERSION = "v1";
 
-function key(): Buffer {
+function rootSecret(): Buffer | string {
   const explicit = process.env.HELIOS_ENCRYPTION_KEY;
   if (explicit) {
     const buf = Buffer.from(explicit, "base64");
@@ -17,7 +17,19 @@ function key(): Buffer {
   }
   const secret = process.env.AUTH_SECRET;
   if (!secret || secret === "generate-me") throw new Error("Set HELIOS_ENCRYPTION_KEY or AUTH_SECRET before storing credentials");
-  return Buffer.from(hkdfSync("sha256", secret, "helios-secrets", "credential-sealing", 32));
+  return secret;
+}
+
+function key(): Buffer {
+  const root = rootSecret();
+  return Buffer.isBuffer(root) ? root : Buffer.from(hkdfSync("sha256", root, "helios-secrets", "credential-sealing", 32));
+}
+
+// An HMAC-SHA256 under a key derived for one purpose (e.g. signing the
+// forwarder configurations HELIOS issues), never the sealing key itself.
+export function signFor(purpose: string, data: string): string {
+  const k = Buffer.from(hkdfSync("sha256", rootSecret(), "helios-signing", purpose, 32));
+  return createHmac("sha256", k).update(data).digest("hex");
 }
 
 export function seal(plaintext: string): string {

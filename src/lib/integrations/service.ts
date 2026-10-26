@@ -11,7 +11,10 @@ import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
 import { applyInventory, touchEndpoints } from "@/lib/endpoints/service";
 import { getCategory } from "@/lib/integrations/catalog";
 import { getCatalogTool } from "@/lib/integrations/tools";
-import { inventoryFrom, mapRecord, recordsFrom, type VendorAlert } from "@/lib/integrations/mappers";
+import { inventoryFrom, mapRecord, recordsAndRejects, type Mapped, type VendorAlert } from "@/lib/integrations/mappers";
+import { MappingError } from "@/lib/ocsf/sources/util";
+import { recordSourceEvents } from "@/lib/ingest/health";
+import type { IngestFormat } from "@/lib/integrations/catalog";
 import type { IntegrationConfig, IntegrationSecrets } from "@/lib/integrations/dispatch";
 import type { SessionUser } from "@/lib/session";
 import type { TelemetrySource } from "@/lib/siem/types";
@@ -170,28 +173,61 @@ export interface IngestResult {
   alerts: number;
   newAlerts: number;
   telemetryEvents: number;
+  // Already stored under the same source event id.
+  duplicates: number;
+  // Records no mapper could read, kept in the dead-letter queue.
+  deadLettered: number;
   inventory: number;
   casesCreated: number;
   casesUpdated: number;
 }
 
-export async function ingestForIntegration(integration: Integration, body: unknown): Promise<IngestResult> {
+const DEAD_LETTER_RAW_MAX = 64 * 1024;
+
+// Records kept as received, to fix the mapper or the source and replay.
+// A whole batch that kept failing is kept in full; a single record is capped.
+export async function deadLetter(integration: Pick<Integration, "id" | "tenantId">, items: Array<{ raw: unknown; reason: string }>, opts: { batchId?: string; format?: string | null } = {}) {
+  if (!items.length) return 0;
+  await db.ingestDeadLetter.createMany({
+    data: items.map((d) => {
+      const raw = typeof d.raw === "string" ? d.raw : JSON.stringify(d.raw);
+      const whole = typeof d.raw === "string";
+      return { tenantId: integration.tenantId, integrationId: integration.id, batchId: opts.batchId, format: opts.format ?? null, reason: d.reason.slice(0, 500), raw: !whole && raw.length > DEAD_LETTER_RAW_MAX ? `${raw.slice(0, DEAD_LETTER_RAW_MAX)}…` : raw };
+    }),
+  });
+  return items.length;
+}
+
+export async function ingestForIntegration(integration: Integration, body: unknown, opts: { batchId?: string; format?: IngestFormat } = {}): Promise<IngestResult> {
   const tool = await getCatalogTool(integration.vendor);
-  if (!tool?.ingest) throw new Error("This tool doesn't push data");
+  // A pull collector names its format; pushed data uses the tool's.
+  const format = opts.format ?? tool?.ingest;
+  if (!tool || !format) throw new Error("This tool doesn't send data");
   const config = (integration.config ?? {}) as IntegrationConfig;
   const source = (config.telemetrySource ?? getCategory(tool.category)?.telemetry ?? "endpoint") as TelemetrySource;
 
   const inventory = inventoryFrom(body);
-  const records = inventory.length ? [] : recordsFrom(body);
+  const { records, rejected } = inventory.length ? { records: [], rejected: [] } : recordsAndRejects(body);
   if (records.length > MAX_RECORDS) throw new Error(`At most ${MAX_RECORDS} records per request`);
 
   const alerts: VendorAlert[] = [];
   const telemetry: IngestItem[] = [];
+  const dead: Array<{ raw: unknown; reason: string }> = rejected.map((raw) => ({ raw, reason: "Not a JSON object" }));
   for (const record of records) {
-    const mapped = mapRecord(tool.ingest, record, source);
-    if (mapped.kind === "alert") alerts.push(mapped.alert);
-    else telemetry.push({ source: mapped.source, data: mapped.data });
+    let mapped: Mapped[];
+    try {
+      mapped = mapRecord(format, record, source);
+    } catch (err) {
+      dead.push({ raw: record, reason: err instanceof MappingError ? err.message : `Mapper failed: ${err instanceof Error ? err.message : String(err)}` });
+      continue;
+    }
+    for (const m of mapped) {
+      if (m.kind === "alert") alerts.push(m.alert);
+      else if (m.kind === "event") telemetry.push({ ocsf: m.ocsf });
+      else telemetry.push({ source: m.source, data: m.data });
+    }
   }
+  const deadLettered = await deadLetter(integration, dead, { batchId: opts.batchId, format: opts.format });
 
   const [filed, siem, inv] = await Promise.all([
     alerts.length ? fileVendorAlerts(integration, alerts) : Promise.resolve(null),
@@ -204,17 +240,23 @@ export async function ingestForIntegration(integration: Integration, body: unkno
     await touchEndpoints(integration.tenantId, alerts.map((a) => ({ hostName: a.host, sourceIp: a.ips[0], userName: a.user })), { integrationId: integration.id });
   }
 
-  const received = records.length + inventory.length;
-  await db.integration.update({
-    where: { id: integration.id },
-    data: { status: "CONNECTED", lastEventAt: new Date(), eventCount: { increment: received }, lastError: null },
-  });
+  const received = records.length + rejected.length + inventory.length;
+  // An empty delivery proves the pipe works, not that the source is sending.
+  if (received) {
+    await db.integration.update({
+      where: { id: integration.id },
+      data: { status: integration.quietSince ? integration.status : "CONNECTED", lastEventAt: new Date(), eventCount: { increment: received }, ...(integration.quietSince ? {} : { lastError: null }) },
+    });
+    await recordSourceEvents(integration.id, received);
+  }
 
   return {
     received,
     alerts: alerts.length,
     newAlerts: filed?.newAlerts ?? 0,
-    telemetryEvents: telemetry.length,
+    telemetryEvents: siem?.eventsIngested ?? 0,
+    duplicates: siem?.duplicates ?? 0,
+    deadLettered,
     inventory: inv,
     casesCreated: (filed?.casesCreated ?? 0) + (siem?.casesCreated ?? 0),
     casesUpdated: (filed?.casesUpdated ?? 0) + (siem?.casesUpdated ?? 0),

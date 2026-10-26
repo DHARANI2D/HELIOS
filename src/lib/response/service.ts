@@ -95,7 +95,9 @@ async function markCaseAfterResponse(caseId: string) {
   const pendingPlaybooks = await db.playbookExecution.count({ where: { caseId, status: "PENDING_APPROVAL" } });
   if (contained > 0 && kase.status !== "CONTAINED") {
     await db.case.update({ where: { id: caseId }, data: { status: "CONTAINED", containedAt: kase.containedAt ?? new Date() } });
-  } else if (contained === 0 && (pending > 0 || pendingPlaybooks > 0) && kase.status !== "AWAITING_APPROVAL") {
+  } else if (contained === 0 && (pending > 0 || pendingPlaybooks > 0) && kase.status !== "AWAITING_APPROVAL" && kase.status !== "CONTAINED") {
+    // A contained case (e.g. an agent the governance runtime revoked) stays
+    // contained while further actions wait for approval.
     await db.case.update({ where: { id: caseId }, data: { status: "AWAITING_APPROVAL" } });
   } else if (pending === 0 && pendingPlaybooks === 0 && kase.status === "AWAITING_APPROVAL") {
     await db.case.update({ where: { id: caseId }, data: { status: "INVESTIGATING" } });

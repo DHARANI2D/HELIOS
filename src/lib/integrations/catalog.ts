@@ -89,7 +89,7 @@ export const UNIT_LABEL: Record<PriceUnit, string> = {
 };
 
 // How a pushed payload is mapped (src/lib/integrations/mappers.ts).
-export type IngestFormat = "crowdstrike" | "defender" | "sentinelone" | "wazuh" | "entra" | "okta" | "generic";
+export type IngestFormat = "crowdstrike" | "defender" | "sentinelone" | "wazuh" | "entra" | "okta" | "forwarder" | "cloudtrail" | "gcp_audit" | "azure_activity" | "google_workspace" | "generic";
 
 export interface ToolDefinition {
   key: string;
@@ -133,7 +133,7 @@ export interface CatalogToolRow {
   active: boolean;
 }
 
-const INGEST_FORMATS = new Set<IngestFormat>(["crowdstrike", "defender", "sentinelone", "wazuh", "entra", "okta", "generic"]);
+const INGEST_FORMATS = new Set<IngestFormat>(["crowdstrike", "defender", "sentinelone", "wazuh", "entra", "okta", "forwarder", "cloudtrail", "gcp_audit", "azure_activity", "google_workspace", "generic"]);
 const PRICE_UNITS = new Set<PriceUnit>(Object.keys(UNIT_LABEL) as PriceUnit[]);
 
 export function toolFromRow(row: CatalogToolRow): ToolDefinition {

@@ -12,6 +12,7 @@ import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
 import { SEVERITY_LABEL, SEVERITY_ORDER } from "@/lib/severity";
 import { serviceMetrics, formatDuration } from "@/lib/metrics";
 import { formatRelative } from "@/lib/format";
+import { DATA_CATEGORIES, goLiveBlockers, sourceHealth } from "@/lib/ingest/health";
 import { StatTile } from "@/components/dashboard/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { TestBadge } from "@/components/shared/test-badge";
@@ -28,19 +29,21 @@ async function loadTenant(id: string) {
     where: { id },
     include: {
       users: { orderBy: { name: "asc" }, select: { id: true, name: true, email: true, role: true, active: true, lastLoginAt: true } },
-      integrations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true, status: true, enabled: true, lastEventAt: true } },
+      integrations: { orderBy: { createdAt: "asc" }, select: { id: true, name: true, status: true, enabled: true, lastEventAt: true, vendor: true, category: true, quietAfterMinutes: true, quietSince: true, quietCaseId: true } },
       _count: { select: { endpoints: true } },
       plan: true,
     },
   });
   if (!tenant) return null;
-  const [metrics, openCases, isolated, plans] = await Promise.all([
+  const [metrics, openCases, isolated, plans, health, blockers] = await Promise.all([
     serviceMetrics({ tenantId: id }, since, now),
     db.case.findMany({ where: { tenantId: id, status: { notIn: CLOSED_STATUSES } }, orderBy: [{ severity: "desc" }, { createdAt: "desc" }], take: 10 }),
     db.endpoint.count({ where: { tenantId: id, isolated: true } }),
     listPlans(),
+    sourceHealth(tenant.integrations.filter((i) => i.enabled), now),
+    tenant.status === "ONBOARDING" ? goLiveBlockers(id, now) : Promise.resolve([]),
   ]);
-  return { now, tenant, metrics, openCases, isolated, plans };
+  return { now, tenant, metrics, openCases, isolated, plans, health, blockers };
 }
 
 export default async function TenantPage({ params }: PageProps<"/tenants/[id]">) {
@@ -50,7 +53,7 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
   if (!own && !can(user, "tenants.view")) forbidden();
   const data = await loadTenant(id);
   if (!data) notFound();
-  const { now, tenant, metrics, openCases, isolated, plans } = data;
+  const { now, tenant, metrics, openCases, isolated, plans, health, blockers } = data;
   const plan = tenant.plan ? parsePlan(tenant.plan) : null;
   const canEditConsent = can(user, "tenants.manage") || (own && user.role === "CLIENT_ADMIN");
 
@@ -212,15 +215,39 @@ export default async function TenantPage({ params }: PageProps<"/tenants/[id]">)
               <p className="text-sm text-muted-foreground">No tools onboarded yet.</p>
             ) : (
               <ul className="flex flex-col gap-2 text-sm">
-                {tenant.integrations.map((i) => (
-                  <li key={i.id} className="flex items-center justify-between gap-2">
-                    <span className="truncate">{i.name}</span>
-                    <Badge variant={!i.enabled ? "outline" : i.status === "CONNECTED" ? "success" : i.status === "DEGRADED" ? "warning" : "soft"}>
-                      {i.enabled ? i.status.toLowerCase() : "disabled"}
-                    </Badge>
-                  </li>
-                ))}
+                {tenant.integrations.map((i) => {
+                  const h = health.get(i.id);
+                  const quiet = h?.state === "quiet" || h?.state === "stale";
+                  return (
+                    <li key={i.id} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block truncate">{i.name}</span>
+                        {h && DATA_CATEGORIES.has(i.category) && (
+                          <span className={quiet ? "text-[11px] text-destructive" : "text-[11px] text-muted-foreground"}>
+                            {h.lastEventAt ? `${quiet ? "quiet · " : ""}last data ${formatRelative(h.lastEventAt, now)} · ${h.perHour7d >= 1 ? `${Math.round(h.perHour7d)}/h` : "under 1/h"}` : "no data yet"}
+                            {h.quietCaseId && <Link href={`/cases/${h.quietCaseId}`} className="ml-1 hover:underline">case</Link>}
+                          </span>
+                        )}
+                      </span>
+                      <Badge variant={!i.enabled ? "outline" : i.status === "CONNECTED" ? "success" : i.status === "DEGRADED" ? "warning" : "soft"}>
+                        {i.enabled ? i.status.toLowerCase() : "disabled"}
+                      </Badge>
+                    </li>
+                  );
+                })}
               </ul>
+            )}
+            {tenant.status === "ONBOARDING" && (
+              <div className={blockers.length ? "mt-3 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs" : "mt-3 rounded-md border border-success/40 bg-success/10 p-2 text-xs"}>
+                {blockers.length ? (
+                  <>
+                    <p className="font-medium">Not ready to go live</p>
+                    <ul className="mt-1 list-disc pl-4">{blockers.map((b) => <li key={b}>{b}</li>)}</ul>
+                  </>
+                ) : (
+                  <p className="font-medium">Every log source is sending: ready to go live.</p>
+                )}
+              </div>
             )}
             {can(user, "integrations.view") && (
               <Button asChild variant="link" size="sm" className="mt-2 px-0">

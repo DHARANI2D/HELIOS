@@ -18,6 +18,8 @@ import type { ScoredDetection, TelemetrySource, UnifiedEvent } from "@/lib/siem/
 import type { SecurityDomain } from "@prisma/client";
 import { touchEndpoints } from "@/lib/endpoints/service";
 import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
+import { rowFromOcsf } from "@/lib/ocsf/rows";
+import type { OcsfEvent } from "@/lib/ocsf/schema";
 
 // Ingestion → detection → correlation. Replaces signal-fusion's
 // IngestionService + DetectionEngine.runDetections, which re-ran every
@@ -29,14 +31,15 @@ import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const WINDOW_EVENT_CAP = 5000;
 
-export interface IngestItem {
-  source: TelemetrySource;
-  data: Record<string, unknown>;
-}
+// Telemetry in the original adapters' shape, or an event already mapped to
+// OCSF (lib/ocsf) by a source-specific mapper.
+export type IngestItem = { source: TelemetrySource; data: Record<string, unknown>; sourceEventId?: string } | { ocsf: OcsfEvent };
 
 export interface IngestSummary {
   batchId: string;
   eventsIngested: number;
+  // Events already stored under the same source event id (a re-poll or a resend).
+  duplicates?: number;
   detectionsFound: number;
   newDetections: number;
   casesCreated: number;
@@ -155,7 +158,8 @@ async function loadWindow(batchId: string, tenantId: string | null): Promise<Uni
   const [batch, recent] = await Promise.all([
     db.securityEvent.findMany({ where: { batchId } }),
     db.securityEvent.findMany({
-      where: { platform: "signal-fusion", tenantId, ingestedAt: { gte: since }, NOT: { batchId } },
+      // Live telemetry only: uploaded investigation logs and governance decisions have their own pipelines.
+      where: { OR: [{ platform: "signal-fusion" }, { integrationId: { not: null } }], tenantId, ingestedAt: { gte: since }, NOT: { batchId } },
       orderBy: { ingestedAt: "desc" },
       take: WINDOW_EVENT_CAP,
     }),
@@ -173,8 +177,10 @@ export interface IngestOptions {
 export async function ingestTelemetry(items: IngestItem[], options: IngestOptions = {}): Promise<IngestSummary> {
   const batchId = randomUUID();
   const tenantId = options.tenantId ?? null;
-  const rows = items.map((item) => ({ ...toEventRow(normalize(item.source, item.data), batchId), tenantId, integrationId: options.integrationId }));
-  if (rows.length) await db.securityEvent.createMany({ data: rows });
+  const placement = { batchId, tenantId, integrationId: options.integrationId };
+  const rows = items.map((item) => ("ocsf" in item ? rowFromOcsf(item.ocsf, placement) : { ...toEventRow(normalize(item.source, item.data), batchId, item.sourceEventId), ...placement }));
+  // An event the source already sent (same source event id) is skipped.
+  const inserted = rows.length ? (await db.securityEvent.createMany({ data: rows, skipDuplicates: true })).count : 0;
   await touchEndpoints(tenantId, rows, { integrationId: options.integrationId });
 
   const events = await loadWindow(batchId, tenantId);
@@ -259,7 +265,8 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
 
   const summary: IngestSummary = {
     batchId,
-    eventsIngested: rows.length,
+    eventsIngested: inserted,
+    ...(rows.length > inserted ? { duplicates: rows.length - inserted } : {}),
     detectionsFound: detections.length,
     newDetections: fresh.length,
     casesCreated,

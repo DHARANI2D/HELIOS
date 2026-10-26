@@ -2,6 +2,12 @@ import type { CaseSeverity } from "@prisma/client";
 
 import type { IngestFormat } from "@/lib/integrations/catalog";
 import type { TelemetrySource } from "@/lib/siem/types";
+import type { OcsfEvent } from "@/lib/ocsf/schema";
+import { entraAudit, entraSignIn, googleLogin, oktaLog } from "@/lib/ocsf/sources/identity";
+import { isWindowsEvent, windowsEvent } from "@/lib/ocsf/sources/windows";
+import { fileLine, isSyslog, syslogRecord } from "@/lib/ocsf/sources/syslog";
+import { azureActivity, cloudTrail, gcpAudit } from "@/lib/ocsf/sources/cloud";
+import { MappingError } from "@/lib/ocsf/sources/util";
 
 // Vendor payload → HELIOS. A pushed record is either a vendor *alert* (the
 // tool already decided something is bad: filed as a case directly) or raw
@@ -27,7 +33,9 @@ export interface VendorAlert {
   raw: Raw;
 }
 
-export type Mapped = { kind: "alert"; alert: VendorAlert } | { kind: "telemetry"; source: TelemetrySource; data: Raw };
+// alert: the tool decided something is bad; telemetry: the original
+// adapters' shape; event: already mapped to OCSF (lib/ocsf/sources).
+export type Mapped = { kind: "alert"; alert: VendorAlert } | { kind: "telemetry"; source: TelemetrySource; data: Raw } | { kind: "event"; ocsf: OcsfEvent };
 
 export interface InventoryRecord {
   hostname: string;
@@ -230,35 +238,48 @@ function entra(r: Raw): Mapped {
       },
     };
   }
-  const failed = Number(get(r, "status.errorCode") ?? 0) !== 0;
-  return {
-    kind: "telemetry",
-    source: "auth",
-    data: {
-      user: str(r.userPrincipalName),
-      source_ip: str(r.ipAddress),
-      result: failed ? "FAILED" : "SUCCESS",
-      geo: str(get(r, "location.countryOrRegion")),
-      hostname: str(get(r, "deviceDetail.displayName")),
-      timestamp: date(r.createdDateTime).toISOString(),
-    },
-  };
+  // Sign-ins and directory audits (Microsoft Graph auditLogs).
+  if (r.activityDisplayName) return { kind: "event", ocsf: entraAudit(r) };
+  if (r.createdDateTime && (r.userPrincipalName || r.status)) return { kind: "event", ocsf: entraSignIn(r) };
+  return generic(r, "auth");
 }
 
 function okta(r: Raw): Mapped {
-  const outcome = String(get(r, "outcome.result") ?? "").toUpperCase();
-  return {
-    kind: "telemetry",
-    source: "auth",
-    data: {
-      user: str(get(r, "actor.alternateId"), get(r, "actor.displayName")),
-      source_ip: str(get(r, "client.ipAddress")),
-      result: outcome === "FAILURE" || outcome === "DENY" ? "FAILED" : "SUCCESS",
-      geo: str(get(r, "client.geographicalContext.country")),
-      event_type: str(r.eventType),
-      timestamp: date(r.published).toISOString(),
-    },
-  };
+  return r.eventType && r.published ? { kind: "event", ocsf: oktaLog(r) } : generic(r, "auth");
+}
+
+// What the HELIOS forwarder sends: Windows events, syslog, and lines of
+// tailed files (lib/forwarder).
+function forwarder(r: Raw, source: TelemetrySource): Mapped {
+  if (isWindowsEvent(r)) return { kind: "event", ocsf: windowsEvent(r) };
+  if (isSyslog(r)) return { kind: "event", ocsf: syslogRecord(r) };
+  if (typeof r.log === "string") {
+    const event = fileLine(r);
+    if (event) return { kind: "event", ocsf: event };
+    try {
+      const parsed = JSON.parse(r.log);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return generic(parsed as Raw, source);
+    } catch {
+      // not JSON after all: read as text
+    }
+    return { kind: "event", ocsf: syslogRecord({ message: r.log, host: r.host, timestamp: r.timestamp, ident: "file" }) };
+  }
+  return generic(r, source);
+}
+
+// Pub/Sub push and pull wrap the LogEntry: { message: { data: base64 } }.
+function gcp(r: Raw): Mapped {
+  const data = str(get(r, "message.data"), r.data);
+  if (data && !r.protoPayload) {
+    let entry: unknown;
+    try {
+      entry = JSON.parse(Buffer.from(data, "base64").toString("utf8"));
+    } catch {
+      throw new MappingError("Pub/Sub message data isn't a JSON log entry");
+    }
+    return { kind: "event", ocsf: gcpAudit(entry as Raw) };
+  }
+  return { kind: "event", ocsf: gcpAudit(r) };
 }
 
 // Plain JSON from anything: an object with a title/name and a severity is an
@@ -289,38 +310,65 @@ function generic(r: Raw, source: TelemetrySource): Mapped {
   return { kind: "telemetry", source, data: r };
 }
 
-export function mapRecord(format: IngestFormat, record: Raw, defaultSource: TelemetrySource): Mapped {
+// One record can be several events (a Google activity with a challenge and
+// a success). A MappingError means the record is unreadable: dead-letter it.
+export function mapRecord(format: IngestFormat, record: Raw, defaultSource: TelemetrySource): Mapped[] {
   switch (format) {
+    case "forwarder":
+      return [forwarder(record, defaultSource)];
+    case "cloudtrail":
+      return [{ kind: "event", ocsf: cloudTrail(record) }];
+    case "gcp_audit":
+      return [gcp(record)];
+    case "azure_activity":
+      return [{ kind: "event", ocsf: azureActivity(record) }];
+    case "google_workspace":
+      return googleLogin(record).map((ocsf) => ({ kind: "event" as const, ocsf }));
     case "crowdstrike":
-      return crowdstrike(record);
+      return [crowdstrike(record)];
     case "defender":
-      return defender(record);
+      return [defender(record)];
     case "sentinelone":
-      return sentinelone(record);
+      return [sentinelone(record)];
     case "wazuh":
-      return wazuh(record);
+      return [wazuh(record)];
     case "entra":
-      return entra(record);
+      return [entra(record)];
     case "okta":
-      return okta(record);
+      return [okta(record)];
     default:
-      return generic(record, defaultSource);
+      return [generic(record, defaultSource)];
   }
 }
 
 // Accepts an array, { events: [...] }, { data: [...] } (Graph/S1 list
 // responses), { value: [...] } (Graph), { resources: [...] } (Falcon), a
-// single object, or JSON Lines.
+// single object, or JSON Lines. Also { Records } (CloudTrail files),
+// { items } (Google Reports API), { entries } (Cloud Logging),
+// { receivedMessages } (Pub/Sub pull).
+const LIST_KEYS = ["events", "alerts", "data", "value", "resources", "records", "Records", "items", "entries", "receivedMessages"];
+
 export function recordsFrom(body: unknown): Raw[] {
-  if (Array.isArray(body)) return body.filter((r): r is Raw => !!r && typeof r === "object" && !Array.isArray(r));
+  return recordsAndRejects(body).records;
+}
+
+// Records, and the items that can't be records (strings, numbers, nested
+// arrays) for the dead-letter queue.
+export function recordsAndRejects(body: unknown): { records: Raw[]; rejected: unknown[] } {
+  if (Array.isArray(body)) {
+    const records: Raw[] = [];
+    const rejected: unknown[] = [];
+    for (const r of body) (r && typeof r === "object" && !Array.isArray(r) ? records : rejected).push(r);
+    return { records, rejected };
+  }
   if (body && typeof body === "object") {
     const b = body as Raw;
-    for (const key of ["events", "alerts", "data", "value", "resources", "records"]) {
-      if (Array.isArray(b[key])) return recordsFrom(b[key]);
+    for (const key of LIST_KEYS) {
+      if (Array.isArray(b[key])) return recordsAndRejects(b[key]);
     }
-    return [b];
+    return { records: [b], rejected: [] };
   }
-  return [];
+  return { records: [], rejected: body === undefined || body === null ? [] : [body] };
 }
 
 export function parseBody(text: string): unknown {

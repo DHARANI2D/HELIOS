@@ -17,6 +17,10 @@ export interface HttpRequest {
   headers?: Record<string, string>;
   json?: unknown;
   form?: Record<string, string>;
+  // A body sent as is (set its content-type in headers).
+  body?: string;
+  // The response as bytes (a Buffer), e.g. a gzipped log file.
+  binary?: boolean;
   // Statuses that are answers rather than failures (e.g. 404 = not found).
   expect?: number[];
 }
@@ -44,6 +48,8 @@ export function createHttp(fetchImpl: typeof fetch = fetch, opts: { retries?: nu
     } else if (req.form) {
       headers["content-type"] = "application/x-www-form-urlencoded";
       body = new URLSearchParams(req.form).toString();
+    } else if (req.body !== undefined) {
+      body = req.body;
     }
     for (let attempt = 0; ; attempt++) {
       let res: Response;
@@ -57,6 +63,7 @@ export function createHttp(fetchImpl: typeof fetch = fetch, opts: { retries?: nu
         await sleep(Math.min(maxWaitMs, Number.isFinite(after) && after > 0 ? after * 1000 : 500 * 2 ** attempt));
         continue;
       }
+      if (req.binary && res.ok) return { status: res.status, data: Buffer.from(await res.arrayBuffer()) as T, headers: res.headers };
       const text = await res.text();
       let data: unknown = text;
       try {

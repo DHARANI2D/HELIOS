@@ -1,34 +1,45 @@
-// Background work that runs on a timer inside the server process: approval
-// escalation along client approver chains, connector verification, time
-// boxes, and the autonomy-ladder review.
-// Started once from src/instrumentation.ts; off with HELIOS_BACKGROUND_JOBS=off.
+// Background work that runs on a timer: approval escalation along client
+// approver chains, connector verification, time boxes, the autonomy-ladder
+// review, and log collection (the ingest queue, pull collectors, source
+// health). Started once from src/instrumentation.ts in the web process; with
+// HELIOS_INGEST_WORKER=external the log-collection jobs run in
+// `npm run worker` (src/worker.ts) instead. Off with HELIOS_BACKGROUND_JOBS=off.
 // Each job is safe to repeat and to run on several instances.
 
 interface Job {
   name: string;
   everyMs: number;
+  group: "core" | "ingest";
   run: () => Promise<unknown>;
 }
 
+const INGEST_JOBS: Job[] = [
+  // Backstop for the kick after each enqueue, and for retries coming due.
+  { name: "ingest queue", group: "ingest", everyMs: 2_000, run: async () => (await import("@/lib/ingest/queue")).drainQueue() },
+  { name: "ingest cleanup", group: "ingest", everyMs: 3_600_000, run: async () => (await import("@/lib/ingest/queue")).pruneBatches() },
+  { name: "log collectors", group: "ingest", everyMs: 30_000, run: async () => (await import("@/lib/collectors/run")).runDueCollectors() },
+  { name: "source health", group: "ingest", everyMs: 5 * 60_000, run: async () => (await import("@/lib/ingest/health")).checkSourceHealth() },
+];
+
 const JOBS: Job[] = [
-  { name: "approval escalation", everyMs: 60_000, run: async () => (await import("@/lib/rulebook/escalation")).escalatePendingApprovals() },
+  { name: "approval escalation", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/rulebook/escalation")).escalatePendingApprovals() },
   // Follows connector requests until the vendor confirms them.
-  { name: "connector verification", everyMs: 30_000, run: async () => (await import("@/lib/connectors/safety")).verifyInProgress() },
+  { name: "connector verification", group: "core", everyMs: 30_000, run: async () => (await import("@/lib/connectors/safety")).verifyInProgress() },
   // Rolls back time-boxed actions whose time is up.
-  { name: "time boxes", everyMs: 60_000, run: async () => (await import("@/lib/connectors/safety")).rollBackExpired() },
+  { name: "time boxes", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/connectors/safety")).rollBackExpired() },
   // Connector credentials about to expire.
-  { name: "credential reminders", everyMs: 6 * 3_600_000, run: async () => (await import("@/lib/connectors/safety")).credentialReminders() },
+  { name: "credential reminders", group: "core", everyMs: 6 * 3_600_000, run: async () => (await import("@/lib/connectors/safety")).credentialReminders() },
   // Demotes on a bad week, proposes promotions; idempotent, so hourly is fine.
-  { name: "autonomy ladder review", everyMs: 3_600_000, run: async () => (await import("@/lib/shadow/service")).reviewLadders() },
+  { name: "autonomy ladder review", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/shadow/service")).reviewLadders() },
 ];
 
 const STARTED = Symbol.for("helios.jobs.started");
 
-export function startJobs() {
+export function startJobs(groups: Array<Job["group"]> = process.env.HELIOS_INGEST_WORKER === "external" ? ["core"] : ["core", "ingest"]) {
   const g = globalThis as typeof globalThis & { [STARTED]?: boolean };
   if (g[STARTED] || process.env.HELIOS_BACKGROUND_JOBS === "off") return;
   g[STARTED] = true;
-  for (const job of JOBS) {
+  for (const job of [...JOBS, ...INGEST_JOBS].filter((j) => groups.includes(j.group))) {
     let running = false;
     const tick = async () => {
       if (running) return;
