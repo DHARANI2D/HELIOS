@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { z } from "zod";
 
-import { AgentRefusalError, type LlmProvider, type LlmResult, type StructuredRequest, type TextRequest } from "@/lib/ai/provider";
+import { AgentRefusalError, type AgentRequest, type AgentSession, type AgentStep, type AgentToolResult, type LlmProvider, type LlmResult, type StructuredRequest, type TextRequest } from "@/lib/ai/provider";
 
 // Claude via the official SDK, with structured outputs. Security telemetry
 // is attack activity by definition, so requests opt into server-side refusal
@@ -76,6 +76,44 @@ export function anthropicProvider(options: { name: string; model: string; apiKey
       const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
       if (!text) throw new Error(`Empty response (stop_reason: ${response.stop_reason})`);
       return { data: text, model: response.model, usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens } };
+    },
+
+    // Tool use, one manual turn at a time (the caller runs the tools and
+    // decides when to stop). The transcript is append-only: each response's
+    // content goes back unchanged, thinking blocks included. Caching: a
+    // breakpoint on the system prompt (tools render before it, so both are
+    // cached) plus automatic caching of the growing transcript. Tools are
+    // sorted and never change within a session, so the prefix stays stable.
+    agent({ system, user, tools, effort }: AgentRequest): AgentSession {
+      const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: user }];
+      const toolDefs: Anthropic.Beta.BetaTool[] = [...tools]
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Beta.BetaTool.InputSchema, strict: true }));
+      return {
+        async step(results?: AgentToolResult[], note?: string): Promise<AgentStep> {
+          const content: Anthropic.Beta.BetaContentBlockParam[] = [
+            ...(results ?? []).map((r): Anthropic.Beta.BetaToolResultBlockParam => ({ type: "tool_result", tool_use_id: r.id, content: r.content, ...(r.isError ? { is_error: true } : {}) })),
+            ...(note ? [{ type: "text" as const, text: note }] : []),
+          ];
+          if (content.length) messages.push({ role: "user", content });
+          const response = await clientFor(apiKey).beta.messages.create({
+            ...base(),
+            output_config: { effort },
+            system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+            cache_control: { type: "ephemeral" },
+            tools: toolDefs,
+            messages,
+          });
+          if (response.stop_reason === "refusal") {
+            throw new AgentRefusalError(`Model declined the request (${response.stop_details?.category ?? "unspecified"})`);
+          }
+          messages.push({ role: "assistant", content: response.content });
+          const calls = response.content.flatMap((b) => (b.type === "tool_use" ? [{ id: b.id, name: b.name, input: b.input }] : []));
+          const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n").trim();
+          const stop = response.stop_reason === "tool_use" || response.stop_reason === "max_tokens" || response.stop_reason === "pause_turn" ? response.stop_reason : "end_turn";
+          return { calls, text, stop, model: response.model, usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens } };
+        },
+      };
     },
 
     // Model metadata lookup: proves the key and model id without spending tokens.

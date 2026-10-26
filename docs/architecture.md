@@ -158,6 +158,31 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
    Providers are `anthropic.ts` (structured outputs, server-side refusal fallback) and `openai-compatible.ts` (Ollama, LM Studio, vLLM; JSON-schema output, validated, one retry).
 5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, AI safety, kill switch, circuit breaker, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
 
+### Investigation agent (`lib/ai/investigator`)
+
+An analyst can send the investigation agent onto a case. It works the case on its own with tools, and every tool only reads:
+
+- **The tools.**
+  - **What they read:** search the client's events around the case, an activity summary for a host, account or IP, one event's full record, the inventory entry for a host, the SOC's reputation record for an indicator, related cases, and ATT&CK lookups.
+  - **Scope:** every query is pinned to the case's client (internal cases see internal data). No tool writes, calls the internet or reaches another client.
+  - **Evidence ids:** results come back as evidence lines with ids (`Q1`, `Q2`…) the agent must cite. What they name (hosts, accounts, IPs, hashes) joins the entities its containment may target.
+- **The loop** (`run.ts`).
+  - **Limits:** at most 12 turns, 24 tool calls and 5 minutes.
+  - **Turns:** all of a turn's calls are answered in one turn. An unknown tool or bad input goes back to the model as an error.
+  - **Finishing:** it ends with a `submit_findings` call in the triage contract plus a cited timeline.
+  - **Checks:** the findings go through the same grounding check and downgrade hold as triage (uncited findings and timeline steps are dropped), and what it recommends goes through the same response policy.
+  - **On the case:** the run, its lookups and its timeline are saved on the case.
+  - **No model:** without a model that can use tools (or if the run fails), a fixed built-in sweep runs the same tools: the top hosts and accounts, the indicators, related cases.
+- **Providers.** `LlmProvider.agent()` keeps the transcript in each provider's own form, append-only.
+  - **Claude:** strict tools, a cache breakpoint on the system prompt plus automatic caching of the growing transcript, response content passed back unchanged, and the same refusal fallback as other calls.
+  - **Local models:** OpenAI-style function calling.
+  - **Masking:** when a client's rules require personal data masked, tool results are masked on the way out and the model's tool inputs restored on the way back.
+- **Untrusted results.** Short fields written on the client's systems (command lines, paths, titles, user names) are escaped and scanned, and withheld when they carry text aimed at the AI. That marks the run as steered, so its containment waits for a person.
+- **The split-privilege extractor** (`extract.ts`) handles long free text (an email body, a log message). The agent never reads it, only what the extractor pulls out.
+  - **Closed answers:** the extractor can only answer with indicators that match their formats and behaviours from a fixed list.
+  - **A model as reader:** a model may do the reading, in a separate call with no tools whose answer is validated field by field. Even a fully steered extractor has nowhere to put an instruction.
+  - **Without a model:** rules do it.
+
 ### Client rulebooks (`lib/rulebook`)
 
 Each client signs a versioned rulebook (`org_policies`, one ACTIVE version, hashed). The rules can only restrict what the plan and the client's consent allow.

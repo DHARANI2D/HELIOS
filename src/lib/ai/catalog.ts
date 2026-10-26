@@ -3,7 +3,7 @@ import type { AiAutonomy, PlaybookActionType } from "@prisma/client";
 // What AI agents exist, which providers can run them, and what they cost.
 // Client-safe: the AI Agents page and the pricing configurator both read it.
 
-export type AgentKey = "triage" | "phishing" | "threat_intel" | "report" | "containment" | "investigation" | "advisor";
+export type AgentKey = "triage" | "phishing" | "threat_intel" | "investigator" | "report" | "containment" | "investigation" | "advisor";
 
 export interface AgentType {
   key: AgentKey;
@@ -48,6 +48,15 @@ export const AGENT_TYPES: Record<AgentKey, AgentType> = {
     key: "threat_intel",
     name: "Threat-intel enricher",
     description: "Puts the case's IOCs in context: reputation, infrastructure overlap with earlier cases, likely campaign, and which indicators are worth blocking.",
+    dispatchable: true,
+    defaultAutonomy: "SUGGEST",
+    defaultActions: [],
+    defaultMinConfidence: 0.8,
+  },
+  investigator: {
+    key: "investigator",
+    name: "Investigation agent",
+    description: "Works a case on its own with read-only tools: searches the client's telemetry around it, checks the hosts, accounts and indicators it finds, reads related cases, then reports what happened with every finding and timeline step tied to what it looked at. It can't change anything; containment it recommends goes through the same policy as triage.",
     dispatchable: true,
     defaultAutonomy: "SUGGEST",
     defaultActions: [],

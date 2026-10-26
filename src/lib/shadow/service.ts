@@ -58,7 +58,7 @@ export async function setAutonomyLevel(tenantId: string, actionType: PlaybookAct
 export async function scoreClosedCase(caseId: string) {
   const kase = await db.case.findUniqueOrThrow({
     where: { id: caseId },
-    select: { id: true, tenantId: true, severity: true, disposition: true, responseActions: true, aiRuns: { where: { agentKey: { in: ["triage", "phishing", "threat_intel"] }, status: { not: "failed" } }, orderBy: { createdAt: "desc" }, take: 1 } },
+    select: { id: true, tenantId: true, severity: true, disposition: true, responseActions: true, aiRuns: { where: { agentKey: { in: ["triage", "phishing", "threat_intel", "investigator"] }, status: { not: "failed" } }, orderBy: { createdAt: "desc" }, take: 1 } },
   });
   await db.aiDecisionOutcome.deleteMany({ where: { caseId } });
   if (!kase.disposition) return 0;

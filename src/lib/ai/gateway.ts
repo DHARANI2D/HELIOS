@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { notify, staffFor } from "@/lib/notifications";
 import { severityRank } from "@/lib/severity";
 import type { AgentKey } from "@/lib/ai/catalog";
-import type { LlmProvider, StructuredRequest, TextRequest } from "@/lib/ai/provider";
+import type { AgentRequest, AgentSession, LlmProvider, StructuredRequest, TextRequest } from "@/lib/ai/provider";
 import { Redactor, type KnownEntities } from "@/lib/ai/redact";
 import { envClaude, envClaudeAvailable, forcedBuiltin, providerFromRow, type AgentProfileView, type AgentScope } from "@/lib/ai/resolve";
 import { activeRulebook } from "@/lib/rulebook/service";
@@ -232,6 +232,19 @@ export function withRedaction(provider: LlmProvider, known: KnownEntities): { pr
       const res = await provider.text({ ...request, system: redactor.redact(request.system), user: redactor.redact(request.user) });
       return { ...res, data: redactor.restoreText(res.data) };
     },
+    // Tool results are masked on the way out; the model's tool inputs (which
+    // name tokens like HOST_1) are restored before the tool runs.
+    agent: provider.agent
+      ? (request: AgentRequest): AgentSession => {
+          const session = provider.agent!({ ...request, system: redactor.redact(request.system), user: redactor.redact(request.user) });
+          return {
+            async step(results, note) {
+              const res = await session.step(results?.map((r) => ({ ...r, content: redactor.redact(r.content) })), note ? redactor.redact(note) : undefined);
+              return { ...res, calls: res.calls.map((c) => ({ ...c, input: redactor.restore(c.input) })), text: redactor.restoreText(res.text) };
+            },
+          };
+        }
+      : undefined,
   };
   return { provider: masked, redactor };
 }
@@ -240,7 +253,7 @@ export function withRedaction(provider: LlmProvider, known: KnownEntities): { pr
 
 // The agents that work on a client's cases, and which model each would get
 // right now (without a case, so the budget fallback isn't applied).
-export const CLIENT_AGENTS: AgentKey[] = ["triage", "phishing", "threat_intel", "report", "investigation"];
+export const CLIENT_AGENTS: AgentKey[] = ["triage", "phishing", "threat_intel", "investigator", "report", "investigation"];
 
 export async function previewClientModels(tenantId: string, userId?: string | null) {
   const { loadProfile } = await import("@/lib/ai/resolve");

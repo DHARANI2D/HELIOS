@@ -9,6 +9,7 @@ import { severityRank } from "@/lib/severity";
 import { AGENT_TYPES, type AgentKey } from "@/lib/ai/catalog";
 import { aiCostOf } from "@/lib/pricing/service";
 import { gatherEvidence } from "@/lib/ai/evidence";
+import { investigate } from "@/lib/ai/investigator/run";
 import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
 import { withRedaction } from "@/lib/ai/gateway";
 import { analyzeCase, runReportAgent, type CaseAnalysis } from "@/lib/ai/agents";
@@ -98,7 +99,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
 
     if (key === "report") {
       const [latest, actions] = await Promise.all([
-        db.aiRun.findFirst({ where: { caseId, agentKey: { in: ["triage", "phishing", "threat_intel"] }, status: { not: "failed" } }, orderBy: { createdAt: "desc" } }),
+        db.aiRun.findFirst({ where: { caseId, agentKey: { in: ["triage", "phishing", "threat_intel", "investigator"] }, status: { not: "failed" } }, orderBy: { createdAt: "desc" } }),
         db.responseAction.findMany({ where: { caseId, status: { not: "SHADOW" } }, orderBy: { createdAt: "asc" } }),
       ]);
       const outcome = await runReportAgent(
@@ -121,6 +122,37 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
         data: { caseId, authorName: `${profile.name} · ${outcome.engine}`, kind: "ai_report", body: outcome.output, internal: true },
       });
       await finishRun(caseId, key, run.id, outcome.engine, outcome.model, outcome.status, opts, {});
+      return run;
+    }
+
+    if (key === "investigator") {
+      // Searches are anchored on when the case's activity began.
+      const [first, opened] = await Promise.all([
+        db.securityEvent.findFirst({ where: { caseId }, orderBy: { timestamp: "asc" }, select: { timestamp: true } }),
+        db.case.findUniqueOrThrow({ where: { id: caseId }, select: { createdAt: true } }),
+      ]);
+      const result = await investigate(evidence, profile, provider, { anchor: first?.timestamp ?? opened.createdAt, tenantId: scope.tenantId });
+      const run = await db.aiRun.create({
+        data: {
+          caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: result.engine, model: result.model, isLocal: result.isLocal, status: result.status,
+          confidence: result.output.confidence, output: JSON.parse(JSON.stringify({ ...result.output, steps: result.steps })), grounding: JSON.parse(JSON.stringify(result.report)),
+          error: result.error, durationMs: result.durationMs, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, requestedById: opts.requestedBy?.id,
+        },
+      });
+      const modelCap = resolved.autonomyCap && result.engine !== "built-in" ? { autonomy: resolved.autonomyCap, reason: resolution?.capReason ?? "Model not evaluated" } : null;
+      const { statuses, silent } = await applyTriage(caseId, run.id, result.output, result.report, profile.name, result.engine, opts, modelCap, result.manipulated);
+      if (silent) {
+        await db.aiRun.update({ where: { id: run.id }, data: { resolution: { ...((runScope.resolution as object | undefined) ?? {}), shadow: true } } });
+      } else {
+        // What it looked at and the story it pieced together, for the analyst.
+        const trail = [
+          `**Investigation trail** · ${result.steps.length} lookup(s), ${result.steps.filter((x) => !x.ok).length} failed`,
+          ...result.steps.map((x, i) => `${i + 1}. \`${x.tool}\` ${JSON.stringify(x.input).slice(0, 160)}${x.ok ? (x.refs.length ? ` → ${x.refs.slice(0, 8).join(", ")}${x.refs.length > 8 ? "…" : ""}` : " → nothing found") : ` → failed: ${x.note ?? ""}`}`),
+          result.output.timeline.length ? `\n**Timeline**\n${result.output.timeline.map((t) => `- ${t.at}: ${t.what} _(${t.evidence.join(", ")})_`).join("\n")}` : "",
+        ].filter(Boolean).join("\n");
+        await db.caseComment.create({ data: { caseId, authorName: `${profile.name} · ${result.engine}`, kind: "ai", body: trail, internal: true } });
+      }
+      await finishRun(caseId, key, run.id, result.engine, result.model, result.status, opts, { verdict: result.output.verdict, confidence: result.output.confidence, actions: statuses, grounding: result.report.notes, lookups: result.steps.length });
       return run;
     }
 

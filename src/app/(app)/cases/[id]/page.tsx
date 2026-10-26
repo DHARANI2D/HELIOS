@@ -121,7 +121,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   // steer the analyst whose call it's measured against.
   const isShadow = (r: { resolution: unknown }) => !!(r.resolution as { shadow?: boolean } | null)?.shadow;
   const shadowHidden = !closed && kase.aiRuns.some(isShadow);
-  const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel"].includes(r.agentKey) && r.status !== "failed" && (closed || !isShadow(r)));
+  const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel", "investigator"].includes(r.agentKey) && r.status !== "failed" && (closed || !isShadow(r)));
   const triage = latestTriage?.output as TriageOutput | undefined;
   const grounding = latestTriage?.grounding as (GroundingReport & { injection?: InjectionFinding[] }) | undefined;
   const lastFailure = kase.aiRuns[0]?.status === "failed" ? kase.aiRuns[0] : null;
@@ -267,6 +267,9 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                         </ul>
                         <p className="mt-1 text-muted-foreground">Containment from this run needs a person, and the AI can&apos;t lower the verdict on its own.</p>
                       </div>
+                    )}
+                    {latestTriage.agentKey === "investigator" && Array.isArray((triage as { steps?: unknown }).steps) && (
+                      <InvestigationTrail steps={(triage as unknown as { steps: Array<{ tool: string; input: unknown; ok: boolean; refs: string[]; note?: string }> }).steps} timeline={(triage as unknown as { timeline?: Array<{ at: string; what: string; evidence: string[] }> }).timeline ?? []} />
                     )}
                     {grounding && grounding.notes.length > 0 && (
                       <p className="text-xs text-muted-foreground">
@@ -668,6 +671,33 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// What the investigation agent looked at, and the story it pieced together.
+function InvestigationTrail({ steps, timeline }: { steps: Array<{ tool: string; input: unknown; ok: boolean; refs: string[]; note?: string }>; timeline: Array<{ at: string; what: string; evidence: string[] }> }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-3 text-xs">
+      {timeline.length > 0 && (
+        <div>
+          <p className="font-medium">Timeline</p>
+          <ol className="mt-1 flex flex-col gap-0.5">
+            {timeline.map((t, i) => <li key={i}><span className="font-mono text-muted-foreground">{t.at}</span> {t.what} <span className="font-mono text-[11px] text-muted-foreground">{t.evidence.join(", ")}</span></li>)}
+          </ol>
+        </div>
+      )}
+      <details>
+        <summary className="cursor-pointer font-medium">What it looked at ({steps.length} lookup{steps.length === 1 ? "" : "s"}, read-only)</summary>
+        <ol className="mt-1 flex list-decimal flex-col gap-0.5 pl-4">
+          {steps.map((s, i) => (
+            <li key={i}>
+              <span className="font-mono">{s.tool}</span> <span className="text-muted-foreground">{JSON.stringify(s.input).slice(0, 140)}</span>
+              {s.ok ? <span className="font-mono text-[11px]"> → {s.refs.length ? s.refs.slice(0, 10).join(", ") : "nothing found"}</span> : <span className="text-destructive"> → {s.note}</span>}
+            </li>
+          ))}
+        </ol>
+      </details>
     </div>
   );
 }
