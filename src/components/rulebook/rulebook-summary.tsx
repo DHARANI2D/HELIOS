@@ -78,7 +78,8 @@ export function RulebookSummary({ book }: { book: Rulebook }) {
       </Block>
       <Block title="Data handling and obligations">
         <p className="text-xs">AI: {AI_RESIDENCY[book.dataHandling.residency]}{book.dataHandling.residency === "region" ? ` (${book.dataHandling.regions.join(", ") || "no region set"})` : ""}; personal data {book.dataHandling.redactPii ? "masked for cloud models" : "sent as is"}; users {book.dataHandling.allowUserChoice ? "may" : "may not"} pick their own model.</p>
-        <p className="text-xs">{book.obligations.regulatedEntity ? `Regulated entity · CERT-In contact: ${book.obligations.certInContact.name || "not named"}${book.obligations.certInContact.email ? ` (${book.obligations.certInContact.email})` : ""}` : "Not flagged as a regulated entity."}</p>
+        <p className="text-xs">{book.obligations.regulatedEntity ? `CERT-In reporting applies, from ${book.obligations.certInMinSeverity.toLowerCase()} severity · point of contact: ${book.obligations.certInContact.name || "not named"}${book.obligations.certInContact.email ? ` (${book.obligations.certInContact.email})` : ""}` : "CERT-In reporting not set for this client."}</p>
+        <p className="text-xs">{book.obligations.dpdpFiduciary ? `Data Fiduciary under the DPDP Act · contact for affected people: ${book.obligations.dpdpContact.name || "not named"}${book.obligations.dpdpContact.email ? ` (${book.obligations.dpdpContact.email})` : ""} · target ${book.obligations.dpdpWithoutDelayHours} h for "without delay"` : "Not flagged as a Data Fiduciary."}</p>
         <p className="text-xs text-muted-foreground">Reviewed every {book.reviewEveryDays} days.</p>
       </Block>
     </div>

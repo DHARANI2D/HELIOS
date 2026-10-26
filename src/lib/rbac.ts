@@ -48,6 +48,9 @@ export const PERMISSIONS = {
   "rulebook.view": "Read a client's rulebook: what HELIOS may do on its estate",
   "rulebook.edit": "Draft changes to a client's rulebook and its allowlist",
   "rulebook.sign": "Put a client's rulebook in force (client admins sign; staff only on the client's recorded instruction)",
+  "compliance.view": "See regulatory clocks and notices (CERT-In, DPDP) and the ISO 27001 evidence map",
+  "compliance.prepare": "Draft regulatory notices, record the client's approval, and file them",
+  "compliance.approve": "Approve a regulatory notice before it is filed (the report is the client's; staff record a client's approval given elsewhere)",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -95,7 +98,7 @@ const SOC_BASE: Permission[] = ["dashboard.view", "cases.view", "cases.comment",
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ADMIN: ALL,
   SOC_MANAGER: ALL.filter((p) => !["users.manage", "pricing.manage", "pricing.margin"].includes(p)),
-  TRIAGE_ANALYST: [...SOC_BASE, "cases.triage", "cases.escalate", "containment.request", "ai.dispatch", "ai.feedback"],
+  TRIAGE_ANALYST: [...SOC_BASE, "cases.triage", "cases.escalate", "containment.request", "ai.dispatch", "ai.feedback", "compliance.view"],
   ANALYST: [
     ...SOC_BASE,
     "cases.triage",
@@ -112,6 +115,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "ai.feedback",
     "reports.view",
     "api.tokens",
+    "compliance.view",
+    "compliance.prepare",
   ],
   INCIDENT_RESPONDER: [
     ...SOC_BASE,
@@ -132,13 +137,15 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "endpoints.contain",
     "reports.view",
     "api.tokens",
+    "compliance.view",
+    "compliance.prepare",
   ],
   THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback", "api.tokens"],
   DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune", "api.tokens", "rulebook.edit"],
-  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view"],
+  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view", "compliance.view"],
   SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view", "rulebook.view", "rulebook.edit"],
-  CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign"],
-  CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view", "rulebook.view"],
+  CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign", "compliance.view", "compliance.approve"],
+  CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view", "rulebook.view", "compliance.view"],
 };
 
 export interface AccessSubject {

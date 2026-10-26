@@ -78,6 +78,7 @@ const SETTINGS = {
   "secret.abuseipdb": sealedSecret,
   "secret.mxtoolbox": sealedSecret,
   "secret.slackWebhook": sealedSecret,
+  "secret.smtp": sealedSecret,
 } as const;
 
 export type SettingKey = keyof typeof SETTINGS;

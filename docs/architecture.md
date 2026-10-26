@@ -24,7 +24,7 @@
   - **Who:** only existing, active staff accounts, matched by verified email. SSO creates no accounts and admits no client users.
   - **MFA:** the identity provider enforces it, so an SSO session satisfies HELIOS's MFA requirement.
   - **SSO only:** `security.ssoOnlyForStaff` turns off password sign-in for staff.
-- **Tenant isolation in the database.** Postgres row-level policies on the 15 tables that carry a `tenantId` (cases, events, endpoints, integrations, response actions, AI runs, rulebooks and the rest).
+- **Tenant isolation in the database.** Postgres row-level policies on the 16 tables that carry a `tenantId` (cases, events, endpoints, integrations, response actions, AI runs, rulebooks and the rest).
   - **How:** `tenantDb(id)` runs each query in a transaction that first sets `helios.tenant_id`, so Postgres returns and accepts only that client's rows, even when a query forgets its filter. With the setting unset (staff, background jobs) the policies allow everything.
   - **Where:** client sessions and client API tokens read cases, endpoints and events through it (`dbFor(user)`), under the application's own filters.
   - **Superusers:** they bypass row-level security. Run the app as a plain role (FORCE makes the policies apply to the owner), or set `HELIOS_DB_TENANT_ROLE` to a plain role the scoped transactions switch to.
@@ -34,6 +34,31 @@
   - **Admin actions:** rotate a client's key (credentials re-sealed, old key retired), and move older credentials onto their clients' keys.
   - **Offboarding:** destroying a suspended client's keys leaves its stored credentials unreadable, from a backup too.
   - **Master key:** `HELIOS_ENCRYPTION_KEY`, or `HELIOS_ENCRYPTION_KEY_KMS`, which holds it encrypted by AWS KMS. KMS decrypts it once at startup (`initKeyManagement`, SigV4 to `TrentService.Decrypt`) in the web process and the worker.
+
+### Regulatory reporting (`lib/compliance`)
+
+- **What it covers.**
+  - **CERT-In:** the directions of 28 April 2022 (section 70B(6) of the IT Act). Incidents of the 20 Annexure I types are reported within 6 hours of being noticed, to `incident@cert-in.org.in`.
+  - **DPDP:** Rule 7 of the DPDP Rules, 2025. The Data Protection Board and each affected Data Principal are told without delay, and the Board gets a detailed report within 72 hours (longer if it allows). Rule 7 applies from 13 May 2027; before then the same workflow runs as a rehearsal.
+  - **Rulebook settings:** whether each applies, the client's CERT-In point of contact, the severity from which the CERT-In clock starts on its own, the contact for affected people, and the client's own target for "without delay".
+- **The rules propose.** `classifyIncident` (pure) maps a case's ATT&CK techniques, detection sources, titles and the inventory assets it touches to Annexure I types, with a reason for each.
+  - **Compromise:** a critical system counts as compromised only with signs beyond scanning or a lure.
+  - **Benign cases:** a case judged benign proposes nothing.
+- **The `regulatory clocks` job** runs every minute:
+  - opens the CERT-In report for a new or changed case of a client it applies to, at or above its threshold, with the clock from when the case was opened;
+  - marks notices not required once their case is closed as a false positive or as authorised activity;
+  - sends reminders at half time, in the last sixth and once overdue, each claimed atomically so it goes out once.
+- **Analysts** can start a CERT-In report on any case, choosing the types and when it was really noticed (with a reason). They start the DPDP workflow, which opens its three notices, when personal data is involved.
+- **Approval and filing.**
+  - **Drafts:** each notice is drafted from the case (systems from the inventory, indicators, techniques, containment done).
+  - **Approval:** it goes to the client for approval. A client admin approves it in the app, or staff record an approval given by phone or email, naming who gave it. An edit after approval sends it back.
+  - **Filing:** only an approved notice is filed. The CERT-In report can be emailed from HELIOS (`lib/mail.ts`, SMTP) with its PDF, copying the client's contacts; otherwise the filing is recorded with the regulator's reference, or, for notices to people, with how many were told.
+  - **Updates:** a filed CERT-In report can be followed by updates.
+  - **Record:** every step is in the audit chain and on the case's timeline.
+- **ISO/IEC 27001 evidence.** `evidenceMap` reports, for 15 Annex A controls, what the platform's records show over a period: cases, containment, filings, audit entries, sources, two-step sign-in, data keys.
+  - **Scope:** for one client or as "X of Y clients" across all of them.
+  - **Gaps:** a control with nothing behind it (clock synchronisation on client systems, retention until it's built) is shown as a gap.
+- **Isolation:** `regulatory_notices` carries a `tenantId` and has the same row-level policy as the other client tables.
 
 ### Reference data in the database
 
@@ -183,6 +208,7 @@ Timers in the server process:
 | Connector verification | 30 seconds |
 | Time-box rollbacks | Minute |
 | Credential reminders | 6 hours |
+| Regulatory clocks (CERT-In and DPDP deadlines) | Minute |
 | Ladder review | Hour |
 | Ingest queue (backstop for the kick after each enqueue) | 2 seconds |
 | Pull collectors (each stream on its own interval) | 30 seconds |

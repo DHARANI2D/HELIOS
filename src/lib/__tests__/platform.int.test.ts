@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { createElement } from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
-import type { AddressInfo } from "node:net";
+import { createServer as createTcpServer, type AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { UserRole } from "@prisma/client";
 
@@ -65,6 +65,9 @@ import { loadPricingContext } from "@/lib/pricing/service";
 import { clientStackConfig } from "@/lib/pricing/client-stack";
 import { createQuote } from "@/lib/pricing/quotes";
 import { reviewUpgrades } from "@/lib/pricing/upgrades";
+import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNoticePdf, requestApproval, saveNotice, setClockStart, submitNotice } from "@/lib/compliance/service";
+import { evidenceMap } from "@/lib/compliance/iso27001";
+import type { SessionUser } from "@/lib/session";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -942,6 +945,144 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await db.quote.delete({ where: { id: [a, b].sort((x, y) => x.reference.localeCompare(y.reference))[0].id } });
     const c = await createQuote(data);
     expect(c.reference).toBe(`Q-${year}-${String(Math.max(Number(a.reference.slice(-4)), Number(b.reference.slice(-4))) + 1).padStart(4, "0")}`);
+  });
+
+  it("opens the CERT-In clock on its own, takes the client's approval, emails CERT-In and chases deadlines", async () => {
+    // A minimal SMTP server standing in for the MSSP's mail relay.
+    const mail: Array<{ from: string; to: string[]; data: string }> = [];
+    const smtp = createTcpServer((socket) => {
+      let buffer = "";
+      let current = { from: "", to: [] as string[], data: "" };
+      let inData = false;
+      const reply = (line: string) => socket.write(`${line}\r\n`);
+      reply("220 test ESMTP");
+      socket.on("data", (chunk) => {
+        buffer += chunk.toString("latin1");
+        while (true) {
+          if (inData) {
+            const end = buffer.indexOf("\r\n.\r\n");
+            if (end < 0) return;
+            current.data = buffer.slice(0, end);
+            buffer = buffer.slice(end + 5);
+            inData = false;
+            mail.push(current);
+            current = { from: "", to: [], data: "" };
+            reply("250 OK queued");
+            continue;
+          }
+          const nl = buffer.indexOf("\r\n");
+          if (nl < 0) return;
+          const line = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 2);
+          const verb = line.slice(0, 4).toUpperCase();
+          if (verb === "MAIL") current.from = line.replace(/^MAIL FROM:\s*/i, "");
+          if (verb === "RCPT") current.to.push(line.replace(/^RCPT TO:\s*<?([^>]*)>?.*$/i, "$1").toLowerCase());
+          if (verb === "DATA") inData = true;
+          reply(verb === "EHLO" || verb === "HELO" ? "250 test" : verb === "DATA" ? "354 go ahead" : verb === "QUIT" ? "221 bye" : "250 OK");
+          if (verb === "QUIT") socket.end();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => smtp.listen(0, "127.0.0.1", resolve));
+    process.env.HELIOS_SMTP_URL = `smtp://127.0.0.1:${(smtp.address() as AddressInfo).port}`;
+    process.env.HELIOS_MAIL_FROM = "SOC <soc@mssp.test>";
+
+    try {
+      const H = 3_600_000;
+      const tenant = await db.tenant.create({ data: { name: "Test · CERT-In", slug: "test-cert-in" } });
+      const author = { id: adminId, name: "Test Admin" };
+      await saveDraft(tenant.id, {
+        body: { obligations: { regulatedEntity: true, certInContact: { name: "Client CISO", email: "ciso@client.test", phone: "+91 11 0000 0000" }, certInMinSeverity: "HIGH", reportRecipients: ["soc@client.test"], dpdpFiduciary: true, dpdpContact: { name: "Client DPO", email: "dpo@client.test", phone: "" }, dpdpWithoutDelayHours: 12 } },
+        reason: "Reporting obligations",
+      }, author);
+      await signRulebook(tenant.id, { ...author, isClient: false }, "Client CISO approved by email today");
+      await db.endpoint.create({ data: { tenantId: tenant.id, hostname: "CERT-DB-01", ipAddress: "10.9.0.5", os: "Windows Server 2022", assetClass: "server", assetType: "database_server", criticality: "critical" } });
+      const clientUser = await db.user.create({ data: { email: "ciso@client.test", name: "Client CISO", role: "CLIENT_ADMIN", tenantId: tenant.id } });
+      const staff: SessionUser = { id: adminId, role: "ADMIN", name: "Test Admin", email: "admin@test.local", tenantId: null, tenantName: null, domains: [], isClient: false };
+      const client: SessionUser = { id: clientUser.id, role: "CLIENT_ADMIN", name: "Client CISO", email: clientUser.email, tenantId: tenant.id, tenantName: tenant.name, domains: [], isClient: true };
+
+      const ransom = { techniques: ["T1486"], metadata: { hostName: "CERT-DB-01" }, detections: [{ source: "IMPACT" as const, ruleId: "test:ransom", title: "Files encrypted on CERT-DB-01", severity: "HIGH" as const, evidence: {} }] };
+      const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Ransomware on CERT-DB-01", severity: "HIGH", tenantId: tenant.id, deferPipelines: true, ...ransom });
+      const below = await createCase({ sourceType: "SIEM_ALERT", title: "Ransomware test file", severity: "MEDIUM", tenantId: tenant.id, deferPipelines: true, ...ransom, detections: [] });
+
+      // The rules open it, once, from when the case was opened.
+      expect((await checkRegulatoryClocks()).opened).toBe(1);
+      expect((await checkRegulatoryClocks()).opened).toBe(0);
+      expect(await db.regulatoryNotice.count({ where: { caseId: below.id } })).toBe(0);
+      const notice = await db.regulatoryNotice.findFirstOrThrow({ where: { caseId: kase.id } });
+      expect(notice).toMatchObject({ kind: "CERT_IN", status: "DRAFT", proposedBy: "rules", categories: ["ii", "v", "vi"] });
+      expect(notice.dueAt!.getTime() - kase.createdAt.getTime()).toBe(6 * H);
+      const content = notice.content as { reporter: { name: string }; affectedSystems: Array<{ hostname: string; ip: string; critical: boolean }> };
+      expect(content.reporter.name).toBe("Client CISO");
+      expect(content.affectedSystems[0]).toMatchObject({ hostname: "CERT-DB-01", ip: "10.9.0.5", critical: true });
+      expect(await db.notification.count({ where: { userId: clientUser.id, kind: "compliance" } })).toBe(1);
+
+      // Nothing is filed without the client's approval, and an edit withdraws it.
+      await expect(submitNotice(notice.id, staff, { via: "email" })).rejects.toThrow(/approved/);
+      await requestApproval(notice.id, staff);
+      await approveNotice(notice.id, client);
+      await saveNotice(notice.id, staff, { content: { ...content, sector: "Healthcare" } });
+      expect(await db.regulatoryNotice.findUniqueOrThrow({ where: { id: notice.id } })).toMatchObject({ status: "DRAFT", approvedAt: null });
+      await expect(approveNotice(notice.id, staff)).rejects.toThrow(/Name the client's approver/);
+      await approveNotice(notice.id, staff, { name: "Client CISO", via: "phone" });
+
+      await submitNotice(notice.id, staff, { via: "email" });
+      expect(mail).toHaveLength(1);
+      expect(mail[0].to.sort()).toEqual(["ciso@client.test", "incident@cert-in.org.in", "soc@client.test"]);
+      expect(mail[0].data).toMatch(/Subject: Cyber security incident report: Test · CERT-In|Subject: =\?UTF-8\?/);
+      expect(mail[0].data).toContain("(v) Malicious code attacks");
+      expect(mail[0].data).toContain(`filename=cert-in-report-${kase.id}.pdf`);
+      expect(mail[0].data).toContain("JVBERi0"); // base64 of "%PDF-"
+      const filed = await db.regulatoryNotice.findUniqueOrThrow({ where: { id: notice.id } });
+      expect(filed).toMatchObject({ status: "SUBMITTED", submittedVia: "email", approvedByName: "Client CISO", approvedVia: "phone" });
+      expect(filed.messageId).toBeTruthy();
+      expect(await db.timelineEntry.count({ where: { caseId: kase.id, action: "compliance.notice_submitted" } })).toBe(1);
+      const update = await addUpdate(kase.id, staff);
+      expect(update).toMatchObject({ sequence: 2, status: "DRAFT", dueAt: null });
+
+      // Reminders as the deadline passes, once; a false positive closes it.
+      const phish = await createCase({ sourceType: "SIEM_ALERT", title: "Credential phishing wave", severity: "HIGH", tenantId: tenant.id, deferPipelines: true, techniques: ["T1566"] });
+      await checkRegulatoryClocks();
+      const late = await db.regulatoryNotice.findFirstOrThrow({ where: { caseId: phish.id } });
+      expect(late.categories).toEqual(["vii"]);
+      await setClockStart(late.id, staff, new Date(Date.now() - 7 * H), "The client saw the first lure at 07:00");
+      await checkRegulatoryClocks();
+      await checkRegulatoryClocks();
+      expect(await db.auditLog.count({ where: { action: "compliance.deadline_missed" } })).toBe(1);
+      expect((await db.regulatoryNotice.findUniqueOrThrow({ where: { id: late.id } })).remindedStage).toBe(4);
+      await db.case.update({ where: { id: phish.id }, data: { status: "FALSE_POSITIVE" } });
+      await checkRegulatoryClocks();
+      expect(await db.regulatoryNotice.findUniqueOrThrow({ where: { id: late.id } })).toMatchObject({ status: "NOT_REQUIRED", notRequiredReason: expect.stringMatching(/false positive/) });
+
+      // The DPDP workflow: three notices from when the client became aware.
+      const awareAt = new Date(Date.now() - H);
+      const dpdp = await openDpdp(kase.id, staff, { awareAt, principalsAffected: 1200, dataCategories: ["names", "phone numbers"] });
+      expect(dpdp.map((n) => n.kind)).toEqual(["DPDP_INTIMATION", "DPDP_REPORT", "DPDP_PRINCIPALS"]);
+      expect(dpdp[0].dueAt!.getTime() - awareAt.getTime()).toBe(12 * H);
+      expect(dpdp[1].dueAt!.getTime() - awareAt.getTime()).toBe(72 * H);
+      expect((dpdp[2].content as { contact: { email: string } }).contact.email).toBe("dpo@client.test");
+      await expect(openDpdp(kase.id, staff, { awareAt, principalsAffected: null, dataCategories: [] })).rejects.toThrow(/already open/);
+      await saveNotice(dpdp[2].id, staff, { content: { ...(dpdp[2].content as object), description: "On 26 Oct an attacker copied customer names and phone numbers.", consequences: "You may get scam calls.", safetySteps: "Don't share one-time passwords." } });
+      await expect(approveNotice(dpdp[2].id, client)).rejects.toThrow(/hasn't sent this for approval/);
+      await requestApproval(dpdp[2].id, staff);
+      await approveNotice(dpdp[2].id, client);
+      await expect(submitNotice(dpdp[2].id, client, { via: "client" })).rejects.toThrow(/how many people/);
+      await submitNotice(dpdp[2].id, client, { via: "client", recipientsCount: 1180 });
+      expect((await renderNoticePdf(dpdp[1].id)).subarray(0, 5).toString()).toBe("%PDF-");
+
+      // Database-enforced isolation covers notices too.
+      const [{ count }] = await db.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) FROM pg_policies WHERE tablename = 'regulatory_notices' AND policyname = 'tenant_isolation'`;
+      expect(Number(count)).toBe(1);
+
+      // Evidence for ISO 27001 A.5.5: a named contact and a report filed on time.
+      const evidence = await evidenceMap(tenant.id, 90);
+      expect(evidence.find((c) => c.id === "5.5")).toMatchObject({ status: "evidenced" });
+      expect(evidence.find((c) => c.id === "8.17")).toMatchObject({ status: "gap" });
+    } finally {
+      smtp.close();
+      delete process.env.HELIOS_SMTP_URL;
+      delete process.env.HELIOS_MAIL_FROM;
+    }
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

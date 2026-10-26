@@ -1,4 +1,4 @@
-import type { PlaybookActionType, ResponseActionStatus } from "@prisma/client";
+import type { CaseStatus, PlaybookActionType, ResponseActionStatus } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
@@ -15,7 +15,7 @@ import { ACTION_LABEL, CONTAINMENT_ACTIONS, ROLLBACK_OF, buildActionContext, exe
 // containment turns out to be unnecessary. Only EXECUTED containment counts
 // towards a case being contained.
 
-const CLOSED = ["RESOLVED", "FALSE_POSITIVE"];
+const CLOSED: CaseStatus[] = ["RESOLVED", "FALSE_POSITIVE"];
 
 const PARAM_FOR: Partial<Record<PlaybookActionType, string>> = {
   ISOLATE_HOST: "host",
@@ -93,14 +93,17 @@ async function markCaseAfterResponse(caseId: string) {
     db.responseAction.count({ where: { caseId, status: "PENDING_APPROVAL" } }),
   ]);
   const pendingPlaybooks = await db.playbookExecution.count({ where: { caseId, status: "PENDING_APPROVAL" } });
+  // Each write re-checks the status in the database, so a change made in
+  // between (the governance runtime containing the case, an analyst closing
+  // it) isn't overwritten by what was read above.
   if (contained > 0 && kase.status !== "CONTAINED") {
-    await db.case.update({ where: { id: caseId }, data: { status: "CONTAINED", containedAt: kase.containedAt ?? new Date() } });
+    await db.case.updateMany({ where: { id: caseId, status: { notIn: ["CONTAINED", ...CLOSED] } }, data: { status: "CONTAINED", containedAt: kase.containedAt ?? new Date() } });
   } else if (contained === 0 && (pending > 0 || pendingPlaybooks > 0) && kase.status !== "AWAITING_APPROVAL" && kase.status !== "CONTAINED") {
     // A contained case (e.g. an agent the governance runtime revoked) stays
     // contained while further actions wait for approval.
-    await db.case.update({ where: { id: caseId }, data: { status: "AWAITING_APPROVAL" } });
+    await db.case.updateMany({ where: { id: caseId, status: { notIn: ["AWAITING_APPROVAL", "CONTAINED", ...CLOSED] } }, data: { status: "AWAITING_APPROVAL" } });
   } else if (pending === 0 && pendingPlaybooks === 0 && kase.status === "AWAITING_APPROVAL") {
-    await db.case.update({ where: { id: caseId }, data: { status: "INVESTIGATING" } });
+    await db.case.updateMany({ where: { id: caseId, status: "AWAITING_APPROVAL" }, data: { status: "INVESTIGATING" } });
   }
 }
 

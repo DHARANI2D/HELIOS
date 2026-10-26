@@ -52,6 +52,7 @@ export async function savePlatformSecretAction(name: string, value: string | nul
   const key = secretName.parse(name);
   const v = value === null ? null : z.string().trim().min(8, "That doesn't look like a complete key").max(2000).parse(value);
   if (key === "slackWebhook" && v && !/^https:\/\//i.test(v)) throw new Error("The webhook must be an https:// URL");
+  if (key === "smtp" && v && !/^smtps?:\/\/[^\s/]+/i.test(v)) throw new Error("The mail server must be an smtp:// or smtps:// URL");
   await storePlatformSecret(key, v, user.id);
   await logAction({ actorId: user.id, action: v ? "settings.secret_stored" : "settings.secret_cleared", detail: { secret: key } });
   revalidate();

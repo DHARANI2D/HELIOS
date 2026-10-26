@@ -231,8 +231,10 @@ export function pdfDate(d: Date | string | null | undefined, withTime = true): s
   return withTime ? `${date.toISOString().slice(0, 16).replace("T", " ")} UTC` : date.toISOString().slice(0, 10);
 }
 
+export const renderPdf = (doc: ReactElement): Promise<Buffer> => renderToBuffer(doc as Parameters<typeof renderToBuffer>[0]);
+
 export async function pdfResponse(doc: ReactElement, filename: string): Promise<Response> {
-  const buffer = await renderToBuffer(doc as Parameters<typeof renderToBuffer>[0]);
+  const buffer = await renderPdf(doc);
   return new Response(new Uint8Array(buffer), {
     headers: {
       "content-type": "application/pdf",

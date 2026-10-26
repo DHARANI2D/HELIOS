@@ -123,5 +123,5 @@ export function parseAssetType(text: string | null | undefined): { class: AssetC
 }
 
 export function assetTypeLabel(cls: AssetClass, type: string | null | undefined) {
-  return ASSET_TYPES[cls].find((t) => t.key === type)?.label ?? null;
+  return ASSET_TYPES[cls]?.find((t) => t.key === type)?.label ?? null;
 }

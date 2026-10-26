@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Ban, Bot, Building2, Crosshair, Download, Eye, Fingerprint, Link2, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
+import { ArrowLeft, Ban, Bot, Building2, Crosshair, Download, Eye, Fingerprint, Landmark, Link2, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { dbFor } from "@/lib/tenant-db";
@@ -39,6 +39,8 @@ import { ResponseActions } from "@/components/cases/response-actions";
 import { ExecutionDecision } from "@/components/playbooks/execution-decision";
 import { RunPlaybookButton } from "@/components/playbooks/run-playbook-button";
 import { RecheckButton } from "@/components/threat-intel/recheck-button";
+import { CaseNotices } from "@/components/compliance/case-notices";
+import { caseNoticesProps } from "@/lib/compliance/view";
 import { VerdictBadge } from "@/components/threat-intel/verdict-badge";
 
 const EXECUTION_VARIANT = {
@@ -100,14 +102,15 @@ async function loadCasePage(id: string, user: SessionUser) {
   ]);
 
   const recommended = user.isClient ? [] : await recommendPlaybooks(kase.id, evidence.entities);
-  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents };
+  const regulatory = kase.tenantId && can(user, "compliance.view") ? await caseNoticesProps(kase, user, now) : null;
+  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory };
 }
 
 export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]">) {
   const { id } = await params;
   const user = await pageGuard("cases.view");
   await assertCaseAccess(user, id, "page");
-  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents } = await loadCasePage(id, user);
+  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory } = await loadCasePage(id, user);
 
   const ranPlaybookIds = new Set(kase.playbookRuns.map((r) => r.playbookId));
   const suggestions = recommended.filter((p) => !ranPlaybookIds.has(p.id));
@@ -330,6 +333,22 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
               />
             </CardContent>
           </Card>
+
+          {regulatory && (
+            <Card id="regulatory" className="scroll-mt-20">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base"><Landmark className="size-4" /> Regulatory reporting</CardTitle>
+                <CardDescription>
+                  {user.isClient
+                    ? "What your organisation must tell CERT-In, the Data Protection Board or the people affected, and by when. Your SOC drafts it; you approve it before it's filed."
+                    : "CERT-In's 6-hour report and the DPDP breach notices: drafted from the case, approved by the client, filed and recorded here."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CaseNotices {...regulatory} />
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>

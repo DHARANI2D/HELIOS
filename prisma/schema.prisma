@@ -45,26 +45,26 @@ enum SecurityDomain {
 }
 
 model User {
-  id           String           @id @default(cuid())
-  email        String           @unique
-  name         String?
-  passwordHash String?
-  role         UserRole         @default(ANALYST)
-  tenantId     String? // set for client users; null for MSSP staff
-  title        String?
-  domains      SecurityDomain[] @default([])
-  active       Boolean          @default(true)
-  lastLoginAt  DateTime?
-  failedLogins Int              @default(0)
-  lockedUntil  DateTime?
+  id                String           @id @default(cuid())
+  email             String           @unique
+  name              String?
+  passwordHash      String?
+  role              UserRole         @default(ANALYST)
+  tenantId          String? // set for client users; null for MSSP staff
+  title             String?
+  domains           SecurityDomain[] @default([])
+  active            Boolean          @default(true)
+  lastLoginAt       DateTime?
+  failedLogins      Int              @default(0)
+  lockedUntil       DateTime?
   // Two-step sign-in (lib/mfa): the TOTP secret, sealed; hashes of the
   // unused recovery codes; the last time step accepted (no replays).
   mfaSecretCipher   String?
   mfaEnabledAt      DateTime?
-  mfaRecoveryHashes String[]  @default([])
+  mfaRecoveryHashes String[]         @default([])
   mfaLastStep       Int?
-  preferences  Json?
-  createdAt    DateTime         @default(now())
+  preferences       Json?
+  createdAt         DateTime         @default(now())
 
   tenant                 Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   accounts               Account[]
@@ -185,6 +185,7 @@ model Tenant {
   aiPolicy     TenantAiPolicy?
   autonomy     AutonomyLevel[]
   keys         TenantKey[]
+  notices      RegulatoryNotice[]
 
   @@map("tenants")
 }
@@ -270,6 +271,7 @@ model Case {
   notifications   Notification[]
   responseActions ResponseAction[]
   aiOutcomes      AiDecisionOutcome[]
+  notices         RegulatoryNotice[]
 
   @@index([tenantId, status])
   @@index([domain, status])
@@ -694,31 +696,31 @@ enum IntegrationStatus {
 }
 
 model Integration {
-  id              String            @id @default(cuid())
-  tenantId        String?
-  vendor          String // tool key, src/lib/integrations/catalog.ts
-  category        String // category key
-  name            String
-  status          IntegrationStatus @default(PENDING)
-  enabled         Boolean           @default(true)
-  config          Json? // non-secret settings
-  secretCipher    String?           @db.Text // AES-256-GCM sealed credentials
+  id                String            @id @default(cuid())
+  tenantId          String?
+  vendor            String // tool key, src/lib/integrations/catalog.ts
+  category          String // category key
+  name              String
+  status            IntegrationStatus @default(PENDING)
+  enabled           Boolean           @default(true)
+  config            Json? // non-secret settings
+  secretCipher      String?           @db.Text // AES-256-GCM sealed credentials
   // SHA-256 of the ingest token; the token itself is shown once.
-  ingestTokenHash String?           @unique
-  tokenPrefix     String?
+  ingestTokenHash   String?           @unique
+  tokenPrefix       String?
   // Roles that can use this tool, in addition to explicitly assigned users.
-  allowedRoles    UserRole[]        @default([])
-  createdById     String?
-  lastEventAt     DateTime?
-  eventCount      Int               @default(0)
-  lastError       String?
+  allowedRoles      UserRole[]        @default([])
+  createdById       String?
+  lastEventAt       DateTime?
+  eventCount        Int               @default(0)
+  lastError         String?
   // Source health (lib/ingest/health): how long it may be silent before
   // that is itself a finding (null: by category), and the open quiet spell.
   quietAfterMinutes Int?
   quietSince        DateTime?
   quietCaseId       String?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   tenant      Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   assignments IntegrationAssignment[]
@@ -1337,4 +1339,77 @@ model TenantKey {
 
   @@unique([tenantId, version])
   @@map("tenant_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Regulatory reporting (lib/compliance): what a client must tell a regulator
+// or the people affected about an incident, and by when. CERT-In: report
+// within 6 hours of noticing an incident of an Annexure I type. DPDP Rule 7:
+// intimate the Data Protection Board and each affected Data Principal
+// without delay, and send the Board a detailed report within 72 hours.
+// HELIOS drafts, the client approves, and the filing is recorded.
+// ---------------------------------------------------------------------------
+
+enum NoticeKind {
+  CERT_IN
+  DPDP_INTIMATION // first intimation to the Data Protection Board
+  DPDP_REPORT // detailed report to the Board
+  DPDP_PRINCIPALS // the notice to each affected Data Principal
+}
+
+enum NoticeStatus {
+  DRAFT
+  AWAITING_APPROVAL // with the client
+  APPROVED
+  SUBMITTED
+  NOT_REQUIRED
+}
+
+model RegulatoryNotice {
+  id                String       @id @default(cuid())
+  tenantId          String
+  caseId            String
+  kind              NoticeKind
+  // 1 = the first report; later ones are updates to it.
+  sequence          Int          @default(1)
+  status            NoticeStatus @default(DRAFT)
+  // When the clock started: the incident noticed (CERT-In) or the client
+  // becoming aware of the personal data breach (DPDP).
+  clockStartAt      DateTime
+  // null = "without delay", with no target set.
+  dueAt             DateTime?
+  // CERT-In Annexure I items (lib/compliance/cert-in.ts).
+  categories        String[]     @default([])
+  // The report's fields, per kind.
+  content           Json
+  // "rules" (proposed by the classifier) or "analyst".
+  proposedBy        String
+  reasons           Json?
+  approvedById      String?
+  approvedByName    String?
+  // How the client approved: app, or the channel staff recorded it from.
+  approvedVia       String?
+  approvedAt        DateTime?
+  submittedAt       DateTime?
+  submittedById     String?
+  submittedVia      String? // email | portal | phone | client | other
+  // The regulator's acknowledgement or tracking number.
+  reference         String?
+  // For notices to people: how many were told.
+  recipientsCount   Int?
+  messageId         String?
+  notRequiredReason String?      @db.Text
+  // Reminders sent so far (lib/compliance/service.ts).
+  remindedStage     Int          @default(0)
+  createdById       String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  case   Case   @relation(fields: [caseId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, kind, sequence])
+  @@index([tenantId, status])
+  @@index([status, dueAt])
+  @@map("regulatory_notices")
 }

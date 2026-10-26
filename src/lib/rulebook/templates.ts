@@ -55,7 +55,7 @@ export function buildTemplate(key: TemplateKey, timeZone = "Asia/Kolkata"): Rule
         },
         blastRadius: { maxActionsPerHour: 3, maxHostsIsolated: 2, twoPerson: ["DISABLE_USER", "ISOLATE_HOST"] },
         dataHandling: { residency: "any", redactPii: true },
-        obligations: { regulatedEntity: true },
+        obligations: { regulatedEntity: true, dpdpFiduciary: true },
       });
     case "finance":
       return rulebookSchema.parse({
@@ -76,7 +76,7 @@ export function buildTemplate(key: TemplateKey, timeZone = "Asia/Kolkata"): Rule
         },
         blastRadius: { maxActionsPerHour: 5, maxHostsIsolated: 3, twoPerson: ["DISABLE_USER", "ISOLATE_HOST"] },
         dataHandling: { residency: "any", redactPii: true },
-        obligations: { regulatedEntity: true },
+        obligations: { regulatedEntity: true, dpdpFiduciary: true },
       });
     case "manufacturing":
       return rulebookSchema.parse({

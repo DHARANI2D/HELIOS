@@ -99,6 +99,9 @@ export const approverSchema = z.object({
 });
 export type Approver = z.infer<typeof approverSchema>;
 
+const contactSchema = z.object({ name: text(120), email: text(200), phone: text(40) });
+const NO_CONTACT = { name: "", email: "", phone: "" };
+
 const DEFAULT_ACTIONS: Record<RuledAction, ActionRule> = {
   ISOLATE_HOST: { mode: "approve", autoFrom: "HIGH" },
   BLOCK_IP: { mode: "approve", autoFrom: "HIGH" },
@@ -169,11 +172,23 @@ export const rulebookSchema = z.object({
     .default({ residency: "any", regions: [], allowedProviders: [], redactPii: true, allowUserChoice: false }),
   obligations: z
     .object({
+      // CERT-In's directions apply (an organisation in India): incidents of
+      // an Annexure I type are reported within 6 hours of being noticed.
       regulatedEntity: z.boolean().default(false),
-      certInContact: z.object({ name: text(120), email: text(200), phone: text(40) }).default({ name: "", email: "", phone: "" }),
+      certInContact: contactSchema.default(NO_CONTACT),
+      // Cases of an Annexure I type at or above this severity start the
+      // CERT-In clock on their own; an analyst can start it on any case.
+      certInMinSeverity: z.enum(SEVERITIES).default("HIGH"),
       reportRecipients: z.array(z.email()).max(20).default([]),
+      // The client is a Data Fiduciary under India's DPDP Act: a personal
+      // data breach is intimated to the Board and to each person affected.
+      dpdpFiduciary: z.boolean().default(false),
+      // Who affected people can contact (printed on their notice).
+      dpdpContact: contactSchema.default(NO_CONTACT),
+      // The client's own target for "without delay"; not a legal deadline.
+      dpdpWithoutDelayHours: z.number().int().min(1).max(72).default(24),
     })
-    .default({ regulatedEntity: false, certInContact: { name: "", email: "", phone: "" }, reportRecipients: [] }),
+    .default({ regulatedEntity: false, certInContact: NO_CONTACT, certInMinSeverity: "HIGH", reportRecipients: [], dpdpFiduciary: false, dpdpContact: NO_CONTACT, dpdpWithoutDelayHours: 24 }),
   // Containment that undoes itself unless someone keeps it: 0 = until a
   // person lifts it.
   timeBoxes: z

@@ -1,9 +1,10 @@
 // Background work that runs on a timer: approval escalation along client
-// approver chains, connector verification, time boxes, the autonomy-ladder
-// review, and log collection (the ingest queue, pull collectors, source
-// health). Started once from src/instrumentation.ts in the web process; with
-// HELIOS_INGEST_WORKER=external the log-collection jobs run in
-// `npm run worker` (src/worker.ts) instead. Off with HELIOS_BACKGROUND_JOBS=off.
+// approver chains, connector verification, time boxes, regulatory clocks,
+// the autonomy-ladder review, and log collection (the ingest queue, pull
+// collectors, source health). Started once from src/instrumentation.ts in
+// the web process; with HELIOS_INGEST_WORKER=external the log-collection
+// jobs run in `npm run worker` (src/worker.ts) instead. Off with
+// HELIOS_BACKGROUND_JOBS=off.
 // Each job is safe to repeat and to run on several instances.
 
 interface Job {
@@ -29,6 +30,8 @@ const JOBS: Job[] = [
   { name: "time boxes", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/connectors/safety")).rollBackExpired() },
   // Connector credentials about to expire.
   { name: "credential reminders", group: "core", everyMs: 6 * 3_600_000, run: async () => (await import("@/lib/connectors/safety")).credentialReminders() },
+  // Opens CERT-In reports for qualifying cases and chases regulatory deadlines.
+  { name: "regulatory clocks", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/compliance/service")).checkRegulatoryClocks() },
   // Demotes on a bad week, proposes promotions; idempotent, so hourly is fine.
   { name: "autonomy ladder review", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/shadow/service")).reviewLadders() },
 ];

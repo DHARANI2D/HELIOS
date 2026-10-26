@@ -423,15 +423,34 @@ export function RulebookEditor({ tenantId, initial, active, template, timeZone, 
         )}
       </Section>
 
-      <Section step={9} title="Obligations and review" hint="Regulated entities in India report qualifying incidents to CERT-In within 6 hours; record who reports for this client. The rulebook comes up for review on this schedule.">
-        <label className="flex items-center gap-2 text-xs"><Switch checked={book.obligations.regulatedEntity} disabled={disabled} onCheckedChange={(v) => patch("obligations", { regulatedEntity: v })} /> Regulated entity (CERT-In reporting applies)</label>
-        <div className="grid gap-2 sm:grid-cols-3">
+      <Section step={9} title="Obligations and review" hint="Organisations in India report incidents of the types CERT-In lists to CERT-In within 6 hours of noticing them; a Data Fiduciary tells the Data Protection Board and the people affected about a personal data breach. Record who reports for this client. The rulebook comes up for review on this schedule.">
+        <label className="flex items-center gap-2 text-xs"><Switch checked={book.obligations.regulatedEntity} disabled={disabled} onCheckedChange={(v) => patch("obligations", { regulatedEntity: v })} /> CERT-In reporting applies (service provider, intermediary, data centre, body corporate or government body in India)</label>
+        <div className="grid gap-2 sm:grid-cols-4">
           {(["name", "email", "phone"] as const).map((k) => (
             <div key={k} className="grid gap-1.5">
               <Label htmlFor={`certin-${k}`} className="text-xs">CERT-In point of contact · {k}</Label>
               <Input id={`certin-${k}`} className="h-8 text-xs" disabled={disabled} value={book.obligations.certInContact[k]} onChange={(e) => patch("obligations", { certInContact: { ...book.obligations.certInContact, [k]: e.target.value } })} />
             </div>
           ))}
+          <div className="grid gap-1.5">
+            <Label htmlFor="certin-severity" className="text-xs">Start the clock from</Label>
+            <NativeSelect id="certin-severity" className="h-8 text-xs" disabled={disabled} value={book.obligations.certInMinSeverity} onChange={(e) => patch("obligations", { certInMinSeverity: e.target.value as Rulebook["obligations"]["certInMinSeverity"] })}>
+              {SEVERITIES.map((s) => <option key={s} value={s}>{s.toLowerCase()} and above</option>)}
+            </NativeSelect>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-xs"><Switch checked={book.obligations.dpdpFiduciary} disabled={disabled} onCheckedChange={(v) => patch("obligations", { dpdpFiduciary: v })} /> Data Fiduciary under the DPDP Act (personal data breaches are notified)</label>
+        <div className="grid gap-2 sm:grid-cols-4">
+          {(["name", "email", "phone"] as const).map((k) => (
+            <div key={k} className="grid gap-1.5">
+              <Label htmlFor={`dpdp-${k}`} className="text-xs">Contact for affected people · {k}</Label>
+              <Input id={`dpdp-${k}`} className="h-8 text-xs" disabled={disabled} value={book.obligations.dpdpContact[k]} onChange={(e) => patch("obligations", { dpdpContact: { ...book.obligations.dpdpContact, [k]: e.target.value } })} />
+            </div>
+          ))}
+          <div className="grid gap-1.5">
+            <Label htmlFor="dpdp-hours" className="text-xs">Our target for &ldquo;without delay&rdquo; (hours)</Label>
+            <Input id="dpdp-hours" type="number" min={1} max={72} className="h-8 text-xs" disabled={disabled} value={book.obligations.dpdpWithoutDelayHours} onChange={(e) => patch("obligations", { dpdpWithoutDelayHours: Math.min(72, Math.max(1, Number(e.target.value) || 24)) })} />
+          </div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid min-w-72 flex-1 gap-1.5">
