@@ -67,6 +67,7 @@ import { createQuote } from "@/lib/pricing/quotes";
 import { reviewUpgrades } from "@/lib/pricing/upgrades";
 import { processDeliveries, queueToContact } from "@/lib/alerts/outbox";
 import { investigate } from "@/lib/ai/investigator/run";
+import { addTuning, checkRules, importRules, setRuleStatus } from "@/lib/detections/service";
 import type { AgentRequest, AgentStep, AgentToolResult, LlmProvider } from "@/lib/ai/provider";
 import { setSetting } from "@/lib/settings";
 import { createHmac } from "node:crypto";
@@ -1253,6 +1254,62 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     const out = run.output as { steps: Array<{ tool: string; ok: boolean }> };
     expect(out.steps.map((x) => x.tool)).toEqual(expect.arrayContaining(["get_endpoint", "event_summary", "related_cases"]));
     expect(await db.caseComment.count({ where: { caseId: kase.id, body: { startsWith: "**Investigation trail**" } } })).toBe(1);
+  });
+
+  it("tests imported Sigma rules before they go live, then tunes them per client", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Sigma", slug: "test-sigma" } });
+    const rule = `title: Encoded PowerShell (test)
+id: 7d3b7a2e-0000-4000-8000-000000000001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains|all: ['powershell', ' -enc ']
+  condition: selection
+level: high
+tags: [attack.execution, attack.t1059.001]`;
+    const ps = (host: string, user: string) => ({ source: "endpoint" as const, data: { event_type: "PROCESS_START", hostname: host, user, process: `powershell.exe -nop -enc SQBFAFgA-${host}`, timestamp: new Date().toISOString() } });
+
+    // Refused: what HELIOS can't evaluate faithfully.
+    const refused = await importRules("title: x\nlogsource: {}\ndetection:\n  s: { User: a }\n  condition: s | count() > 3\nlevel: low", { tenantId: null, actorId: adminId });
+    expect(refused[0]).toMatchObject({ ok: false, errors: [expect.stringMatching(/Aggregations/)] });
+
+    const [imported] = await importRules(rule, { tenantId: null, actorId: adminId });
+    expect(imported).toMatchObject({ ok: true, updated: false });
+    const stored = await db.detectionRule.findUniqueOrThrow({ where: { id: imported.id! } });
+    expect(stored).toMatchObject({ status: "TESTING", level: "high", techniques: ["T1059.001"], logsource: "windows/process_creation" });
+
+    // In testing it only counts.
+    await ingestTelemetry([ps("SIG-WS-01", "ravi")], { tenantId: tenant.id });
+    expect(await db.detection.count({ where: { source: "SIGMA_RULE" } })).toBe(0);
+    const tested = await db.detectionRule.findUniqueOrThrow({ where: { id: imported.id! } });
+    expect(tested.testHits).toBe(1);
+    expect((tested.samples as string[])[0]).toMatch(/host=SIG-WS-01 user=ravi/);
+
+    // The backtest finds it in history.
+    const [checked] = await checkRules(rule, tenant.id);
+    expect(checked.backtest).toMatchObject({ matched: 1 });
+
+    // Live: a match raises a detection and a case.
+    await setRuleStatus(imported.id!, "ACTIVE", adminId);
+    const live = await ingestTelemetry([ps("SIG-WS-02", "meera")], { tenantId: tenant.id });
+    const detections = await db.detection.findMany({ where: { source: "SIGMA_RULE" }, include: { case: { select: { tenantId: true } } } });
+    expect(detections).toHaveLength(1);
+    expect(detections[0]).toMatchObject({ ruleId: "sigma:7d3b7a2e-0000-4000-8000-000000000001", severity: "HIGH", case: { tenantId: tenant.id } });
+    expect(live.caseIds.length).toBeGreaterThan(0);
+
+    // Tuned for this client: the build server's runs are left out.
+    const tuning = await addTuning({ tenantId: tenant.id, target: "*", kind: "exclude", field: "host", op: "equals", value: "SIG-BUILD-01", reason: "Build agent packs scripts with -enc; confirmed with the client" }, adminId);
+    const quiet = await ingestTelemetry([ps("SIG-BUILD-01", "builder")], { tenantId: tenant.id });
+    expect(quiet.tuned).toBeGreaterThan(0);
+    expect(await db.detection.count({ where: { source: "SIGMA_RULE" } })).toBe(1);
+    expect((await db.detectionTuning.findUniqueOrThrow({ where: { id: tuning.id } })).hits).toBeGreaterThan(0);
+    await expect(addTuning({ tenantId: tenant.id, target: "*", kind: "exclude", field: "host", op: "equals", value: "x", reason: " " }, adminId)).rejects.toThrow(/Say why/);
+
+    // A changed rule goes back to testing.
+    await importRules(rule.replace("level: high", "level: critical"), { tenantId: null, actorId: adminId });
+    expect(await db.detectionRule.findUniqueOrThrow({ where: { id: imported.id! } })).toMatchObject({ status: "TESTING", level: "critical", testHits: 0 });
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

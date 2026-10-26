@@ -191,6 +191,7 @@ model Tenant {
   autonomy     AutonomyLevel[]
   keys         TenantKey[]
   notices      RegulatoryNotice[]
+  tunings      DetectionTuning[]
 
   @@map("tenants")
 }
@@ -377,6 +378,7 @@ enum DetectionSource {
   EMAIL_ATTACHMENT_FORENSICS
   EMAIL_SANDBOX_DETONATION
   VENDOR_ALERT // raised by an onboarded tool (EDR, identity, email gateway)
+  SIGMA_RULE // an imported Sigma rule (lib/detections)
 }
 
 model Detection {
@@ -1462,4 +1464,69 @@ model AlertDelivery {
   @@index([userId, createdAt])
   @@index([to, createdAt])
   @@map("alert_deliveries")
+}
+
+// ---------------------------------------------------------------------------
+// Detection engineering (lib/detections): Sigma rules imported by detection
+// engineers, and per-client tuning of every detector and rule.
+// ---------------------------------------------------------------------------
+
+enum DetectionRuleStatus {
+  TESTING // matches are counted, no cases open
+  ACTIVE
+  DISABLED
+}
+
+model DetectionRule {
+  id          String              @id @default(cuid())
+  // The rule's own Sigma id (or a hash of its text when it has none).
+  sigmaId     String
+  title       String
+  description String?             @db.Text
+  level       String // informational | low | medium | high | critical
+  status      DetectionRuleStatus @default(TESTING)
+  // null = every client; set = one client's own rule.
+  tenantId    String?
+  yaml        String              @db.Text
+  techniques  String[]            @default([])
+  tactics     String[]            @default([])
+  logsource   String
+  // What the import found that may stop it matching (unmapped log source…).
+  warnings    String[]            @default([])
+  testHits    Int                 @default(0)
+  lastHitAt   DateTime?
+  // The last few events it matched, for review before it goes live.
+  samples     Json?
+  createdById String?
+  updatedById String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([status])
+  @@index([sigmaId])
+  @@map("detection_rules")
+}
+
+model DetectionTuning {
+  id          String        @id @default(cuid())
+  tenantId    String
+  // A built-in detector's name, "sigma:<sigmaId>", or "*" for every one.
+  target      String
+  kind        String // exclude | disable | severity
+  // exclude: events matching this condition don't count.
+  field       String? // host | user | process | ip | text
+  op          String? // equals | contains | startswith | endswith | regex
+  value       String?
+  severity    CaseSeverity?
+  reason      String        @db.Text
+  expiresAt   DateTime?
+  hits        Int           @default(0)
+  lastHitAt   DateTime?
+  createdById String?
+  createdAt   DateTime      @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("detection_tunings")
 }

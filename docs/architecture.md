@@ -354,11 +354,33 @@ The case view renders that metadata in `components/cases/source-panel.tsx`.
 
 1. **Ingest.** Raw logs are normalized by four adapters (auth, endpoint, network, cloud) and stored as `SecurityEvent` rows, grouped by `batchId`.
 2. **Detect.** All 11 detectors run over the batch plus the previous 24h of SIEM telemetry, capped at 5,000 events. That window lets multi-event rules (password spraying, impossible travel, FSM chains, port scans) span ingests.
-3. **Score.** This uses signal-fusion's model: confidence × signal-family multiplier, capped at 1000. The score then maps to a severity.
+   Active Sigma rules (below) run over the batch itself.
+3. **Score.** This uses signal-fusion's model: confidence × signal-family multiplier, capped at 1000. The score then maps to a severity. A Sigma rule's level sets its score.
+   **Tune.** The client's detection tuning then applies to every finding: detectors or rules switched off there, events left out by a condition, severity overrides.
 4. **De-duplicate.** Each detection is fingerprinted as `sha256(detector | rule | sorted matched event IDs)`. A finding already on file is never re-filed.
 5. **Correlate.** Fresh detections are grouped by risk object (user > host > IP). An open SIEM case for the same risk object from the last 24h gets the new evidence appended, with severity and risk only ratcheting up. Otherwise a new case is created.
 
 Detectors are pure; the threat-intel detector matches against an intel snapshot the service loads for the batch (`threat-intel/snapshot.ts`). The 48 ATT&CK scenarios live in `src/lib/__tests__/fixtures/siem` and are used only by tests and `npm run db:seed:test`.
+
+### Detection engineering (`lib/detections`, `/detections`)
+
+- **Sigma rules** (`sigma.ts`). Detection engineers paste Sigma YAML; each rule is compiled into a matcher over HELIOS events.
+  - **Supported:** maps, lists and keyword searches; null; case-insensitive values with `*`/`?` wildcards; the `contains`, `startswith`, `endswith`, `all`, `re` (`i`/`m`/`s`), `cidr`, `exists`, `cased`, `gt`/`gte`/`lt`/`lte`, `windash`, `base64`, `base64offset` and `wide` modifiers; conditions with and/or/not, parentheses and `1 of`/`all of` patterns.
+  - **Refused at import, with the reason:** anything outside that (aggregations, correlation rules, `fieldref`, unknown modifiers), so no rule runs with part of its logic missing.
+- **Field mapping** (`sigma-fields.ts`). Sigma's field names are mapped onto event columns (Image, CommandLine, ParentImage, User, Computer, DestinationIp, TargetFilename, Hashes and their aliases), then looked up in the OCSF record and the source's own fields.
+  - **Log sources:** each maps to the events it covers (process_creation → Process Activity, dns_query → DNS Activity, cloud products by platform). An unmapped one is flagged, and the rule is checked against every event.
+- **Testing first.**
+  - **Testing:** an imported rule starts in testing, where it runs on every batch and only counts matches, keeping samples.
+  - **Backtest:** before importing, a rule can be backtested against the last 7 days of a client's events.
+  - **Live:** once a detection engineer makes it live, a match raises a `SIGMA_RULE` detection that correlates into cases like the built-in ones.
+  - **Edits and hunting rules:** a changed rule goes back to testing. Informational rules only count.
+  - **Coverage:** live rules count towards ATT&CK coverage.
+- **Tuning per client** (`tuning.ts`). Three kinds, each with a reason and an optional expiry:
+  - switch a detector or rule off for one client;
+  - leave out events matching a condition (host, account, process, IP or anywhere; equals, contains, starts with, ends with, regex);
+  - set the severity a detector or rule raises.
+  - **Stale tuning:** each counts the findings it held back, so stale tuning shows up.
+  - **Isolation:** `detection_tunings` and `detection_rules` carry row-level policies.
 
 ### Investigations (`lib/investigations`)
 

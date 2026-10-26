@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { db } from "@/lib/db";
+import { sigmaDetections, tuneDetections } from "@/lib/detections/service";
 import { getSetting } from "@/lib/settings";
 import { logAction } from "@/lib/audit";
 import { maxSeverity } from "@/lib/severity";
@@ -48,6 +49,8 @@ export interface IngestSummary {
   // Findings about entities on the client's allowlist (a known scanner, an
   // admin tool), recorded as telemetry but not filed as cases.
   allowlisted?: number;
+  // Findings the client's detection tuning held back.
+  tuned?: number;
 }
 
 function humanize(ruleId: string) {
@@ -95,7 +98,7 @@ export function buildCaseArtifacts(group: ScoredDetection[]): CaseArtifacts {
     detections: group.map((d) => ({
       source: d.detectionSource,
       ruleId: `${d.detector}:${d.ruleId}`,
-      title: `${humanize(d.ruleId)} — ${d.reasoning[0]}`.slice(0, 240),
+      title: (d.detector === "sigma" ? d.reasoning[0] : `${humanize(d.ruleId)} — ${d.reasoning[0]}`).slice(0, 240),
       severity: severityForRisk(d.riskScore),
       fingerprint: fingerprintFor(d),
       evidence: {
@@ -185,7 +188,10 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
 
   const events = await loadWindow(batchId, tenantId);
   const intel = await loadIntelSnapshot(events.flatMap((e) => [e.network.sourceIp, e.network.destIp]).map((value) => ({ type: "IP" as const, value })));
-  const detections = runDetections(events, { intel, disabled: await getSetting("detection.disabledDetectors") });
+  // Built-in detectors over the window, active Sigma rules over this batch,
+  // then the client's own tuning over both.
+  const found = [...runDetections(events, { intel, disabled: await getSetting("detection.disabledDetectors") }), ...(await sigmaDetections(batchId, tenantId))];
+  const { detections, suppressed } = await tuneDetections(found, tenantId);
 
   // Drop findings already filed (in an earlier run) or repeated in this one.
   const fingerprints = detections.map(fingerprintFor);
@@ -273,6 +279,7 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
     casesUpdated,
     caseIds,
     ...(allowlisted ? { allowlisted } : {}),
+    ...(suppressed ? { tuned: suppressed } : {}),
   };
   await logAction({
     actorId: options.actorId,

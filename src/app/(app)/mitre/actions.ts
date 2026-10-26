@@ -17,4 +17,5 @@ export async function setDetectorEnabledAction(name: string, enabled: boolean) {
   await setSetting("detection.disabledDetectors", [...disabled], user.id);
   await logAction({ actorId: user.id, action: enabled ? "detection.detector_enabled" : "detection.detector_disabled", detail: { detector } });
   revalidatePath("/mitre");
+  revalidatePath("/detections");
 }

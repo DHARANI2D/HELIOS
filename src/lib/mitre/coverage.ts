@@ -15,8 +15,10 @@ export interface DetectionCapability {
 }
 
 // Detectors switched off under ATT&CK coverage → Detectors don't count.
-export function detectionCapabilities(disabledDetectors: string[] = []): DetectionCapability[] {
+// Active Sigma rules (lib/detections) count under Detection Engineering.
+export function detectionCapabilities(disabledDetectors: string[] = [], sigmaRules: Array<{ title: string; techniques: string[] }> = []): DetectionCapability[] {
   const caps: DetectionCapability[] = [];
+  for (const r of sigmaRules) for (const t of r.techniques) caps.push({ techniqueId: t, module: "Sigma rules", rule: r.title });
   for (const detector of DETECTORS) {
     if (disabledDetectors.includes(detector.name)) continue;
     for (const t of detector.techniques) caps.push({ techniqueId: t, module: "Cases & Alerts", rule: detector.name });

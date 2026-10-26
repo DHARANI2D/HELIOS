@@ -48,7 +48,7 @@ async function detectionsLast30Days(scope: Prisma.CaseWhereInput) {
 export default async function MitrePage() {
   const user = await pageGuard("mitre.view");
   const scope = await caseScope(user);
-  const [tactics, mappings, disabled, recentBySource] = await Promise.all([
+  const [tactics, mappings, disabled, recentBySource, sigmaRules] = await Promise.all([
     db.mitreTactic.findMany({
       include: { techniques: { orderBy: { id: "asc" } } },
     }),
@@ -58,6 +58,7 @@ export default async function MitrePage() {
     }),
     getSetting("detection.disabledDetectors"),
     detectionsLast30Days(scope),
+    db.detectionRule.findMany({ where: { status: "ACTIVE", tenantId: null }, select: { title: true, techniques: true } }),
   ]);
 
   // Catalog order (Recon → Impact) rather than tactic-ID order.
@@ -72,7 +73,7 @@ export default async function MitrePage() {
     observed.set(m.techniqueId, entry);
   }
 
-  const capabilities = detectionCapabilities(disabled);
+  const capabilities = detectionCapabilities(disabled, sigmaRules);
   const detectableBy = new Map<string, string[]>();
   for (const c of capabilities) {
     const list = detectableBy.get(c.techniqueId) ?? [];
