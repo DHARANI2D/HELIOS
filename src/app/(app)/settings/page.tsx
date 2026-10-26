@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, LockKeyhole, Mail, MonitorSmartphone, Users } from "lucide-react";
+import { BellRing, Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, LockKeyhole, Mail, MonitorSmartphone, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -11,6 +11,9 @@ import { CompanyForm, EnvironmentControl, ForensicsSettingsForm, SecretsPanel, S
 import { SecuritySettings } from "@/components/settings/security-settings";
 import { SSO } from "@/lib/sso";
 import { keyReport } from "@/lib/keys";
+import { channelStatus } from "@/lib/alerts/send";
+import { deliveryCounts } from "@/lib/alerts/outbox";
+import { AlertChannels } from "@/components/settings/alert-channels";
 
 const ELSEWHERE = [
   { href: "/ai", icon: Bot, title: "AI agents", text: "Providers (online and local models), agent profiles, autonomy and the kill switch" },
@@ -22,7 +25,7 @@ const ELSEWHERE = [
 
 export default async function SettingsPage() {
   const user = await pageGuard("settings.manage");
-  const [company, environment, testClients, secrets, thresholds, allowDomains, site, mfa, ssoOnly, staffWithoutMfa, keys] = await Promise.all([
+  const [company, environment, testClients, secrets, thresholds, allowDomains, site, mfa, ssoOnly, staffWithoutMfa, keys, messaging, ready, deliveries] = await Promise.all([
     getSetting("company.profile"),
     getSetting("platform.environment"),
     db.tenant.count({ where: { isTest: true } }),
@@ -34,6 +37,9 @@ export default async function SettingsPage() {
     getSetting("security.ssoOnlyForStaff"),
     db.user.count({ where: { active: true, tenantId: null, mfaEnabledAt: null } }),
     keyReport(),
+    getSetting("alerts.messaging"),
+    channelStatus(),
+    deliveryCounts(),
   ]);
   const rows = (Object.keys(PLATFORM_SECRETS) as PlatformSecret[]).map((name) => ({ name, ...PLATFORM_SECRETS[name], status: secrets[name] }));
 
@@ -81,7 +87,17 @@ export default async function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base"><KeyRound className="size-4" /> Intelligence and chat keys</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><BellRing className="size-4" /> Alert channels</CardTitle>
+          <CardDescription>How alerts reach people outside HELIOS: email, SMS and WhatsApp. Each person picks theirs under My alerts; client approver chains use them too.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AlertChannels initial={messaging} ready={ready} counts={deliveries} canEdit />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><KeyRound className="size-4" /> Provider keys</CardTitle>
           <CardDescription>
             Keys saved here are encrypted (AES-256-GCM) and take precedence over the environment variables. Only the last four characters are ever shown again.
           </CardDescription>

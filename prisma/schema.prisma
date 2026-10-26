@@ -64,6 +64,10 @@ model User {
   mfaRecoveryHashes String[]         @default([])
   mfaLastStep       Int?
   preferences       Json?
+  // For alerts by SMS and WhatsApp (E.164), and which notification kinds
+  // also go out by email, SMS or WhatsApp (lib/alerts): { kind: [channels] }.
+  phone             String?
+  alertPrefs        Json?
   createdAt         DateTime         @default(now())
 
   tenant                 Tenant?                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -79,6 +83,7 @@ model User {
   quotes                 Quote[]
   aiFeedback             AiRun[]                 @relation("AiRunFeedback")
   apiTokens              ApiToken[]
+  alertDeliveries        AlertDelivery[]
 
   @@index([tenantId])
   @@map("users")
@@ -1412,4 +1417,49 @@ model RegulatoryNotice {
   @@index([tenantId, status])
   @@index([status, dueAt])
   @@map("regulatory_notices")
+}
+
+// ---------------------------------------------------------------------------
+// Alerts outside HELIOS (lib/alerts): every email, SMS, WhatsApp message or
+// gateway webhook goes through this outbox. A worker sends each one, retries
+// with backoff and records the outcome, so a slow provider never holds up the
+// request that raised the alert and nothing is lost on a restart.
+// ---------------------------------------------------------------------------
+
+enum AlertDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED // not sent on purpose: rate limit, channel not set up
+}
+
+model AlertDelivery {
+  id            String              @id @default(cuid())
+  // The HELIOS user it's for; null for a contact outside HELIOS (an
+  // approver reached by phone number or email address).
+  userId        String?
+  tenantId      String?
+  channel       String // email | sms | whatsapp
+  to            String
+  kind          String
+  subject       String
+  body          String              @db.Text
+  href          String?
+  caseId        String?
+  status        AlertDeliveryStatus @default(PENDING)
+  attempts      Int                 @default(0)
+  // When the worker may (re)try it; claiming it pushes this forward.
+  nextAttemptAt DateTime            @default(now())
+  lastError     String?             @db.Text
+  // The provider's message id (SMTP Message-ID, Twilio SID).
+  providerRef   String?
+  sentAt        DateTime?
+  createdAt     DateTime            @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, createdAt])
+  @@index([to, createdAt])
+  @@map("alert_deliveries")
 }

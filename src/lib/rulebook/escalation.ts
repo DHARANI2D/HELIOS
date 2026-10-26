@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { notify, staffFor } from "@/lib/notifications";
 import { dispatchChatMessage } from "@/lib/integrations/chat";
+import { queueToContact } from "@/lib/alerts/outbox";
 import { ACTION_LABEL } from "@/lib/response/labels";
 import { activeRulebook } from "@/lib/rulebook/service";
 import { APPROVER_CHANNELS, type Approver } from "@/lib/rulebook/schema";
@@ -45,8 +46,12 @@ async function ask(approver: Approver, tenantId: string, caseId: string, title: 
     const sent = await dispatchChatMessage(tenantId, `${title} — ${approver.name}, please review in HELIOS.`);
     if (sent.sent) return `posted to ${APPROVER_CHANNELS[approver.channel]} for ${approver.name}`;
   }
-  // Email and phone (or a channel that couldn't be reached) go through the
-  // SOC: HELIOS doesn't send email or place calls itself.
+  if (approver.channel === "email" || approver.channel === "sms" || approver.channel === "whatsapp") {
+    const d = await queueToContact(approver.channel, approver.contact, { kind: "approval", subject: title, body: `${approver.name}: your approval is needed. Approve or reject in HELIOS, or reply to your SOC.`, href: "/approvals", caseId, tenantId });
+    if (d.status === "PENDING") return `sent to ${approver.name} by ${APPROVER_CHANNELS[approver.channel].toLowerCase()} (${approver.contact})`;
+  }
+  // Phone calls, and a channel that isn't set up, go through the SOC:
+  // HELIOS doesn't place calls itself.
   await notify(await staffFor(["SOC_MANAGER", "INCIDENT_RESPONDER"], null), {
     kind: "approval",
     title: `Contact ${approver.name} for approval`,

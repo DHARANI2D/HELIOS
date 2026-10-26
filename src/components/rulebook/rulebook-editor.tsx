@@ -361,7 +361,7 @@ export function RulebookEditor({ tenantId, initial, active, template, timeZone, 
               <NativeSelect className="h-8 w-36 text-xs" value={a.channel} disabled={disabled} onChange={(e) => set({ channel: e.target.value as Approver["channel"] })} aria-label="Channel">
                 {Object.entries(APPROVER_CHANNELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </NativeSelect>
-              <Input className="h-8 min-w-40 flex-1 text-xs" value={a.contact} disabled={disabled} placeholder={a.channel === "phone" ? "+91 …" : "name@client.example"} onChange={(e) => set({ contact: e.target.value })} aria-label="Contact" />
+              <Input className="h-8 min-w-40 flex-1 text-xs" value={a.contact} disabled={disabled} placeholder={["phone", "sms", "whatsapp"].includes(a.channel) ? "+91…" : "name@client.example"} onChange={(e) => set({ contact: e.target.value })} aria-label="Contact" />
               <Input type="number" min={1} max={1440} className="h-8 w-20 text-xs" value={a.timeoutMinutes} disabled={disabled} onChange={(e) => set({ timeoutMinutes: Math.max(1, Number(e.target.value) || 15) })} aria-label="Minutes before escalating" />
               <span className="text-[11px] text-muted-foreground">min</span>
               {canEdit && (

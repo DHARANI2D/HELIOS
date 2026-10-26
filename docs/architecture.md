@@ -60,6 +60,16 @@
   - **Gaps:** a control with nothing behind it (clock synchronisation on client systems, retention until it's built) is shown as a gap.
 - **Isolation:** `regulatory_notices` carries a `tenantId` and has the same row-level policy as the other client tables.
 
+### Alerts and approvals (`lib/alerts`, `app/(app)/approvals`)
+
+- **Alerts outside HELIOS.** Every notification lands in the app. People can also choose, per kind of notification, to get it by email, SMS or WhatsApp under My alerts (`/account/alerts`), with a phone number in international format.
+  - **The outbox:** `notify()` queues one `alert_deliveries` row per person and channel, and approver chains queue to a contact directly. A worker (every 10 s) claims due rows with a two-minute lease, sends them, and retries after 1, 5, 15 and 60 minutes. A permanent failure (a bad number, refused credentials) or the fifth attempt marks the row failed.
+  - **Skipped rows:** a delivery that can't go (channel not set up, no phone number, over the per-person hourly cap) is kept as SKIPPED with the reason, so the gap shows on My alerts and in Settings.
+- **Channels.** Email uses the SMTP server (`lib/mail.ts`). SMS and WhatsApp go through Twilio's Messages API, or a JSON webhook to any other gateway (e.g. a DLT-registered Indian SMS provider), signed with `X-Helios-Timestamp` and `X-Helios-Signature`, an HMAC-SHA256 of `timestamp.body`.
+  - **WhatsApp templates:** WhatsApp only takes free text inside a conversation the person opened in the last 24 hours. For anything else, set an approved Content template; its `{{1}}` gets the alert and `{{2}}` the link.
+  - **Where it's set:** under Settings → Alert channels; the credentials are provider keys.
+- **Approvals inbox.** `/approvals` lists what's waiting on someone's yes, in the viewer's scope: containment the policy held (decided right there), playbooks needing approval, regulatory notices with the client, and rulebooks to sign. The response policy still applies to each decision.
+
 ### Reference data in the database
 
 Plans, the price book, the tool catalog, currencies, model prices and threat feeds are tables. Only facts are seeded (`prisma/seed-data/`):
@@ -162,7 +172,7 @@ Each client signs a versioned rulebook (`org_policies`, one ACTIVE version, hash
   - AI data handling (residency, allowed providers, PII masking, user choice);
   - CERT-In obligations and a review interval.
 - **Evaluation** (`evaluate.ts`): pure; returns every rule that restricts an action. *Hard* rules bind people too: never-isolate assets, protected accounts, actions the client forbids, and the two-person rule. The executor re-checks them against the latest active version at the moment of acting, for AI, analysts, playbooks and direct isolation alike.
-- **Approvals**: a two-person action counts distinct approvers. `escalation.ts` walks pending approvals along the client's chain on a background job: app users are notified, Slack or Teams get a post, and for email and phone the SOC is asked to make contact. When the chain runs out, the action holds or becomes a suggestion, as the rulebook says.
+- **Approvals**: a two-person action counts distinct approvers. `escalation.ts` walks pending approvals along the client's chain on a background job: app users are notified, Slack or Teams get a post, email, SMS and WhatsApp approvers get a message through the alert outbox (`lib/alerts`), and for a phone call, or a channel that isn't set up, the SOC is asked to make contact. The rulebook editor's test button sends a real message on each channel. When the chain runs out, the action holds or becomes a suggestion, as the rulebook says.
 - **Allowlist** (`policy_allowlist`): every entry has an owner, a reason and an expiry. Allowlisted hosts, IPs and accounts open no SIEM cases, and AI containment against them is only suggested.
 - **Lifecycle** (`service.ts`, `/rulebook`):
   - drafts start from industry templates;
@@ -209,6 +219,7 @@ Timers in the server process:
 | Time-box rollbacks | Minute |
 | Credential reminders | 6 hours |
 | Regulatory clocks (CERT-In and DPDP deadlines) | Minute |
+| Alert deliveries (email, SMS, WhatsApp) | 10 seconds |
 | Ladder review | Hour |
 | Ingest queue (backstop for the kick after each enqueue) | 2 seconds |
 | Pull collectors (each stream on its own interval) | 30 seconds |

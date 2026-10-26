@@ -5,6 +5,7 @@ import {
   Bot,
   Building2,
   Calculator,
+  CheckSquare,
   KeyRound,
   Crosshair,
   Landmark,
@@ -44,6 +45,7 @@ export const NAV_GROUPS: NavGroup[] = ["Operate", "Analyze", "Intelligence", "Pl
 export const NAV_ITEMS: NavItem[] = [
   { title: "Overview", href: "/", icon: LayoutDashboard, group: "Operate", permission: "dashboard.view", description: "Live posture, queues, SLAs and AI activity" },
   { title: "Cases & Alerts", clientTitle: "Incidents", href: "/cases", icon: ShieldAlert, group: "Operate", permission: "cases.view", description: "Unified detection and case stream" },
+  { title: "Approvals", href: "/approvals", icon: CheckSquare, group: "Operate", permission: "containment.approve", description: "Containment, playbooks, regulatory notices and rulebooks waiting on someone's yes" },
   { title: "Endpoints", href: "/endpoints", icon: Laptop, group: "Operate", permission: "endpoints.view", description: "Endpoint inventory, protection coverage and isolation" },
   { title: "Reports", clientTitle: "Service reports", href: "/reports", icon: BarChart3, group: "Operate", permission: "reports.view", description: "Volume, response times, SLA and AI performance by period" },
   { title: "Compliance", href: "/compliance", icon: Landmark, group: "Operate", permission: "compliance.view", description: "CERT-In and DPDP reporting clocks, notices and ISO 27001 evidence" },
@@ -77,3 +79,10 @@ export function navItemFor(pathname: string, items: NavItem[] = NAV_ITEMS): NavI
     .filter((item) => (item.href === "/" ? pathname === "/" : pathname === item.href || pathname.startsWith(`${item.href}/`)))
     .sort((a, b) => b.href.length - a.href.length)[0];
 }
+
+// Pages that aren't in the sidebar but still need a title in the top bar.
+export const OTHER_PAGES: Array<Pick<NavItem, "href" | "title" | "description">> = [
+  { href: "/account/alerts", title: "My alerts", description: "Which notifications also reach you by email, SMS or WhatsApp" },
+];
+
+export const otherPageFor = (pathname: string) => OTHER_PAGES.find((p) => pathname === p.href || pathname.startsWith(`${p.href}/`));

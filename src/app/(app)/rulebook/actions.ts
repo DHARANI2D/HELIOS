@@ -8,6 +8,8 @@ import { db } from "@/lib/db";
 import { requirePermission, type SessionUser } from "@/lib/session";
 import { notify } from "@/lib/notifications";
 import { dispatchChatMessage } from "@/lib/integrations/chat";
+import { sendAlert } from "@/lib/alerts/send";
+import { logAction } from "@/lib/audit";
 import { approverSchema, rulebookSchema } from "@/lib/rulebook/schema";
 import { dryRunRulebook } from "@/lib/rulebook/dry-run";
 import { addAllowlistEntry, discardDraft, removeAllowlistEntry, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
@@ -138,5 +140,10 @@ export async function testApproverAction(tenantId: string, input: unknown) {
     const sent = await dispatchChatMessage(tenantId, text);
     return { ok: sent.sent, message: sent.message };
   }
-  return { ok: false, message: `HELIOS doesn't send ${approver.channel === "email" ? "email" : "calls"} itself: the SOC is asked to reach ${approver.name} at ${approver.contact} when an approval is due. Check the contact by hand.` };
+  if (approver.channel === "email" || approver.channel === "sms" || approver.channel === "whatsapp") {
+    const r = await sendAlert(approver.channel, approver.contact.trim(), { subject: "Approver test", body: text });
+    await logAction({ actorId: user.id, action: "rulebook.approver_tested", detail: { tenantId, channel: approver.channel, ok: r.ok, error: r.error ?? null } });
+    return { ok: r.ok, message: r.ok ? `Sent to ${approver.name} by ${approver.channel === "email" ? "email" : approver.channel === "sms" ? "SMS" : "WhatsApp"}` : r.error ?? "Not sent" };
+  }
+  return { ok: false, message: `HELIOS doesn't place calls itself: the SOC is asked to ring ${approver.name} on ${approver.contact} when an approval is due. Check the number by hand.` };
 }

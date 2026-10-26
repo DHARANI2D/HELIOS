@@ -10,6 +10,8 @@ export const PLATFORM_SECRETS = {
   abuseipdb: { setting: "secret.abuseipdb", env: "ABUSEIPDB_API_KEY", label: "AbuseIPDB API key", help: "IP abuse reports for alerts, investigations and email senders." },
   mxtoolbox: { setting: "secret.mxtoolbox", env: "MXTOOLBOX_API_KEY", label: "MxToolbox API key", help: "Sender-domain diagnostics (MX, blacklist, SPF, DMARC, DKIM) in email forensics." },
   slackWebhook: { setting: "secret.slackWebhook", env: "SLACK_WEBHOOK_URL", label: "SOC Slack webhook", help: "The SOC's own channel for chat playbook steps when no Slack or Teams tool is onboarded." },
+  twilio: { setting: "secret.twilio", env: "HELIOS_TWILIO", label: "Twilio account (Account SID:Auth token)", help: "SMS and WhatsApp alerts when the provider under Alert channels is Twilio. Written as AC…:token." },
+  alertWebhook: { setting: "secret.alertWebhook", env: "HELIOS_ALERT_WEBHOOK_SECRET", label: "SMS gateway webhook signing secret", help: "Signs each SMS or WhatsApp request HELIOS posts to your own gateway (X-Helios-Signature)." },
   smtp: { setting: "secret.smtp", env: "HELIOS_SMTP_URL", label: "Outgoing mail server (SMTP URL)", help: "smtps://user:password@smtp.example.com:465 — sends CERT-In reports, breach notices and alert email. The sender is HELIOS_MAIL_FROM or the company email." },
 } as const satisfies Record<string, { setting: SettingKey; env: string; label: string; help: string }>;
 

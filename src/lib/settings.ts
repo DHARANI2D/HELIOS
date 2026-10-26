@@ -46,6 +46,25 @@ export const siteSchema = z.object({
 export type SiteSettings = z.infer<typeof siteSchema>;
 export const SITE_DEFAULTS: SiteSettings = { enabled: true, estimator: true, aiAdvisor: true, aiDailyLimit: 100, leads: true, headline: "", intro: "" };
 
+// SMS and WhatsApp alerts (lib/alerts): through Twilio, or a webhook to any
+// other gateway (an Indian DLT-registered SMS provider, say). The Twilio
+// credentials and the webhook's signing secret are platform secrets.
+export const messagingSchema = z.object({
+  provider: z.enum(["none", "twilio", "webhook"]),
+  // Sender numbers in E.164; WhatsApp needs a WhatsApp-enabled number.
+  smsFrom: z.string().trim().regex(/^(\+[1-9]\d{6,14})?$/, "Use the international format, e.g. +919812345678"),
+  whatsappFrom: z.string().trim().regex(/^(\+[1-9]\d{6,14})?$/, "Use the international format, e.g. +919812345678"),
+  // A Twilio Content template (HX…) for WhatsApp messages that start a
+  // conversation: its {{1}} gets the alert's title, {{2}} the link.
+  whatsappTemplate: z.string().trim().regex(/^(HX[0-9a-f]{32})?$/i, "A Content SID starts with HX"),
+  // https, or plain http only to a gateway on this host.
+  webhookUrl: z.string().trim().regex(/^(https:\/\/\S+|http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/\S*)?)?$/, "The gateway must be an https:// URL"),
+  // External alerts per person per hour; past it they wait in the app.
+  maxPerUserPerHour: z.number().int().min(1).max(200),
+});
+export type MessagingSettings = z.infer<typeof messagingSchema>;
+export const MESSAGING_DEFAULTS: MessagingSettings = { provider: "none", smsFrom: "", whatsappFrom: "", whatsappTemplate: "", webhookUrl: "", maxPerUserPerHour: 20 };
+
 // A credential sealed with lib/secrets; only the last 4 characters are kept
 // in clear, to show which key is stored.
 const sealedSecret = z.object({ sealed: z.string(), last4: z.string() }).nullable().default(null);
@@ -79,6 +98,9 @@ const SETTINGS = {
   "secret.mxtoolbox": sealedSecret,
   "secret.slackWebhook": sealedSecret,
   "secret.smtp": sealedSecret,
+  "secret.twilio": sealedSecret,
+  "secret.alertWebhook": sealedSecret,
+  "alerts.messaging": messagingSchema.default(MESSAGING_DEFAULTS),
 } as const;
 
 export type SettingKey = keyof typeof SETTINGS;

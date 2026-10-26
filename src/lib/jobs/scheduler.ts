@@ -30,6 +30,8 @@ const JOBS: Job[] = [
   { name: "time boxes", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/connectors/safety")).rollBackExpired() },
   // Connector credentials about to expire.
   { name: "credential reminders", group: "core", everyMs: 6 * 3_600_000, run: async () => (await import("@/lib/connectors/safety")).credentialReminders() },
+  // Sends queued email, SMS and WhatsApp alerts, with retries.
+  { name: "alert deliveries", group: "core", everyMs: 10_000, run: async () => (await import("@/lib/alerts/outbox")).processDeliveries() },
   // Opens CERT-In reports for qualifying cases and chases regulatory deadlines.
   { name: "regulatory clocks", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/compliance/service")).checkRegulatoryClocks() },
   // Demotes on a bad week, proposes promotions; idempotent, so hourly is fine.

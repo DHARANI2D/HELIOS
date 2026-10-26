@@ -1,11 +1,13 @@
 import type { SecurityDomain, UserRole } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { queueForUsers } from "@/lib/alerts/outbox";
 
 // In-app notifications. Every collaboration event (mention, assignment,
 // escalation, share, AI triage finished, approval needed, SLA breach, a
-// quote request from the website) fans
-// out through notify(); the bell in the top bar polls for them.
+// quote request from the website) fans out through notify(); the bell in
+// the top bar polls for them. People who chose to also get some kinds by
+// email, SMS or WhatsApp have those queued in the alert outbox (lib/alerts).
 
 export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla" | "lead" | "rulebook" | "ingest" | "compliance";
 
@@ -34,6 +36,8 @@ export async function notify(userIds: Iterable<string>, input: NotifyInput, opti
       actorName: input.actorName ?? null,
     })),
   });
+  // Never lets an alert channel break the notification itself.
+  await queueForUsers(active.map((u) => u.id), { kind: input.kind, subject: input.title, body: input.body, href: input.href, caseId: input.caseId }).catch((err) => console.error("Queueing alerts failed", err));
   return count;
 }
 

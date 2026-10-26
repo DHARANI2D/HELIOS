@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { logAction } from "@/lib/audit";
 import { requirePermission } from "@/lib/session";
-import { companySchema, getSetting, setSetting, siteSchema, thresholdsSchema } from "@/lib/settings";
+import { companySchema, getSetting, messagingSchema, setSetting, siteSchema, thresholdsSchema } from "@/lib/settings";
 import { PLATFORM_SECRETS, storePlatformSecret, type PlatformSecret } from "@/lib/platform-secrets";
 
 function revalidate() {
@@ -53,6 +53,7 @@ export async function savePlatformSecretAction(name: string, value: string | nul
   const v = value === null ? null : z.string().trim().min(8, "That doesn't look like a complete key").max(2000).parse(value);
   if (key === "slackWebhook" && v && !/^https:\/\//i.test(v)) throw new Error("The webhook must be an https:// URL");
   if (key === "smtp" && v && !/^smtps?:\/\/[^\s/]+/i.test(v)) throw new Error("The mail server must be an smtp:// or smtps:// URL");
+  if (key === "twilio" && v && !/^AC[0-9a-f]{32}:\S{16,}$/i.test(v)) throw new Error("Write it as the Account SID (AC…), a colon, then the auth token");
   await storePlatformSecret(key, v, user.id);
   await logAction({ actorId: user.id, action: v ? "settings.secret_stored" : "settings.secret_cleared", detail: { secret: key } });
   revalidate();
@@ -87,6 +88,15 @@ export async function saveSecuritySettingsAction(input: z.input<typeof securityS
   await setSetting("security.mfa", s.mfa, user.id);
   await setSetting("security.ssoOnlyForStaff", s.ssoOnlyForStaff, user.id);
   await logAction({ actorId: user.id, action: "security.settings_changed", detail: s });
+  revalidate();
+}
+
+export async function saveMessagingSettingsAction(input: z.input<typeof messagingSchema>) {
+  const user = await requirePermission("settings.manage");
+  const parsed = messagingSchema.safeParse(input);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Check the form");
+  await setSetting("alerts.messaging", parsed.data, user.id);
+  await logAction({ actorId: user.id, action: "settings.messaging_changed", detail: { provider: parsed.data.provider, maxPerUserPerHour: parsed.data.maxPerUserPerHour } });
   revalidate();
 }
 

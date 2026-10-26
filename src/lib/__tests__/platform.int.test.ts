@@ -65,6 +65,10 @@ import { loadPricingContext } from "@/lib/pricing/service";
 import { clientStackConfig } from "@/lib/pricing/client-stack";
 import { createQuote } from "@/lib/pricing/quotes";
 import { reviewUpgrades } from "@/lib/pricing/upgrades";
+import { processDeliveries, queueToContact } from "@/lib/alerts/outbox";
+import { setSetting } from "@/lib/settings";
+import { createHmac } from "node:crypto";
+import { notify } from "@/lib/notifications";
 import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNoticePdf, requestApproval, saveNotice, setClockStart, submitNotice } from "@/lib/compliance/service";
 import { evidenceMap } from "@/lib/compliance/iso27001";
 import type { SessionUser } from "@/lib/session";
@@ -89,6 +93,13 @@ const stub = createServer((req, res) => {
     if (req.url === "/feed.txt") {
       res.writeHead(200, { "content-type": "text/plain" }).end(feedBody);
       return;
+    }
+    // A stand-in for Twilio's Messages API: one number is invalid, one is down.
+    if (req.url?.endsWith("/Messages.json")) {
+      const to = new URLSearchParams(body).get("To") ?? "";
+      if (to.endsWith("+15005550001")) return void res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ code: 21211, message: "The 'To' number is not a valid phone number." }));
+      if (to.endsWith("+15005550002")) return void res.writeHead(503).end();
+      return void res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ sid: `SM${received.length}`, status: "queued" }));
     }
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
   });
@@ -1082,6 +1093,76 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
       smtp.close();
       delete process.env.HELIOS_SMTP_URL;
       delete process.env.HELIOS_MAIL_FROM;
+    }
+  });
+
+  it("sends alerts by SMS and WhatsApp through the outbox, retrying, capping and saying why when it can't", async () => {
+    process.env.HELIOS_TWILIO_API = stubUrl;
+    const sid = `AC${"0".repeat(32)}`;
+    await storePlatformSecret("twilio", `${sid}:test-auth-token-123456`, adminId);
+    await setSetting("alerts.messaging", { provider: "twilio", smsFrom: "+15005550006", whatsappFrom: "", whatsappTemplate: "", webhookUrl: "", maxPerUserPerHour: 3 }, adminId);
+    try {
+      const tenant = await db.tenant.create({ data: { name: "Test · Alerts", slug: "test-alerts" } });
+      const person = await db.user.create({ data: { email: "approver@alerts.test", name: "Client Approver", role: "CLIENT_ADMIN", tenantId: tenant.id, phone: "+919800000001", alertPrefs: { approval: ["sms", "whatsapp"] } } });
+
+      // One notification: in the app, plus an SMS; WhatsApp has no sender number, so it's skipped with the reason.
+      const before = received.length;
+      await notify([person.id], { kind: "approval", title: "Approval needed: Block IP 203.0.113.9", body: "Ransomware on DB-01" });
+      const queued = await db.alertDelivery.findMany({ where: { userId: person.id }, orderBy: { channel: "asc" } });
+      expect(queued.map((d) => [d.channel, d.status])).toEqual([["sms", "PENDING"], ["whatsapp", "SKIPPED"]]);
+      expect(queued[1].lastError).toMatch(/No WhatsApp sender number/);
+      expect(await processDeliveries()).toMatchObject({ sent: 1, failed: 0 });
+      const call = received.slice(before).find((r) => r.path.endsWith("/Messages.json"))!;
+      expect(call.path).toBe(`/2010-04-01/Accounts/${sid}/Messages.json`);
+      expect(call.headers.authorization).toBe(`Basic ${Buffer.from(`${sid}:test-auth-token-123456`).toString("base64")}`);
+      const form = new URLSearchParams(call.body);
+      expect(form.get("To")).toBe("+919800000001");
+      expect(form.get("From")).toBe("+15005550006");
+      expect(form.get("Body")).toMatch(/^HELIOS: Approval needed: Block IP 203\.0\.113\.9 — Ransomware on DB-01/);
+      expect((await db.alertDelivery.findUniqueOrThrow({ where: { id: queued[0].id } })).providerRef).toMatch(/^SM/);
+
+      // A bad number fails at once; a provider outage is retried later.
+      const bad = await queueToContact("sms", "+15005550001", { kind: "approval", subject: "Approval needed" });
+      const down = await queueToContact("sms", "+15005550002", { kind: "approval", subject: "Approval needed" });
+      await processDeliveries();
+      expect(await db.alertDelivery.findUniqueOrThrow({ where: { id: bad.id } })).toMatchObject({ status: "FAILED", attempts: 1, lastError: expect.stringMatching(/21211/) });
+      const retry = await db.alertDelivery.findUniqueOrThrow({ where: { id: down.id } });
+      expect(retry).toMatchObject({ status: "PENDING", attempts: 1, lastError: "Twilio 503: rejected" });
+      expect(retry.nextAttemptAt.getTime()).toBeGreaterThan(Date.now() + 30_000);
+      expect((await processDeliveries()).due).toBe(0);
+
+      // The hourly cap: the rest wait in the app.
+      for (let i = 0; i < 3; i++) await notify([person.id], { kind: "approval", title: `More ${i}` });
+      const capped = await db.alertDelivery.findMany({ where: { userId: person.id, channel: "sms", subject: { startsWith: "More" } }, orderBy: { createdAt: "asc" } });
+      expect(capped.map((d) => d.status)).toEqual(["PENDING", "PENDING", "SKIPPED"]);
+      expect(capped[2].lastError).toMatch(/Over 3 alerts in the hour/);
+
+      // A client approver chain texts its approver, through the same outbox.
+      const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Alerting test", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+      await saveDraft(tenant.id, { body: { approvers: { chain: [{ name: "Night CISO", contact: "+91 98000 00009", channel: "sms", timeoutMinutes: 10 }] } }, reason: "Approvers" }, { id: adminId, name: "Test Admin" });
+      await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved by email today");
+      await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "BLOCK_IP", target: "203.0.113.9", source: "ai", status: "PENDING_APPROVAL" } });
+      await escalatePendingApprovals();
+      const asked = await db.alertDelivery.findFirstOrThrow({ where: { to: "+919800000009" } });
+      expect(asked).toMatchObject({ channel: "sms", kind: "approval", status: "PENDING", caseId: kase.id, tenantId: tenant.id });
+      expect(asked.href).toMatch(/\/approvals$/);
+      expect(await db.timelineEntry.count({ where: { caseId: kase.id, action: "response.approval_escalated", detail: { contains: "by sms" } } })).toBe(1);
+
+      // Your own gateway instead: a signed JSON post.
+      await storePlatformSecret("alertWebhook", "gateway-signing-secret", adminId);
+      await setSetting("alerts.messaging", { provider: "webhook", smsFrom: "", whatsappFrom: "", whatsappTemplate: "", webhookUrl: `${stubUrl}/sms-gateway`, maxPerUserPerHour: 20 }, adminId);
+      await db.alertDelivery.updateMany({ where: { status: "PENDING" }, data: { status: "SKIPPED" } });
+      const viaGateway = await queueToContact("whatsapp", "+919800000010", { kind: "compliance", subject: "CERT-In report due in 1 h" });
+      const mark = received.length;
+      await processDeliveries();
+      const hook = received.slice(mark).find((r) => r.path === "/sms-gateway")!;
+      const ts = String(hook.headers["x-helios-timestamp"]);
+      expect(hook.headers["x-helios-signature"]).toBe(`sha256=${createHmac("sha256", "gateway-signing-secret").update(`${ts}.${hook.body}`).digest("hex")}`);
+      expect(JSON.parse(hook.body)).toMatchObject({ id: viaGateway.id, channel: "whatsapp", to: "+919800000010", subject: "CERT-In report due in 1 h" });
+      expect((await db.alertDelivery.findUniqueOrThrow({ where: { id: viaGateway.id } })).status).toBe("SENT");
+    } finally {
+      delete process.env.HELIOS_TWILIO_API;
+      await setSetting("alerts.messaging", { provider: "none", smsFrom: "", whatsappFrom: "", whatsappTemplate: "", webhookUrl: "", maxPerUserPerHour: 20 }, adminId);
     }
   });
 

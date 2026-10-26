@@ -4,10 +4,10 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Building2, KeyRound, LogOut, Menu, Search } from "lucide-react";
+import { BellRing, Building2, KeyRound, LogOut, Menu, Search } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 
-import { navFor, navItemFor } from "@/lib/nav";
+import { navFor, navItemFor, otherPageFor } from "@/lib/nav";
 import { roleLabel } from "@/lib/rbac";
 import { useUIStore } from "@/lib/stores/ui-store";
 import { setTenantFilterAction } from "@/app/(app)/shell-actions";
@@ -42,7 +42,7 @@ export function AppTopbar({ viewer, tenants, selectedTenantId, notifications }: 
   const pathname = usePathname();
   const router = useRouter();
   const items = navFor(viewer.role);
-  const current = navItemFor(pathname, items) ?? items[0];
+  const current = navItemFor(pathname, items) ?? otherPageFor(pathname) ?? items[0];
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
   const [pending, startTransition] = React.useTransition();
 
@@ -157,6 +157,12 @@ export function AppTopbar({ viewer, tenants, selectedTenantId, notifications }: 
               <Link href="/account/security">
                 <KeyRound />
                 Sign-in security
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/account/alerts">
+                <BellRing />
+                My alerts
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/login" })}>

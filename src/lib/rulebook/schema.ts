@@ -42,7 +42,7 @@ export const WINDOW_EFFECTS = {
   suggest: "Suggest only",
 } as const;
 
-export const APPROVER_CHANNELS = { app: "HELIOS app", email: "Email", phone: "Phone", slack: "Slack", teams: "Microsoft Teams" } as const;
+export const APPROVER_CHANNELS = { app: "HELIOS app", email: "Email", sms: "SMS", whatsapp: "WhatsApp", phone: "Phone call", slack: "Slack", teams: "Microsoft Teams" } as const;
 export const ON_TIMEOUT = { hold: "Keep holding (nothing runs)", suggest: "Downgrade to a suggestion" } as const;
 
 export const AI_RESIDENCY = {
@@ -91,12 +91,16 @@ export const actionRuleSchema = z.object({
 });
 export type ActionRule = z.infer<typeof actionRuleSchema>;
 
-export const approverSchema = z.object({
-  name: text(120).min(1),
-  contact: text(200).min(1),
-  channel: z.enum(key(APPROVER_CHANNELS)),
-  timeoutMinutes: z.number().int().min(1).max(24 * 60).default(15),
-});
+export const approverSchema = z
+  .object({
+    name: text(120).min(1),
+    contact: text(200).min(1),
+    channel: z.enum(key(APPROVER_CHANNELS)),
+    timeoutMinutes: z.number().int().min(1).max(24 * 60).default(15),
+  })
+  // Texts go to a number in international format (+91…).
+  .refine((a) => (a.channel !== "sms" && a.channel !== "whatsapp") || /^\+[1-9]\d{6,14}$/.test(a.contact.replace(/[\s-]/g, "")), { message: "Use the international format, e.g. +919812345678", path: ["contact"] })
+  .transform((a) => (a.channel === "sms" || a.channel === "whatsapp" ? { ...a, contact: a.contact.replace(/[\s-]/g, "") } : a));
 export type Approver = z.infer<typeof approverSchema>;
 
 const contactSchema = z.object({ name: text(120), email: text(200), phone: text(40) });
