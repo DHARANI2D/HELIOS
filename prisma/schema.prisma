@@ -167,6 +167,12 @@ model Tenant {
   aiAutonomyCap         AiAutonomy   @default(CONTAIN_WITH_APPROVAL)
   // Circuit breaker: automatic containment paused for this client after
   // repeated connector failures, until someone resumes it.
+  // Log retention (lib/retention): events stay searchable in the database
+  // for logHotDays, then move to the archive, which is deleted after
+  // logRetentionDays (at least 180 where CERT-In applies). Events on a case
+  // are kept with it.
+  logHotDays            Int          @default(90)
+  logRetentionDays      Int          @default(365)
   automationPausedAt    DateTime?
   automationPauseReason String?
   notes                 String?      @db.Text
@@ -192,6 +198,8 @@ model Tenant {
   keys         TenantKey[]
   notices      RegulatoryNotice[]
   tunings      DetectionTuning[]
+  archives     EventArchive[]
+  legalHolds   LegalHold[]
 
   @@map("tenants")
 }
@@ -1529,4 +1537,58 @@ model DetectionTuning {
 
   @@index([tenantId])
   @@map("detection_tunings")
+}
+
+// ---------------------------------------------------------------------------
+// Log retention (lib/retention): archived event chunks and legal holds.
+// ---------------------------------------------------------------------------
+
+// One day's events of one client, as a compressed, encrypted object in the
+// archive store. The object's own key is sealed with the client's data key,
+// so destroying that key makes the archive unreadable too.
+model EventArchive {
+  id           String    @id @default(cuid())
+  tenantId     String?
+  day          DateTime // the UTC day the events are from
+  part         Int       @default(1)
+  storage      String // local | s3
+  objectKey    String
+  events       Int
+  bytes        Int
+  // SHA-256 of the stored object, checked on every read.
+  sha256       String
+  keySealed    String
+  firstAt      DateTime
+  lastAt       DateTime
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+  deleteReason String?
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, day])
+  @@index([deletedAt, day])
+  @@map("event_archives")
+}
+
+// Nothing in its range is deleted while a hold is in force, whatever the
+// retention says.
+model LegalHold {
+  id            String    @id @default(cuid())
+  tenantId      String
+  caseId        String?
+  reason        String    @db.Text
+  fromAt        DateTime
+  // null = open-ended.
+  toAt          DateTime?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  releasedAt    DateTime?
+  releasedById  String?
+  releaseReason String?   @db.Text
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@map("legal_holds")
 }

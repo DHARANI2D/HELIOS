@@ -20,6 +20,8 @@ const INGEST_JOBS: Job[] = [
   { name: "ingest cleanup", group: "ingest", everyMs: 3_600_000, run: async () => (await import("@/lib/ingest/queue")).pruneBatches() },
   { name: "log collectors", group: "ingest", everyMs: 30_000, run: async () => (await import("@/lib/collectors/run")).runDueCollectors() },
   { name: "source health", group: "ingest", everyMs: 5 * 60_000, run: async () => (await import("@/lib/ingest/health")).checkSourceHealth() },
+  // Archives events past their hot period and deletes what's past retention.
+  { name: "log retention", group: "ingest", everyMs: 3_600_000, run: async () => (await import("@/lib/retention/service")).runRetention() },
 ];
 
 const JOBS: Job[] = [

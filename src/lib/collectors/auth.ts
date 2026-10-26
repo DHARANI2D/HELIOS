@@ -68,7 +68,7 @@ export interface SignInput {
   region: string;
   service: string;
   headers?: Record<string, string>;
-  body?: string;
+  body?: string | Buffer;
   now: Date;
   // S3 wants the payload hash as a header too.
   contentSha256Header?: boolean;

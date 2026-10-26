@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 import {
+  Archive,
   BarChart3,
   Bot,
   Building2,
@@ -63,6 +64,7 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Rulebooks", clientTitle: "Our rulebook", href: "/rulebook", icon: ShieldCheck, group: "Platform", permission: "rulebook.view", description: "Each client's rules for what HELIOS may do: protected assets, actions, hours, approvers" },
   { title: "Clients", href: "/tenants", icon: Building2, group: "Platform", permission: "tenants.view", description: "Client tenants, plans and SLAs" },
   { title: "Team & Roles", href: "/team", icon: Users, group: "Platform", permission: "users.manage", description: "Users, roles, queues and what each role can see" },
+  { title: "Data Retention", href: "/retention", icon: Archive, group: "Platform", permission: "audit.view", description: "Where each client's logs are kept, for how long, the archive and legal holds" },
   { title: "Audit Log", href: "/audit", icon: ScrollText, group: "Platform", permission: "audit.view", description: "Hash-chained record of every action" },
   { title: "API Tokens", href: "/api-tokens", icon: KeyRound, group: "Platform", permission: "api.tokens", description: "Personal tokens and the REST API reference" },
   { title: "Settings", href: "/settings", icon: Settings, group: "Platform", permission: "settings.manage", description: "Environment, company profile, provider keys and forensics" },
