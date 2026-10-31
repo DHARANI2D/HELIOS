@@ -30,6 +30,7 @@ const PARAM_FOR: Partial<Record<PlaybookActionType, string>> = {
   BLOCK_SENDER: "sender",
   PURGE_EMAIL: "message",
   RESET_PASSWORD: "user",
+  COLLECT_FORENSICS: "host",
   REVOKE_AGENT: "agentId",
   RESTORE_AGENT: "agentId",
 };

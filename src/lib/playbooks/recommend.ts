@@ -48,6 +48,7 @@ const TARGET_FOR: Partial<Record<PlaybookActionType, keyof CaseTargets | Array<k
   ISOLATE_HOST: "hosts",
   RELEASE_HOST: "hosts",
   COLLECT_LOGS: "hosts",
+  COLLECT_FORENSICS: "hosts",
   BLOCK_IP: "ips",
   UNBLOCK_IP: "ips",
   DISABLE_USER: "users",

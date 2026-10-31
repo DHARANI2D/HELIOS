@@ -148,7 +148,7 @@ export const saveToolPriceAction = action(async function saveToolPriceAction(too
   revalidatePath("/integrations");
 });
 
-const ACTION_TYPES = ["ISOLATE_HOST", "RELEASE_HOST", "BLOCK_IP", "UNBLOCK_IP", "DISABLE_USER", "ENABLE_USER", "KILL_PROCESS", "QUARANTINE_FILE", "BLOCK_SENDER", "PURGE_EMAIL", "RESET_PASSWORD", "CREATE_TICKET", "NOTIFY_SLACK"] as const;
+const ACTION_TYPES = ["ISOLATE_HOST", "RELEASE_HOST", "BLOCK_IP", "UNBLOCK_IP", "DISABLE_USER", "ENABLE_USER", "KILL_PROCESS", "QUARANTINE_FILE", "BLOCK_SENDER", "PURGE_EMAIL", "RESET_PASSWORD", "COLLECT_FORENSICS", "CREATE_TICKET", "NOTIFY_SLACK"] as const;
 const toolSchema = z.object({
   key: z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9_]{1,60}$/, "Key: lowercase letters, digits and underscores"),
   name: z.string().trim().min(2).max(80),

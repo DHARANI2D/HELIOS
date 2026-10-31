@@ -573,6 +573,8 @@ enum PlaybookActionType {
   PURGE_EMAIL
   // Set a new password (required to change at next sign-in) and end sessions.
   RESET_PASSWORD
+  // Collect a forensic package from a device (Defender's investigation package).
+  COLLECT_FORENSICS
   // Rollbacks for the containment actions above.
   RELEASE_HOST
   UNBLOCK_IP

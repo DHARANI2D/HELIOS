@@ -1830,6 +1830,21 @@ tags: [attack.execution, attack.t1059.001]`;
     expect(reset.status).toBe("BLOCKED");
   });
 
+  it("collects a device's investigation package through the EDR, or tells a person exactly what to collect", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Forensics", slug: "test-forensics" } });
+    const author = { id: adminId, name: "Test Admin" };
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Encoded PowerShell on FOR-WS-22", severity: "HIGH", tenantId: tenant.id, deferPipelines: true, metadata: { hostName: "FOR-WS-22" } });
+    // No EDR connector: a person collects it, told what and where.
+    const asked = await requestAnalystAction({ caseId: kase.id, actionType: "COLLECT_FORENSICS", target: "FOR-WS-22", actor: author, canApprove: true });
+    expect(asked.status).toBe("MANUAL_REQUIRED");
+    expect((await db.responseAction.findFirstOrThrow({ where: { caseId: kase.id, actionType: "COLLECT_FORENSICS" } })).result).toMatchObject({ summary: expect.stringContaining("Collect an investigation package from FOR-WS-22 in the EDR console") });
+    // A crown jewel needs a person's approval for it too.
+    await saveDraft(tenant.id, { body: { assets: { crownJewels: [{ kind: "hostname", value: "FOR-DB-*", note: "Core banking database" }] } }, reason: "Onboarding" }, author);
+    await signRulebook(tenant.id, { ...author, isClient: false }, "Client approved by email today");
+    const jewel = await requestAnalystAction({ caseId: kase.id, actionType: "COLLECT_FORENSICS", target: "FOR-DB-01", actor: author, canApprove: false });
+    expect(jewel.status).toBe("PENDING_APPROVAL");
+  });
+
   it("pulls a rulebook kept in Git into a draft, and reminds people of reviews and lapsing allowlist entries", async () => {
     const DAY = 86_400_000;
     const tenant = await db.tenant.create({ data: { name: "Test · Git rulebook", slug: "test-git-rulebook" } });

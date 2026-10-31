@@ -313,6 +313,18 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       return { ...base, status: "succeeded", summary: `Attached ${count} related events to the case`, output: { attached: count } };
     }
 
+    case "COLLECT_FORENSICS": {
+      // The EDR copies the device's forensic state (processes, connections,
+      // autoruns, event logs) into its console; nothing on the device changes.
+      const host = p.host ?? ctx.host;
+      if (!host) {
+        return { ...base, status: "succeeded", skipped: true, summary: "No host identified on this case — nothing to collect from" };
+      }
+      const no = await refusal(base, kase, req, host);
+      if (no) return no;
+      return viaConnector(base, kase, req, "COLLECT_FORENSICS", host, { done: `Collected an investigation package from ${host}`, todo: `Collect an investigation package from ${host} in the EDR console` }, { host });
+    }
+
     case "NOTIFY_SLACK": {
       const message = renderTemplate(p.message ?? "HELIOS case update: {{case.title}}", ctx.vars);
       const sent = await dispatchChatMessage(kase.tenantId, message);

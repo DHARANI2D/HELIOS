@@ -84,7 +84,7 @@ export function matchesAsset(m: Matcher, asset: AssetFacts | null | undefined, t
   }
 }
 
-const HOST_ACTIONS = new Set(["ISOLATE_HOST", "COLLECT_LOGS"]);
+const HOST_ACTIONS = new Set(["ISOLATE_HOST", "COLLECT_LOGS", "COLLECT_FORENSICS"]);
 const IP_ACTIONS = new Set(["BLOCK_IP"]);
 
 // Weekday (0 = Sunday) and minutes past midnight in the client's time zone.

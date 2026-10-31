@@ -18,7 +18,8 @@ export const ACTION_LABEL: Record<PlaybookActionType, string> = {
   BLOCK_SENDER: "Block sender",
   PURGE_EMAIL: "Purge email",
   RESET_PASSWORD: "Reset password",
+  COLLECT_FORENSICS: "Collect investigation package",
 };
 
 // Actions analysts and playbooks can ask for that the AI doesn't propose.
-export const ANALYST_ONLY_ACTIONS = ["PURGE_EMAIL", "RESET_PASSWORD"] as const satisfies readonly PlaybookActionType[];
+export const ANALYST_ONLY_ACTIONS = ["PURGE_EMAIL", "RESET_PASSWORD", "COLLECT_FORENSICS"] as const satisfies readonly PlaybookActionType[];

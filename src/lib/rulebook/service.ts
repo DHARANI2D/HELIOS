@@ -55,6 +55,7 @@ export async function activeRulebook(tenantId: string | null | undefined, fresh 
 const ALLOWLIST_KIND: Partial<Record<PlaybookActionType, string>> = {
   ISOLATE_HOST: "host",
   COLLECT_LOGS: "host",
+  COLLECT_FORENSICS: "host",
   BLOCK_IP: "ip",
   DISABLE_USER: "user",
   RESET_PASSWORD: "user",

@@ -321,11 +321,11 @@ Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable th
 
   | Connector | Actions |
   |---|---|
-  | Microsoft Defender for Endpoint | Isolate and release devices; block file hashes and IPs with indicators |
+  | Microsoft Defender for Endpoint | Isolate and release devices; collect a device's investigation package; block file hashes and IPs with indicators |
   | Microsoft Entra ID (Graph) | Disable an account and revoke its sessions; re-enable it; reset its password (a random one HELIOS doesn't keep, to change at the next sign-in) and end its sessions |
   | Microsoft Exchange Online (Graph mail) | Purge a delivered message: each recipient's copy, found by its Message-ID, moved to Recoverable Items |
   | CrowdStrike Falcon | Contain a host; lift containment; block a file's SHA-256 or MD5 with a prevent IOC |
-  | SentinelOne | Disconnect an agent from the network; reconnect it |
+  | SentinelOne | Disconnect an agent from the network; reconnect it; block a file hash (SHA-1 or SHA-256) in the client's site |
   | Okta | Suspend an account and clear its sessions; unsuspend it |
   | Cloudflare | Block an IP account-wide with an IP Access rule; remove the block |
 
@@ -340,9 +340,18 @@ Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable th
   - **Purge email** (`PURGE_EMAIL`): the target is `<message-id> to a@x, b@y`, built from an email case's Message-ID, To and Cc. It's confirmed when no recipient's mailbox lists the message any more. An admin can restore it from Recoverable Items. The app needs `Mail.ReadWrite`; limit it to the right mailboxes with RBAC for Applications in Exchange Online.
   - **Reset password** (`RESET_PASSWORD`): it's refused for an account synced from on-premises AD (change it there). It's confirmed when `lastPasswordChangeDateTime` and `signInSessionsValidFromDateTime` are past the request. It needs `User-PasswordProfile.ReadWrite.All`, with the app holding at least the User Administrator role. The rulebook protects break-glass and service accounts from a reset as it does from a disable, and VIP accounts need approval.
   - **Not automated:** analysts and playbooks can ask for both; the AI doesn't propose them. Neither has an automatic rollback: a purged message is restored from Recoverable Items, and a reset password is changed by its owner.
+  - **Collect investigation package** (`COLLECT_FORENSICS`), Defender for Endpoint: the device's processes, connections, autoruns and event logs are copied to the Defender portal; nothing on the device changes.
+    - **The calls:** `POST /api/machines/{id}/collectInvestigationPackage`, followed in `/api/machineactions/{id}` until it succeeds. Only then is it confirmed, with a short-lived download link from `/getPackageUri`. The package also stays in the device's Action center.
+    - **Permission:** it needs `Machine.CollectForensics`.
+    - **Source:** written against Microsoft's own `Get-MDEInvestigationPackage` playbook in the Azure-Sentinel repository, as learn.microsoft.com wasn't reachable.
+    - **Who asks for it:** analysts and playbooks, not the AI. The rulebook default is approval (a person asks), and a crown-jewel host always needs a person's approval.
+    - **Without Defender:** it's left as a task: "Collect an investigation package from <host> in the EDR console".
+  - **SentinelOne file block** (`QUARANTINE_FILE`): a `black_hash` blocklist entry for Windows, macOS and Linux, scoped to the client's site (`siteId`), confirmed by reading the blocklist back.
+    - **Source:** SentinelOne's API reference is behind its console, so this follows the Cortex XSOAR SentinelOne-V2 integration (`demisto/content`): a SHA-1 as `value`, a SHA-256 as `sha256Value`.
+    - **Check it in a lab:** a blocklist search may not match `sha256Value` the same way on every console version.
 - **Not covered yet.** These go through a signed webhook or are done by hand:
   - **Tenant-wide sender blocks in Exchange Online:** the Tenant Allow/Block List is Exchange Online PowerShell (`New-TenantAllowBlockListItems`), not Microsoft Graph.
-  - **Defender's investigation package, and new SentinelOne actions:** their documentation couldn't be reached from the build environment, and connectors aren't written from memory.
+  - **Other SentinelOne actions** (threat mitigation, scans, log fetches): not mapped to HELIOS actions yet.
   - **CrowdStrike file blocks:** the IOC body follows FalconPy's payload, but the `prevent` action value isn't confirmed in the public sources; check it in a lab.
 
   **Dry-run mode** runs preflight only, reports what it would do, and leaves the action to do by hand. Contract tests run each connector against its vendor's documented request and response shapes. The vendor docs couldn't be opened from the build environment, so check every connector against a lab tenant before production.

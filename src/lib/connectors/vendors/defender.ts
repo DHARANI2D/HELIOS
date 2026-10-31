@@ -2,9 +2,16 @@ import { ConnectorError, microsoftToken, odata } from "@/lib/connectors/http";
 import type { ConnectorCtx, Execution, NativeConnector, Preflight, VendorRef } from "@/lib/connectors/types";
 
 // Microsoft Defender for Endpoint: isolate and release devices (machine
-// actions, confirmed when the action reports Succeeded), and block files and
-// IPs through custom indicators. An app registration with Machine.Isolate,
+// actions, confirmed when the action reports Succeeded), collect a device's
+// investigation package, and block files and IPs through custom indicators.
+// An app registration with Machine.Isolate, Machine.CollectForensics,
 // Machine.Read.All and Ti.ReadWrite.All (application permissions) is enough.
+//
+// The investigation package (POST /api/machines/{id}/collectInvestigationPackage,
+// then GET /api/machineactions/{id} until Succeeded, then
+// /api/machineactions/{id}/getPackageUri for a short-lived download link) is
+// written against Microsoft's own Get-MDEInvestigationPackage playbook in the
+// Azure-Sentinel repository; learn.microsoft.com wasn't reachable here.
 
 const SCOPE = "https://api.securitycenter.microsoft.com/.default";
 const base = (ctx: ConnectorCtx) => (ctx.config.apiBase || "https://api.securitycenter.microsoft.com").replace(/\/+$/, "");
@@ -60,8 +67,8 @@ export const defender: NativeConnector = {
   key: "defender_endpoint",
   label: "Microsoft Defender for Endpoint",
   tools: ["defender_endpoint_p2", "defender_business"],
-  actions: ["ISOLATE_HOST", "RELEASE_HOST", "QUARANTINE_FILE", "BLOCK_IP", "UNBLOCK_IP"],
-  docs: "https://learn.microsoft.com/defender-endpoint/api/isolate-machine · /unisolate-machine · /get-machineaction-object · /post-ti-indicator",
+  actions: ["ISOLATE_HOST", "RELEASE_HOST", "COLLECT_FORENSICS", "QUARANTINE_FILE", "BLOCK_IP", "UNBLOCK_IP"],
+  docs: "https://learn.microsoft.com/defender-endpoint/api/isolate-machine · /unisolate-machine · /collect-investigation-package · /get-package-sas-uri · /get-machineaction-object · /post-ti-indicator",
   fields: [
     { key: "tenantId", label: "Directory (tenant) ID", required: true },
     { key: "clientId", label: "Application (client) ID", required: true },
@@ -76,7 +83,7 @@ export const defender: NativeConnector = {
   },
 
   async preflight({ action, target, ctx }) {
-    if (action === "ISOLATE_HOST" || action === "RELEASE_HOST") return findMachine(ctx, target);
+    if (action === "ISOLATE_HOST" || action === "RELEASE_HOST" || action === "COLLECT_FORENSICS") return findMachine(ctx, target);
     if (action === "QUARANTINE_FILE") {
       if (!hashType(target)) return { ok: false, reason: `${target} isn't a SHA-256, SHA-1 or MD5 hash` };
       const existing = await findIndicator(ctx, target);
@@ -93,22 +100,24 @@ export const defender: NativeConnector = {
   async execute({ action, target, ctx, comment, idempotencyKey }, resolved): Promise<Execution> {
     const headers = await auth(ctx);
     const note = `${comment} [HELIOS ${idempotencyKey}]`.slice(0, 1000);
-    if (action === "ISOLATE_HOST" || action === "RELEASE_HOST") {
-      const path = action === "ISOLATE_HOST" ? "isolate" : "unisolate";
+    if (action === "ISOLATE_HOST" || action === "RELEASE_HOST" || action === "COLLECT_FORENSICS") {
+      const path = action === "ISOLATE_HOST" ? "isolate" : action === "RELEASE_HOST" ? "unisolate" : "collectInvestigationPackage";
       const body = action === "ISOLATE_HOST" ? { Comment: note, IsolationType: ctx.config.isolationType === "Selective" ? "Selective" : "Full" } : { Comment: note };
       const res = await ctx.http<MachineAction | { error?: { code?: string } }>(`${base(ctx)}/api/machines/${encodeURIComponent(resolved.id)}/${path}`, { headers, json: body, expect: [400] });
       if (res.status === 400) {
         // An identical request already running is the one to follow.
         const code = (res.data as { error?: { code?: string } }).error?.code ?? "";
         if (!/ActiveRequestAlreadyExists/i.test(code)) throw new ConnectorError(`Defender refused the request: ${JSON.stringify(res.data).slice(0, 200)}`, 400);
-        const type = action === "ISOLATE_HOST" ? "Isolate" : "Unisolate";
+        const type = action === "ISOLATE_HOST" ? "Isolate" : action === "RELEASE_HOST" ? "Unisolate" : "CollectInvestigationPackage";
         const running = await ctx.http<{ value: MachineAction[] }>(`${base(ctx)}/api/machineactions?$filter=${encodeURIComponent(`machineId eq '${odata(resolved.id)}' and type eq '${type}'`)}`, { headers });
         const latest = running.data.value.find((a) => a.status === "Pending" || a.status === "InProgress");
         if (!latest) throw new ConnectorError("Defender says a request is already running but none was found", 400);
         return { ref: { machineActionId: latest.id, machineId: resolved.id }, confirmed: false, message: `${type} already requested in Defender (action ${latest.id})` };
       }
       const a = res.data as MachineAction;
-      return { ref: { machineActionId: a.id, machineId: resolved.id }, confirmed: a.status === "Succeeded", message: `${action === "ISOLATE_HOST" ? "Isolation" : "Release"} requested in Defender (action ${a.id}, ${a.status})` };
+      const what = action === "ISOLATE_HOST" ? "Isolation" : action === "RELEASE_HOST" ? "Release" : "Investigation package";
+      // A package is only done once it can be downloaded: verify fetches the link.
+      return { ref: { machineActionId: a.id, machineId: resolved.id }, confirmed: action !== "COLLECT_FORENSICS" && a.status === "Succeeded", message: `${what} requested in Defender (action ${a.id}, ${a.status})` };
     }
     if (action === "UNBLOCK_IP") {
       await ctx.http(`${base(ctx)}/api/indicators/${encodeURIComponent(resolved.id)}`, { method: "DELETE", headers, expect: [404] });
@@ -134,6 +143,13 @@ export const defender: NativeConnector = {
     if (ref.machineActionId) {
       const res = await ctx.http<MachineAction>(`${base(ctx)}/api/machineactions/${encodeURIComponent(ref.machineActionId)}`, { headers: await auth(ctx) });
       const s = res.data.status;
+      if (s === "Succeeded" && action === "COLLECT_FORENSICS") {
+        // The link is a short-lived signed URL; the package stays in the
+        // device's Action center in the Defender portal.
+        const uri = await ctx.http<{ value?: string }>(`${base(ctx)}/api/machineactions/${encodeURIComponent(ref.machineActionId)}/getPackageUri`, { headers: await auth(ctx) });
+        if (!uri.data.value) return { state: "pending", message: "Defender collected the package but has no download link yet" };
+        return { state: "confirmed", message: `Defender collected the investigation package. Download (a short-lived link; the package stays in the device's Action center): ${uri.data.value}` };
+      }
       if (s === "Succeeded") return { state: "confirmed", message: `Defender reports the ${res.data.type.toLowerCase()} succeeded` };
       if (s === "Pending" || s === "InProgress") return { state: "pending", message: `Defender action ${ref.machineActionId} is ${s === "Pending" ? "waiting for the device" : "in progress"}` };
       return { state: "failed", message: `Defender action ${ref.machineActionId} ended ${s}` };

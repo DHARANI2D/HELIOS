@@ -165,9 +165,11 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   });
   const requestable = [
     ...fromEvidence,
-    // Analysts' own: purge the email this case is about, reset an account's password.
+    // Analysts' own: purge the email this case is about, reset an account's
+    // password, collect a device's investigation package.
     { value: "PURGE_EMAIL" as PlaybookActionType, label: ACTION_LABEL.PURGE_EMAIL, targets: [purgeTargetOfCase(kase.metadata)].filter((t): t is string => !!t) },
     { value: "RESET_PASSWORD" as PlaybookActionType, label: ACTION_LABEL.RESET_PASSWORD, targets: evidence.entities.users.slice(0, 25) },
+    { value: "COLLECT_FORENSICS" as PlaybookActionType, label: ACTION_LABEL.COLLECT_FORENSICS, targets: evidence.entities.hosts.slice(0, 25) },
   ].filter((r) => r.targets.length > 0);
 
   return (

@@ -316,3 +316,78 @@ describe("CrowdStrike Falcon file block", () => {
     expect((await crowdstrike.verify(req(c, "QUARANTINE_FILE", sha), done.ref)).state).toBe("confirmed");
   });
 });
+
+describe("Defender investigation package", () => {
+  it("collects one, follows the machine action, and confirms with the download link", async () => {
+    const { http, calls } = fakeApi([
+      MS_TOKEN,
+      { method: "GET", match: /\/api\/machines\?\$filter=computerDnsName%20eq%20'ws-22.corp.example'/, reply: [{ body: { value: [{ id: "m22", computerDnsName: "ws-22.corp.example", healthStatus: "Active" }] } }] },
+      { method: "POST", match: /\/api\/machines\/m22\/collectInvestigationPackage$/, reply: [{ status: 201, body: { id: "pkg1", type: "CollectInvestigationPackage", status: "Pending", machineId: "m22" } }] },
+      { method: "GET", match: /\/api\/machineactions\/pkg1$/, reply: [{ body: { id: "pkg1", type: "CollectInvestigationPackage", status: "InProgress" } }, { body: { id: "pkg1", type: "CollectInvestigationPackage", status: "Succeeded" } }] },
+      { method: "GET", match: /\/api\/machineactions\/pkg1\/getPackageUri$/, reply: [{ body: { value: "https://userrequests-us.securitycenter.windows.com/safedownload/pkg1.zip?token=abc" } }] },
+    ]);
+    const c = ctx(http, MS, { clientSecret: "s" });
+    const pre = await defender.preflight(req(c, "COLLECT_FORENSICS", "ws-22.corp.example"));
+    expect(pre).toMatchObject({ ok: true, resolved: { id: "m22" } });
+    const done = await defender.execute(req(c, "COLLECT_FORENSICS", "ws-22.corp.example"), pre.ok ? pre.resolved : (null as never));
+    // Not done until the package can be downloaded.
+    expect(done).toMatchObject({ ref: { machineActionId: "pkg1", machineId: "m22" }, confirmed: false, message: expect.stringMatching(/^Investigation package requested/) });
+    expect(calls.find((x) => x.url.endsWith("/collectInvestigationPackage"))!.body).toEqual({ Comment: "Test case [HELIOS ra_123]" });
+    expect((await defender.verify(req(c, "COLLECT_FORENSICS", ""), done.ref)).state).toBe("pending");
+    const ready = await defender.verify(req(c, "COLLECT_FORENSICS", ""), done.ref);
+    expect(ready).toMatchObject({ state: "confirmed", message: expect.stringContaining("https://userrequests-us.securitycenter.windows.com/safedownload/pkg1.zip") });
+  });
+
+  it("follows a collection already running on the device", async () => {
+    const { http } = fakeApi([
+      MS_TOKEN,
+      { method: "POST", match: /\/collectInvestigationPackage$/, reply: [{ status: 400, body: { error: { code: "ActiveRequestAlreadyExists", message: "Action is already in progress" } } }] },
+      { method: "GET", match: /\/api\/machineactions\?\$filter=machineId%20eq%20'm22'%20and%20type%20eq%20'CollectInvestigationPackage'/, reply: [{ body: { value: [{ id: "pkg0", type: "CollectInvestigationPackage", status: "InProgress" }] } }] },
+    ]);
+    const c = ctx(http, MS, { clientSecret: "s" });
+    const done = await defender.execute(req(c, "COLLECT_FORENSICS", "ws-22"), { id: "m22", name: "ws-22.corp.example" });
+    expect(done).toMatchObject({ ref: { machineActionId: "pkg0" }, message: expect.stringMatching(/CollectInvestigationPackage already requested/) });
+  });
+});
+
+describe("SentinelOne file block", () => {
+  const sha256 = "c".repeat(64);
+  it("adds a blocklist entry per OS type to the client's site and confirms all three", async () => {
+    const { http, calls } = fakeApi([
+      {
+        method: "GET",
+        match: /\/web\/api\/v2\.1\/restrictions\?siteIds=site-9&type=black_hash&value__contains=c{64}/,
+        reply: [
+          { body: { data: [{ id: "r0", sha256Value: sha256, osType: "windows" }, { id: "rx", sha256Value: "d".repeat(64), osType: "macos" }] } },
+          { body: { data: [{ id: "r0", sha256Value: sha256, osType: "windows" }] } },
+          { body: { data: [{ id: "r0", sha256Value: sha256, osType: "windows" }, { id: "r1", sha256Value: sha256.toUpperCase(), osType: "macos" }, { id: "r2", sha256Value: sha256, osType: "linux" }] } },
+        ],
+      },
+      { method: "POST", match: /\/web\/api\/v2\.1\/restrictions$/, reply: [{ body: { data: { id: "new" } } }] },
+    ]);
+    const c = ctx(http, { consoleUrl: "https://usea1-acme.sentinelone.net", siteId: "site-9" }, { apiToken: "tok" });
+    expect(await sentinelone.preflight(req(c, "QUARANTINE_FILE", "e".repeat(32)))).toMatchObject({ ok: false, reason: expect.stringMatching(/SHA-256 or SHA-1/) });
+    const pre = await sentinelone.preflight(req(c, "QUARANTINE_FILE", sha256.toUpperCase()));
+    // Another hash's entry doesn't count; only Windows is covered so far.
+    expect(pre).toMatchObject({ ok: true, alreadyDone: false });
+    const done = await sentinelone.execute(req(c, "QUARANTINE_FILE", sha256.toUpperCase()), pre.ok ? pre.resolved : (null as never));
+    const posts = calls.filter((x) => x.method === "POST");
+    expect(posts.map((p) => (p.body as { data: { osType: string } }).data.osType)).toEqual(["macos", "linux"]);
+    expect(posts[0].body).toEqual({ data: { value: "", sha256Value: sha256, source: "HELIOS", osType: "macos", type: "black_hash", description: "Test case [HELIOS ra_123]" }, filter: { siteIds: ["site-9"] } });
+    expect(posts[0].headers.authorization).toBe("ApiToken tok");
+    expect((await sentinelone.verify(req(c, "QUARANTINE_FILE", sha256), done.ref)).state).toBe("confirmed");
+  });
+
+  it("sends a SHA-1 as the value, and needs the site", async () => {
+    const sha1 = "f".repeat(40);
+    const { http, calls } = fakeApi([
+      { method: "GET", match: /\/restrictions\?/, reply: [{ body: { data: [] } }] },
+      { method: "POST", match: /\/restrictions$/, reply: [{ body: { data: { id: "n" } } }] },
+    ]);
+    const c = ctx(http, { consoleUrl: "https://x.sentinelone.net", siteId: "s1" }, { apiToken: "tok" });
+    await sentinelone.execute(req(c, "QUARANTINE_FILE", sha1), { id: sha1, name: sha1 });
+    expect((calls.find((x) => x.method === "POST")!.body as { data: Record<string, string> }).data).toMatchObject({ value: sha1, sha256Value: "" });
+    const noSite = ctx(http, { consoleUrl: "https://x.sentinelone.net" }, { apiToken: "tok" });
+    await expect(sentinelone.preflight(req(noSite, "QUARANTINE_FILE", sha1))).rejects.toThrow(/site ID/);
+  });
+});
