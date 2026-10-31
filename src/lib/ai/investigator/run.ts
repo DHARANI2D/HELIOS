@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { CaseEvidence } from "@/lib/ai/evidence";
 import { renderEvidence } from "@/lib/ai/evidence";
-import type { AgentToolResult, LlmProvider, LlmUsage } from "@/lib/ai/provider";
+import { addUsage, type AgentToolResult, type LlmProvider, type LlmUsage } from "@/lib/ai/provider";
 import type { AgentProfileView } from "@/lib/ai/resolve";
 import { TriageSchema, builtinTriage, groundTriage, normalizeTriage, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
 import { UNTRUSTED_RULES, holdDowngrades, scanForInjection, type InjectionFinding } from "@/lib/ai/safety";
@@ -121,7 +121,7 @@ export async function investigate(evidence: CaseEvidence, profile: AgentProfileV
   };
   if (!provider?.agent) return builtin(provider ? "fallback" : "succeeded", provider ? `${provider.name} can't use tools; the built-in sweep ran instead` : undefined);
 
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  let usage: LlmUsage = { inputTokens: 0, outputTokens: 0 };
   let model: string | null = provider.model;
   try {
     const session = provider.agent({ system: SYSTEM(profile), user: renderEvidence(evidence), tools: agentTools(), effort: profile.effort });
@@ -133,8 +133,7 @@ export async function investigate(evidence: CaseEvidence, profile: AgentProfileV
       if (Date.now() - started > LIMITS.ms) note = "Time is up: call submit_findings now with what you have.";
       const step = await session.step(results, note);
       model = step.model;
-      usage.inputTokens += step.usage.inputTokens ?? 0;
-      usage.outputTokens += step.usage.outputTokens ?? 0;
+      usage = addUsage(usage, step.usage);
       results = undefined;
       note = undefined;
       if (step.stop === "pause_turn") continue;

@@ -4,8 +4,9 @@ import { db } from "@/lib/db";
 import { openSealed } from "@/lib/keys";
 import { AGENT_TYPES, type AgentKey } from "@/lib/ai/catalog";
 import type { Effort, LlmProvider } from "@/lib/ai/provider";
-import { anthropicProvider } from "@/lib/ai/anthropic";
+import { anthropicProvider, bedrockProvider, parseBedrockAuth } from "@/lib/ai/anthropic";
 import { openAiCompatibleProvider } from "@/lib/ai/openai-compatible";
+import { publicFetch } from "@/lib/net/public-fetch";
 
 // Which model runs which agent. Order of precedence:
 //   HELIOS_AI_ENGINE=builtin (or INVESTIGATIONS_ENGINE=heuristic for the
@@ -55,13 +56,32 @@ function forcedBuiltin(key: AgentKey) {
   return false;
 }
 
+// A client admin types their own provider's address; from a hosted HELIOS
+// it may only reach public https hosts (not the cloud metadata endpoint or
+// the platform's own network). An operator running HELIOS inside a client's
+// network, where the client's model is on a private address, turns that off
+// with HELIOS_ALLOW_PRIVATE_CLIENT_AI=1.
+export function clientEndpointFetch(): typeof fetch | undefined {
+  if (process.env.HELIOS_ALLOW_PRIVATE_CLIENT_AI === "1") return undefined;
+  return ((url: string | URL | Request, init?: RequestInit) => publicFetch(String(url instanceof Request ? url.url : url), init)) as typeof fetch;
+}
+
 export async function providerFromRow(row: AiProvider, modelOverride?: string | null): Promise<LlmProvider> {
   const model = modelOverride || row.model;
   // A client's own key is sealed with that client's data key (lib/keys).
-  const apiKey = row.apiKeyCipher ? await openSealed(row.apiKeyCipher) : undefined;
-  if (row.kind === "anthropic") return anthropicProvider({ name: row.name, model, apiKey });
+  const secret = row.apiKeyCipher ? await openSealed(row.apiKeyCipher) : undefined;
+  if (row.kind === "anthropic") return anthropicProvider({ name: row.name, model, apiKey: secret });
+  if (row.kind === "bedrock") {
+    if (!row.region) throw new Error(`Provider ${row.name} has no AWS region`);
+    const auth = parseBedrockAuth(secret);
+    // Without credentials the server's own AWS identity answers, which a
+    // client's provider must never borrow.
+    if (!auth && row.tenantId) throw new Error(`Provider ${row.name} has no AWS credentials`);
+    return bedrockProvider({ name: row.name, model, region: row.region, auth });
+  }
   if (!row.baseUrl) throw new Error(`Provider ${row.name} has no base URL`);
-  return openAiCompatibleProvider({ name: row.name, baseUrl: row.baseUrl, model, apiKey, isLocal: row.isLocal });
+  const guarded = row.tenantId ? clientEndpointFetch() : undefined;
+  return openAiCompatibleProvider({ name: row.name, baseUrl: row.baseUrl, model, apiKey: secret, isLocal: row.isLocal, azure: row.kind === "azure_openai", fetch: guarded });
 }
 
 export async function resolveProvider(key: AgentKey, profile?: AgentProfileView): Promise<LlmProvider | null> {

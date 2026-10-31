@@ -939,7 +939,7 @@ model ModelCapability {
 model AiProvider {
   id               String    @id @default(cuid())
   name             String    @unique
-  kind             String // anthropic | openai_compatible
+  kind             String // anthropic | bedrock | azure_openai | openai_compatible
   baseUrl          String?
   model            String
   apiKeyCipher     String?   @db.Text
@@ -949,7 +949,8 @@ model AiProvider {
   // Set for a client's own provider (bring your own key): used only for
   // that client. Null = a platform provider.
   tenantId         String?
-  // Where inference runs, for region-locked clients ("india", "eu"…).
+  // Where inference runs, for region-locked clients ("india", "eu"…). For
+  // Bedrock it's the AWS region it calls (ap-south-1…).
   region           String?
   lastCheckedAt    DateTime?
   lastCheckOk      Boolean?
@@ -985,29 +986,32 @@ model AiAgentProfile {
 }
 
 model AiRun {
-  id            String   @id @default(cuid())
-  caseId        String?
+  id               String   @id @default(cuid())
+  caseId           String?
   // The client the run was for, and why this model ran it (lib/ai/gateway).
-  tenantId      String?
-  resolution    Json?
-  agentKey      String
-  trigger       String // auto | manual
-  engine        String // provider name, or "built-in"
-  model         String?
-  isLocal       Boolean  @default(false)
-  status        String // succeeded | fallback | failed
-  confidence    Float?
-  output        Json?
-  grounding     Json? // claims checked against case evidence
-  error         String?  @db.Text
-  durationMs    Int?
-  inputTokens   Int?
-  outputTokens  Int?
-  requestedById String?
-  feedback      String? // agree | disagree
-  feedbackNote  String?
-  feedbackById  String?
-  createdAt     DateTime @default(now())
+  tenantId         String?
+  resolution       Json?
+  agentKey         String
+  trigger          String // auto | manual
+  engine           String // provider name, or "built-in"
+  model            String?
+  isLocal          Boolean  @default(false)
+  status           String // succeeded | fallback | failed
+  confidence       Float?
+  output           Json?
+  grounding        Json? // claims checked against case evidence
+  error            String?  @db.Text
+  durationMs       Int?
+  inputTokens      Int?
+  outputTokens     Int?
+  // Of the input tokens, how many were read from / written to the prompt cache.
+  cacheReadTokens  Int?
+  cacheWriteTokens Int?
+  requestedById    String?
+  feedback         String? // agree | disagree
+  feedbackNote     String?
+  feedbackById     String?
+  createdAt        DateTime @default(now())
 
   case       Case?            @relation(fields: [caseId], references: [id], onDelete: Cascade)
   feedbackBy User?            @relation("AiRunFeedback", fields: [feedbackById], references: [id], onDelete: SetNull)

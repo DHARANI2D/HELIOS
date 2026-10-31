@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { AgentRequest, AgentSession, AgentStep, AgentToolResult, LlmProvider, LlmResult, StructuredRequest, TextRequest } from "@/lib/ai/provider";
+import { addUsage, type AgentRequest, type AgentSession, type AgentStep, type AgentToolResult, type LlmProvider, type LlmResult, type LlmUsage, type StructuredRequest, type TextRequest } from "@/lib/ai/provider";
 
 // Local / self-hosted models behind the OpenAI-compatible chat completions
 // API that Ollama, LM Studio, vLLM and llama.cpp's server all expose — the
@@ -8,6 +8,11 @@ import type { AgentRequest, AgentSession, AgentStep, AgentToolResult, LlmProvide
 // Structured output uses response_format json_schema; local models are less
 // reliable at it than hosted ones, so the reply is validated with Zod and
 // re-asked once with the validation errors before giving up.
+//
+// Azure OpenAI is the same API (its v1 endpoint, /openai/v1) with the key
+// in an api-key header and the deployment's name as the model. It enforces
+// strict JSON schemas only in OpenAI's subset (every property required), so
+// there the schema guides the reply and Zod checks it, as with local models.
 
 const TIMEOUT_MS = Number(process.env.AI_LOCAL_TIMEOUT_MS ?? 180_000);
 
@@ -20,7 +25,7 @@ interface ToolCall {
 interface ChatResponse {
   model?: string;
   choices?: Array<{ finish_reason?: string; message?: { content?: string | null; tool_calls?: ToolCall[] } }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
 }
 
 type Message =
@@ -40,44 +45,72 @@ export function extractJson(content: string): unknown {
   return JSON.parse(start > 0 ? cleaned.slice(start) : cleaned);
 }
 
-export function openAiCompatibleProvider(options: { name: string; baseUrl: string; model: string; apiKey?: string; isLocal: boolean }): LlmProvider {
-  const { name, model, apiKey, isLocal } = options;
-  const baseUrl = options.baseUrl.replace(/\/+$/, "");
+// An Azure OpenAI resource's endpoint as people copy it from the portal
+// (https://NAME.openai.azure.com/) becomes its v1 API base.
+export function azureBaseUrl(endpoint: string) {
+  const url = endpoint.trim().replace(/\/+$/, "");
+  if (/\/openai\/v1$/i.test(url)) return url;
+  if (/\/openai$/i.test(url)) return `${url}/v1`;
+  return new URL(url).pathname === "/" ? `${url}/openai/v1` : url;
+}
 
-  async function chat(messages: Message[], responseFormat?: unknown, tools?: unknown[]): Promise<ChatResponse> {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
+interface Options {
+  name: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  isLocal: boolean;
+  // Azure OpenAI: the key goes in an api-key header, the base URL is the
+  // resource's endpoint.
+  azure?: boolean;
+  // Where requests go out through (lib/ai/resolve guards client-entered
+  // addresses).
+  fetch?: typeof fetch;
+}
+
+export function openAiCompatibleProvider(options: Options): LlmProvider {
+  const { name, model, apiKey, isLocal, azure } = options;
+  const baseUrl = azure ? azureBaseUrl(options.baseUrl) : options.baseUrl.replace(/\/+$/, "");
+  const doFetch = options.fetch ?? fetch;
+  const auth: Record<string, string> = apiKey ? (azure ? { "api-key": apiKey } : { authorization: `Bearer ${apiKey}` }) : {};
+
+  async function chat(messages: Message[], responseFormat?: unknown, tools?: unknown[], extra: Record<string, unknown> = {}): Promise<ChatResponse> {
+    const res = await doFetch(`${baseUrl}/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
-      body: JSON.stringify({ model, messages, stream: false, ...(responseFormat ? { response_format: responseFormat } : {}), ...(tools ? { tools, tool_choice: "auto" } : {}) }),
+      headers: { "content-type": "application/json", ...auth },
+      body: JSON.stringify({ model, messages, stream: false, ...(responseFormat ? { response_format: responseFormat } : {}), ...(tools ? { tools, tool_choice: "auto" } : {}), ...extra }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`${name} returned HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
     return (await res.json()) as ChatResponse;
   }
 
-  const usageOf = (r: ChatResponse) => ({ inputTokens: r.usage?.prompt_tokens, outputTokens: r.usage?.completion_tokens });
+  // OpenAI-style servers (Azure among them) cache long prompts on their own
+  // and report how much of the prompt came from the cache.
+  const usageOf = (r: ChatResponse): LlmUsage => ({
+    inputTokens: r.usage?.prompt_tokens,
+    outputTokens: r.usage?.completion_tokens,
+    ...(r.usage?.prompt_tokens_details?.cached_tokens ? { cacheReadTokens: r.usage.prompt_tokens_details.cached_tokens } : {}),
+  });
 
   return {
     name,
-    kind: "openai_compatible",
+    kind: azure ? "azure_openai" : "openai_compatible",
     model,
     isLocal,
 
     async structured<S extends z.ZodType>({ schema, schemaName, system, user }: StructuredRequest<S>): Promise<LlmResult<z.infer<S>>> {
       const { $schema: _ignored, ...jsonSchema } = z.toJSONSchema(schema) as Record<string, unknown>;
-      const format = { type: "json_schema", json_schema: { name: schemaName, schema: jsonSchema, strict: true } };
+      const format = { type: "json_schema", json_schema: { name: schemaName, schema: jsonSchema, strict: !azure } };
       const messages: Message[] = [
         { role: "system", content: `${system}\n\nRespond with a single JSON object that matches the provided schema. No prose.` },
         { role: "user", content: user },
       ];
-      let inputTokens = 0;
-      let outputTokens = 0;
+      let usage: LlmUsage = {};
       let lastError = "";
       for (let attempt = 0; attempt < 2; attempt++) {
         const response = await chat(messages, format);
-        const usage = usageOf(response);
-        inputTokens += usage.inputTokens ?? 0;
-        outputTokens += usage.outputTokens ?? 0;
+        usage = addUsage(usage, usageOf(response));
         const content = response.choices?.[0]?.message?.content ?? "";
         let parsed: unknown;
         try {
@@ -89,7 +122,7 @@ export function openAiCompatibleProvider(options: { name: string; baseUrl: strin
         }
         const result = schema.safeParse(parsed);
         if (result.success) {
-          return { data: result.data as z.infer<S>, model: response.model ?? model, usage: { inputTokens, outputTokens } };
+          return { data: result.data as z.infer<S>, model: response.model ?? model, usage };
         }
         lastError = result.error.issues.slice(0, 5).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
         messages.push({ role: "assistant", content }, { role: "user", content: `The JSON did not match the schema (${lastError}). Reply again with a corrected JSON object only.` });
@@ -142,9 +175,22 @@ export function openAiCompatibleProvider(options: { name: string; baseUrl: strin
     },
 
     async check() {
+      if (azure) {
+        // Azure's model list names base models, not deployments: ask the
+        // deployment for a word instead.
+        try {
+          const r = await chat([{ role: "user", content: "Reply with OK." }], undefined, undefined, { max_completion_tokens: 256 });
+          return { ok: true, message: `Connected — deployment ${model}${r.model ? ` (${r.model})` : ""}` };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/HTTP 401/.test(msg)) return { ok: false, message: "API key rejected" };
+          if (/HTTP 404/.test(msg)) return { ok: false, message: `No deployment named ${model} at ${baseUrl}` };
+          return { ok: false, message: msg };
+        }
+      }
       try {
-        const res = await fetch(`${baseUrl}/models`, {
-          headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+        const res = await doFetch(`${baseUrl}/models`, {
+          headers: auth,
           signal: AbortSignal.timeout(8_000),
         });
         if (!res.ok) return { ok: false, message: `HTTP ${res.status} from ${baseUrl}/models` };

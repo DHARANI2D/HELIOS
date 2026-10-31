@@ -107,7 +107,15 @@ export function minAutonomy(a: AiAutonomy, b: AiAutonomy): AiAutonomy {
   return AUTONOMY_ORDER.indexOf(a) <= AUTONOMY_ORDER.indexOf(b) ? a : b;
 }
 
-export type ProviderKind = "anthropic" | "openai_compatible";
+export type ProviderKind = "anthropic" | "bedrock" | "azure_openai" | "openai_compatible";
+export const PROVIDER_KINDS: ProviderKind[] = ["anthropic", "bedrock", "azure_openai", "openai_compatible"];
+
+export const KIND_LABEL: Record<ProviderKind, string> = {
+  anthropic: "Anthropic API",
+  bedrock: "Claude in Amazon Bedrock",
+  azure_openai: "Azure OpenAI",
+  openai_compatible: "OpenAI-compatible endpoint",
+};
 
 export interface ProviderPreset {
   id: string;
@@ -115,9 +123,29 @@ export interface ProviderPreset {
   label: string;
   isLocal: boolean;
   baseUrl?: string;
+  // Bedrock: the AWS region it calls.
+  region?: string;
   defaultModel: string;
   models: string[];
   note: string;
+}
+
+// Claude in Amazon Bedrock takes the anthropic.-prefixed model IDs. HELIOS's
+// Claude SDK sends API version 2026-10-21, which Bedrock accepts for Claude
+// 4.7 and later only, so older Bedrock models aren't offered.
+export const BEDROCK_MODEL = /^anthropic\.claude-[a-z0-9.-]+$/;
+function oldClaude(model: string) {
+  if (/^anthropic\.claude-(\d|instant|v\d)/.test(model)) return true; // claude-3-5-sonnet, claude-instant, claude-v2
+  const m = /^anthropic\.claude-(?:opus|sonnet|haiku)-(\d+)(?:-(\d+))?/.exec(model);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = m[2] && m[2].length < 8 ? Number(m[2]) : 0; // an 8-digit date isn't a minor version
+  return major < 4 || (major === 4 && minor < 7);
+}
+export function bedrockModelProblem(model: string): string | null {
+  if (!BEDROCK_MODEL.test(model)) return `A Bedrock model ID starts with "anthropic." (for example anthropic.claude-sonnet-5-5)`;
+  if (oldClaude(model)) return "HELIOS calls Bedrock with an API version that works with Claude 4.7 and later only";
+  return null;
 }
 
 // Local presets all speak the OpenAI-compatible /v1/chat/completions API
@@ -131,6 +159,26 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "claude-opus-5-5",
     models: ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
     note: "Hosted by Anthropic. Needs an API key; telemetry excerpts leave your network.",
+  },
+  {
+    id: "bedrock",
+    kind: "bedrock",
+    label: "Claude in Amazon Bedrock",
+    isLocal: false,
+    region: "ap-south-1",
+    defaultModel: "anthropic.claude-sonnet-5-5",
+    models: ["anthropic.claude-opus-5-5", "anthropic.claude-sonnet-5-5", "anthropic.claude-haiku-5-5"],
+    note: "Claude in your own AWS account, in the region you pick (ap-south-1 is Mumbai). A Bedrock API key, or an access key pair; for a platform provider, leave both blank to use the server's AWS role. Claude 4.7 and later only.",
+  },
+  {
+    id: "azure",
+    kind: "azure_openai",
+    label: "Azure OpenAI",
+    isLocal: false,
+    baseUrl: "https://YOUR-RESOURCE.openai.azure.com",
+    defaultModel: "gpt-4o",
+    models: ["gpt-4o", "gpt-4.1", "gpt-4o-mini"],
+    note: "Your Azure OpenAI resource. The model is your deployment's name; the key is the resource's API key. Pick a deployment that supports structured outputs (gpt-4o 2024-08-06 or later).",
   },
   {
     id: "ollama",
@@ -161,5 +209,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     defaultModel: "Qwen/Qwen2.5-14B-Instruct",
     models: ["Qwen/Qwen2.5-14B-Instruct", "meta-llama/Llama-3.1-8B-Instruct"],
     note: "GPU server you run; any OpenAI-compatible endpoint works.",
+  },
+  {
+    id: "edge",
+    kind: "openai_compatible",
+    label: "HELIOS AI box (on the client's site)",
+    isLocal: true,
+    baseUrl: "https://ai-box.client.example/v1",
+    defaultModel: "qwen2.5:14b",
+    models: ["qwen2.5:14b", "qwen2.5:32b", "llama3.3:70b"],
+    note: "The on-premises box from deploy/edge-ai: Ollama behind a TLS proxy that wants the box's API key. Telemetry is analysed on the client's own hardware.",
   },
 ];

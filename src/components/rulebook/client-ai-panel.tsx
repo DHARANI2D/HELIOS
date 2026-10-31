@@ -8,6 +8,9 @@ import { toast } from "sonner";
 
 import { deleteClientProviderAction, saveClientAiPolicyAction, saveClientProviderAction, saveMyModelPreferenceAction, testClientProviderAction } from "@/app/(app)/rulebook/ai-actions";
 import type { Resolution } from "@/lib/ai/gateway";
+import type { ProviderKind } from "@/lib/ai/catalog";
+
+const KIND_DEFAULT_MODEL: Record<ProviderKind, string> = { anthropic: "claude-sonnet-5-5", bedrock: "anthropic.claude-sonnet-5-5", azure_openai: "gpt-4o", openai_compatible: "qwen2.5:14b" };
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,11 +64,11 @@ export function ClientAiPanel({ tenantId, canEdit, rulesText, providers, agents,
   const [choice, setChoice] = React.useState(defaults);
   const [limit, setLimit] = React.useState(budget ? String(budget) : "");
   const [adding, setAdding] = React.useState(false);
-  const [d, setD] = React.useState({ name: "", kind: "anthropic" as "anthropic" | "openai_compatible", baseUrl: "", model: "claude-sonnet-5-5", apiKey: "", isLocal: false, region: "" });
+  const [d, setD] = React.useState({ name: "", kind: "anthropic" as ProviderKind, baseUrl: "", model: "claude-sonnet-5-5", apiKey: "", awsAccessKeyId: "", awsSecretAccessKey: "", isLocal: false, region: "" });
   const savePolicy = useAct(() => unwrap(saveClientAiPolicyAction(tenantId, { defaults: choice, monthlyBudgetUsd: limit ? Number(limit) : null })), () => "AI choices saved");
-  const addProvider = useAct(() => unwrap(saveClientProviderAction(tenantId, d)), () => {
+  const addProvider = useAct(() => unwrap(saveClientProviderAction(tenantId, { ...d, awsAccessKeyId: d.awsAccessKeyId || undefined, awsSecretAccessKey: d.awsSecretAccessKey || undefined, apiKey: d.apiKey || undefined })), () => {
     setAdding(false);
-    setD({ ...d, name: "", apiKey: "" });
+    setD({ ...d, name: "", apiKey: "", awsAccessKeyId: "", awsSecretAccessKey: "" });
     return "Provider added";
   });
   const remove = useAct((id: string) => unwrap(deleteClientProviderAction(tenantId, id)), () => "Provider removed");
@@ -165,15 +168,28 @@ export function ClientAiPanel({ tenantId, canEdit, rulesText, providers, agents,
             <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-name">Name</Label><Input id="cp-name" className="h-8 text-xs" value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} placeholder="Our Claude account" /></div>
             <div className="grid gap-1">
               <Label className="text-xs" htmlFor="cp-kind">Kind</Label>
-              <NativeSelect id="cp-kind" className="h-8 text-xs" value={d.kind} onChange={(e) => setD({ ...d, kind: e.target.value as typeof d.kind })}>
+              <NativeSelect id="cp-kind" className="h-8 text-xs" value={d.kind} onChange={(e) => setD({ ...d, kind: e.target.value as ProviderKind, model: KIND_DEFAULT_MODEL[e.target.value as ProviderKind], region: e.target.value === "bedrock" ? "ap-south-1" : d.region })}>
                 <option value="anthropic">Anthropic API</option>
-                <option value="openai_compatible">OpenAI-compatible endpoint (vLLM, Ollama, LM Studio…)</option>
+                <option value="bedrock">Claude in Amazon Bedrock (your AWS account)</option>
+                <option value="azure_openai">Azure OpenAI (your Azure resource)</option>
+                <option value="openai_compatible">OpenAI-compatible endpoint (HELIOS AI box, vLLM, Ollama…)</option>
               </NativeSelect>
             </div>
-            {d.kind === "openai_compatible" && <div className="grid gap-1 sm:col-span-2"><Label className="text-xs" htmlFor="cp-url">Base URL</Label><Input id="cp-url" className="h-8 text-xs" value={d.baseUrl} onChange={(e) => setD({ ...d, baseUrl: e.target.value })} placeholder="https://llm.client.example/v1" /></div>}
-            <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-model">Model</Label><Input id="cp-model" className="h-8 font-mono text-xs" value={d.model} onChange={(e) => setD({ ...d, model: e.target.value })} /></div>
-            <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-key">API key</Label><Input id="cp-key" type="password" className="h-8 text-xs" value={d.apiKey} onChange={(e) => setD({ ...d, apiKey: e.target.value })} autoComplete="off" /></div>
-            <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-region">Region</Label><Input id="cp-region" className="h-8 text-xs" value={d.region} onChange={(e) => setD({ ...d, region: e.target.value })} placeholder="india, eu… (for region-locked rules)" /></div>
+            {(d.kind === "openai_compatible" || d.kind === "azure_openai") && (
+              <div className="grid gap-1 sm:col-span-2">
+                <Label className="text-xs" htmlFor="cp-url">{d.kind === "azure_openai" ? "Endpoint" : "Base URL"}</Label>
+                <Input id="cp-url" className="h-8 text-xs" value={d.baseUrl} onChange={(e) => setD({ ...d, baseUrl: e.target.value })} placeholder={d.kind === "azure_openai" ? "https://NAME.openai.azure.com" : "https://ai-box.client.example/v1"} />
+              </div>
+            )}
+            <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-model">{d.kind === "azure_openai" ? "Deployment name" : "Model"}</Label><Input id="cp-model" className="h-8 font-mono text-xs" value={d.model} onChange={(e) => setD({ ...d, model: e.target.value })} /></div>
+            <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-key">{d.kind === "bedrock" ? "Bedrock API key (or an access key below)" : "API key"}</Label><Input id="cp-key" type="password" className="h-8 text-xs" value={d.apiKey} onChange={(e) => setD({ ...d, apiKey: e.target.value })} autoComplete="off" /></div>
+            {d.kind === "bedrock" && (
+              <>
+                <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-aws-id">Access key ID</Label><Input id="cp-aws-id" className="h-8 text-xs" value={d.awsAccessKeyId} onChange={(e) => setD({ ...d, awsAccessKeyId: e.target.value })} autoComplete="off" /></div>
+                <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-aws-secret">Secret access key</Label><Input id="cp-aws-secret" type="password" className="h-8 text-xs" value={d.awsSecretAccessKey} onChange={(e) => setD({ ...d, awsSecretAccessKey: e.target.value })} autoComplete="off" /></div>
+              </>
+            )}
+            <div className="grid gap-1"><Label className="text-xs" htmlFor="cp-region">{d.kind === "bedrock" ? "AWS region" : "Region"}</Label><Input id="cp-region" className="h-8 text-xs" value={d.region} onChange={(e) => setD({ ...d, region: e.target.value })} placeholder={d.kind === "bedrock" ? "ap-south-1" : "india, eu… (for region-locked rules)"} /></div>
             {d.kind === "openai_compatible" && <label className="flex items-center gap-2 self-end text-xs"><Switch checked={d.isLocal} onCheckedChange={(v) => setD({ ...d, isLocal: v })} /> Runs on the client&apos;s premises</label>}
             <div className="flex gap-2 sm:col-span-2">
               <Button size="sm" onClick={() => addProvider.mutate(undefined)} disabled={addProvider.isPending || d.name.length < 2 || !d.model}>{addProvider.isPending ? <Loader2 className="animate-spin" /> : <Save />} Add provider</Button>

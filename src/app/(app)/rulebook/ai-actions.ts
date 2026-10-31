@@ -9,9 +9,11 @@ import { sealFor } from "@/lib/keys";
 import { can } from "@/lib/rbac";
 import { requirePermission, requireUser, type SessionUser } from "@/lib/session";
 import { AGENT_KEYS, type AgentKey } from "@/lib/ai/catalog";
-import { providerFromRow } from "@/lib/ai/resolve";
+import { clientEndpointFetch, providerFromRow } from "@/lib/ai/resolve";
+import { assertPublicUrl } from "@/lib/net/public-fetch";
 import { CLIENT_AGENTS } from "@/lib/ai/gateway";
 import { action } from "@/lib/action";
+import { providerColumns, providerInputSchema, providerSecret, type ProviderInput } from "@/lib/ai/provider-input";
 
 // A client's AI setup: its own providers (bring your own key), which
 // provider each agent uses, and its monthly budget. Staff who configure AI
@@ -29,40 +31,35 @@ function done() {
   revalidatePath("/ai");
 }
 
-const providerSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().trim().min(2).max(80),
-  kind: z.enum(["anthropic", "openai_compatible"]),
-  baseUrl: z.string().trim().url().max(300).optional().or(z.literal("")),
-  model: z.string().trim().min(1).max(120),
-  apiKey: z.string().trim().max(400).optional(),
-  isLocal: z.boolean(),
-  region: z.string().trim().toLowerCase().max(40).optional().or(z.literal("")),
-});
-
-export const saveClientProviderAction = action(async function saveClientProviderAction(tenantId: string, input: z.input<typeof providerSchema>) {
+export const saveClientProviderAction = action(async function saveClientProviderAction(tenantId: string, input: ProviderInput) {
   const user = await aiActor(tenantId);
-  const p = providerSchema.parse(input);
-  if (p.kind === "openai_compatible" && !p.baseUrl) throw new Error("OpenAI-compatible providers need a base URL");
-  if (p.baseUrl && !/^https?:\/\//.test(p.baseUrl)) throw new Error("Base URL must be http(s)");
+  const p = providerInputSchema.parse(input);
   if (p.id && !(await db.aiProvider.count({ where: { id: p.id, tenantId } }))) throw new Error("Not found");
-  if (!p.id && !p.apiKey && p.kind === "anthropic") throw new Error("Add the API key for this provider");
+  const secret = providerSecret(p);
+  // A client's provider runs on the client's own account: never on the
+  // platform's (an absent Bedrock credential would mean the server's AWS
+  // role). A local server may not need a key.
+  if (!p.id && !secret && p.kind !== "openai_compatible") throw new Error(p.kind === "bedrock" ? "Add a Bedrock API key or an access key pair" : "Add the API key for this provider");
   const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } });
+  const columns = providerColumns(p);
+  // HELIOS reaches a client's own endpoint only at a public https address,
+  // unless the operator allows private ones (lib/ai/resolve).
+  if (columns.baseUrl && clientEndpointFetch()) {
+    await assertPublicUrl(columns.baseUrl).catch((e: Error) => {
+      throw new Error(`${e.message}: HELIOS reaches a client's own model at a public https address (an operator running HELIOS inside the client's network can allow private ones)`);
+    });
+  }
   const data = {
+    ...columns,
     // Provider names are unique platform-wide; the client's name prefixes its own.
     name: p.name.startsWith(`${tenant.name} · `) ? p.name : `${tenant.name} · ${p.name}`,
-    kind: p.kind,
-    baseUrl: p.kind === "anthropic" ? null : p.baseUrl || null,
-    model: p.model,
-    isLocal: p.kind === "openai_compatible" ? p.isLocal : false,
-    region: p.region || null,
     tenantId,
     isDefault: false,
     // Sealed with the client's own data key (lib/keys).
-    ...(p.apiKey ? { apiKeyCipher: await sealFor(tenantId, p.apiKey) } : {}),
+    ...(secret ? { apiKeyCipher: await sealFor(tenantId, secret) } : {}),
   };
   const saved = p.id ? await db.aiProvider.update({ where: { id: p.id }, data }) : await db.aiProvider.create({ data });
-  await logAction({ actorId: user.id, action: p.id ? "ai.client_provider_updated" : "ai.client_provider_added", detail: { tenantId, providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, region: saved.region, keyChanged: !!p.apiKey } });
+  await logAction({ actorId: user.id, action: p.id ? "ai.client_provider_updated" : "ai.client_provider_added", detail: { tenantId, providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, region: saved.region, keyChanged: !!secret } });
   done();
   return { id: saved.id };
 });

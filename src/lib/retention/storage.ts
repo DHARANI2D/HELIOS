@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { signAws } from "@/lib/collectors/auth";
+import { inIndia } from "@/lib/regions";
 
 // Where archived events live: a directory on the server, or an S3 bucket
 // (or an S3-compatible store) in a region the operator chooses. For
@@ -88,7 +89,7 @@ export function archiveStore(): ArchiveStore | null {
 
 // Indian jurisdiction, as far as the configuration says: an Indian region
 // of AWS, Azure or Google Cloud, or a region the operator declares as India.
-export const inIndia = (region: string | null) => !!region && /^(ap-south-[12]|asia-south[12]|(central|south|west)india|in|india|in-[a-z]+)$/i.test(region.trim());
+export { inIndia };
 
 // Where the logs are: the database (the region the operator declares in
 // HELIOS_DATA_REGION) and, once events are archived, the archive store.

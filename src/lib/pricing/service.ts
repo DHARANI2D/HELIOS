@@ -17,13 +17,41 @@ export async function loadModelPrices() {
   return db.aiModelPrice.findMany({ orderBy: [{ provider: "asc" }, { inputPer: "desc" }] });
 }
 
+// Prompt-cache pricing relative to the input price: writing a 5-minute
+// cache entry costs 1.25×, reading one 0.1× (Anthropic's published rates;
+// OpenAI-style automatic caching reports reads only).
+export const CACHE_WRITE_RATE = 1.25;
+export const CACHE_READ_RATE = 0.1;
+
+// Claude in Amazon Bedrock names models anthropic.claude-… (optionally with
+// a cross-region prefix such as global. or apac.); they're priced as the
+// same model.
+export const priceKey = (model: string) => model.replace(/^(?:[a-z]{2,6}\.)?anthropic\./, "");
+
+export interface RunUsage {
+  model: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+}
+
+// One run's USD cost at a model's prices. inputTokens counts every input
+// token; the cached share is priced at the cache rates instead.
+export function runCost(r: RunUsage, p: { inputPer: number; outputPer: number }) {
+  const read = r.cacheReadTokens ?? 0;
+  const write = r.cacheWriteTokens ?? 0;
+  const plain = Math.max(0, (r.inputTokens ?? 0) - read - write);
+  return (plain * p.inputPer + write * p.inputPer * CACHE_WRITE_RATE + read * p.inputPer * CACHE_READ_RATE + (r.outputTokens ?? 0) * p.outputPer) / 1_000_000;
+}
+
 // USD cost of AI runs at the stored model prices; runs on models without a
 // price (local models, or ones nobody priced) count as zero.
-export async function aiCostOf(runs: Array<{ model: string | null; inputTokens: number | null; outputTokens: number | null }>) {
+export async function aiCostOf(runs: RunUsage[]) {
   const prices = new Map((await loadModelPrices()).map((p) => [p.model, p]));
   return runs.reduce((sum, r) => {
-    const p = r.model ? prices.get(r.model) : undefined;
-    return p ? sum + ((r.inputTokens ?? 0) * p.inputPer + (r.outputTokens ?? 0) * p.outputPer) / 1_000_000 : sum;
+    const p = r.model ? (prices.get(r.model) ?? prices.get(priceKey(r.model))) : undefined;
+    return p ? sum + runCost(r, p) : sum;
   }, 0);
 }
 

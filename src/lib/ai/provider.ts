@@ -3,16 +3,33 @@ import type { z } from "zod";
 import type { ProviderKind } from "@/lib/ai/catalog";
 
 // The seam between HELIOS's agents and whatever model runs them: Claude
-// online today, a local OpenAI-compatible server (Ollama, LM Studio, vLLM)
-// for offline deployments. Agents only ever ask for schema-validated
+// (Anthropic's API, or Claude in Amazon Bedrock), Azure OpenAI, or a local
+// OpenAI-compatible server (Ollama, LM Studio, vLLM) for offline
+// deployments. Agents only ever ask for schema-validated
 // structured output or plain text; a null provider means the built-in
 // deterministic engine handles that stage instead.
 
 export type Effort = "low" | "medium" | "high";
 
+// inputTokens is every input token the model read, cached or not; the
+// cache counts say how many of them were read from or written to the
+// prompt cache (they cost less and more than the rest, lib/pricing).
 export interface LlmUsage {
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+}
+
+// Adds one call's usage to a running total.
+export function addUsage(total: LlmUsage, add: LlmUsage): LlmUsage {
+  const sum = (a?: number, b?: number) => (a == null && b == null ? undefined : (a ?? 0) + (b ?? 0));
+  return { inputTokens: sum(total.inputTokens, add.inputTokens), outputTokens: sum(total.outputTokens, add.outputTokens), cacheReadTokens: sum(total.cacheReadTokens, add.cacheReadTokens), cacheWriteTokens: sum(total.cacheWriteTokens, add.cacheWriteTokens) };
+}
+
+// The AiRun columns for a usage.
+export function usageColumns(u: LlmUsage) {
+  return { inputTokens: u.inputTokens ?? null, outputTokens: u.outputTokens ?? null, cacheReadTokens: u.cacheReadTokens ?? null, cacheWriteTokens: u.cacheWriteTokens ?? null };
 }
 
 export interface LlmResult<T> {

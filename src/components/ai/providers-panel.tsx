@@ -7,7 +7,7 @@ import { Cloud, HardDrive, Loader2, Pencil, Plus, PlugZap, Star, Trash2 } from "
 import { toast } from "sonner";
 
 import { deleteProviderAction, saveProviderAction, setDefaultProviderAction, setProviderEnabledAction, testProviderAction } from "@/app/(app)/ai/actions";
-import { PROVIDER_PRESETS } from "@/lib/ai/catalog";
+import { KIND_LABEL, PROVIDER_PRESETS, type ProviderKind } from "@/lib/ai/catalog";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,9 @@ import { unwrap } from "@/lib/action-result";
 export interface ProviderView {
   id: string;
   name: string;
-  kind: "anthropic" | "openai_compatible";
+  kind: ProviderKind;
   baseUrl: string | null;
+  region: string | null;
   model: string;
   isLocal: boolean;
   enabled: boolean;
@@ -42,17 +43,22 @@ interface Draft {
   id?: string;
   preset: string;
   name: string;
-  kind: "anthropic" | "openai_compatible";
+  kind: ProviderKind;
   baseUrl: string;
+  region: string;
   model: string;
   apiKey: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
   isLocal: boolean;
   isDefault: boolean;
 }
 
+const PRESET_OF_KIND: Record<ProviderKind, string> = { anthropic: "claude", bedrock: "bedrock", azure_openai: "azure", openai_compatible: "ollama" };
+
 function draftFromPreset(id: string): Draft {
   const p = PROVIDER_PRESETS.find((x) => x.id === id) ?? PROVIDER_PRESETS[0];
-  return { preset: p.id, name: p.label.replace(/ \(.*\)$/, ""), kind: p.kind, baseUrl: p.baseUrl ?? "", model: p.defaultModel, apiKey: "", isLocal: p.isLocal, isDefault: false };
+  return { preset: p.id, name: p.label.replace(/ \(.*\)$/, ""), kind: p.kind, baseUrl: p.baseUrl ?? "", region: p.region ?? "", model: p.defaultModel, apiKey: "", awsAccessKeyId: "", awsSecretAccessKey: "", isLocal: p.isLocal, isDefault: false };
 }
 
 export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
@@ -65,7 +71,14 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
   };
 
   const save = useMutation({
-    mutationFn: (d: Draft) => unwrap(saveProviderAction({ id: d.id, name: d.name, kind: d.kind, baseUrl: d.baseUrl, model: d.model, apiKey: d.apiKey || undefined, isLocal: d.isLocal, isDefault: d.isDefault })),
+    mutationFn: (d: Draft) =>
+      unwrap(
+        saveProviderAction({
+          id: d.id, name: d.name, kind: d.kind, baseUrl: d.baseUrl, region: d.region, model: d.model,
+          apiKey: d.apiKey || undefined, awsAccessKeyId: d.awsAccessKeyId || undefined, awsSecretAccessKey: d.awsSecretAccessKey || undefined,
+          isLocal: d.isLocal, isDefault: d.isDefault,
+        }),
+      ),
     onSuccess: () => {
       setDraft(null);
       refresh("Provider saved");
@@ -112,12 +125,13 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
             <div className="min-w-0 flex-1">
               <p className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                 {p.name}
-                <Badge variant={p.isLocal ? "info" : "soft"}>{p.isLocal ? "Local / offline" : "Online"}</Badge>
+                <Badge variant={p.isLocal ? "info" : "soft"}>{p.isLocal ? "Local / offline" : KIND_LABEL[p.kind] ?? "Online"}</Badge>
                 {p.isDefault && <Badge variant="default"><Star /> Default</Badge>}
               </p>
               <p className="truncate text-xs text-muted-foreground">
                 <code>{p.model}</code>
                 {p.baseUrl ? ` · ${p.baseUrl}` : ""}
+                {p.region ? ` · ${p.region}` : ""}
                 {p.hasKey ? " · key stored (encrypted)" : ""}
                 {p.usedBy ? ` · ${p.usedBy} agent profile${p.usedBy === 1 ? "" : "s"}` : ""}
               </p>
@@ -142,7 +156,7 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
                   size="icon"
                   variant="ghost"
                   aria-label="Edit"
-                  onClick={() => setDraft({ id: p.id, preset: p.kind === "anthropic" ? "claude" : "ollama", name: p.name, kind: p.kind, baseUrl: p.baseUrl ?? "", model: p.model, apiKey: "", isLocal: p.isLocal, isDefault: p.isDefault })}
+                  onClick={() => setDraft({ id: p.id, preset: PRESET_OF_KIND[p.kind] ?? "ollama", name: p.name, kind: p.kind, baseUrl: p.baseUrl ?? "", region: p.region ?? "", model: p.model, apiKey: "", awsAccessKeyId: "", awsSecretAccessKey: "", isLocal: p.isLocal, isDefault: p.isDefault })}
                 >
                   <Pencil />
                 </Button>
@@ -179,16 +193,24 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
                 <Label>Name</Label>
                 <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
               </div>
-              {draft.kind === "openai_compatible" && (
+              {(draft.kind === "openai_compatible" || draft.kind === "azure_openai") && (
                 <div className="grid gap-1.5">
-                  <Label>Base URL (OpenAI-compatible /v1)</Label>
-                  <Input value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} type="url" aria-describedby="provider-url-hint" />
-                  <p id="provider-url-hint" className="text-[11px] text-muted-foreground">The server&apos;s OpenAI-compatible base URL (ending in /v1). Picking a preset fills in its default.</p>
+                  <Label htmlFor="provider-url">{draft.kind === "azure_openai" ? "Endpoint" : "Base URL (OpenAI-compatible /v1)"}</Label>
+                  <Input id="provider-url" value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} type="url" aria-describedby="provider-url-hint" />
+                  <p id="provider-url-hint" className="text-[11px] text-muted-foreground">
+                    {draft.kind === "azure_openai" ? "The resource's endpoint from the Azure portal (https://NAME.openai.azure.com); HELIOS calls its /openai/v1 API." : "The server's OpenAI-compatible base URL (ending in /v1). Picking a preset fills in its default."}
+                  </p>
+                </div>
+              )}
+              {draft.kind === "bedrock" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="provider-region">AWS region</Label>
+                  <Input id="provider-region" value={draft.region} onChange={(e) => setDraft({ ...draft, region: e.target.value })} placeholder="ap-south-1" />
                 </div>
               )}
               <div className="grid gap-1.5">
-                <Label>Model</Label>
-                <Input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} list="model-suggestions" />
+                <Label htmlFor="provider-model">{draft.kind === "azure_openai" ? "Deployment name" : "Model"}</Label>
+                <Input id="provider-model" value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} list="model-suggestions" />
                 <datalist id="model-suggestions">
                   {(preset?.models ?? []).map((m) => (
                     <option key={m} value={m} />
@@ -196,9 +218,35 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
                 </datalist>
               </div>
               <div className="grid gap-1.5">
-                <Label>{draft.kind === "anthropic" ? "Anthropic API key" : "API key (optional)"}</Label>
-                <Input type="password" value={draft.apiKey} onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })} placeholder={draft.id ? "Leave blank to keep the stored key" : draft.kind === "anthropic" ? "sk-ant-…" : "Only if your server requires one"} autoComplete="off" />
+                <Label htmlFor="provider-key">{draft.kind === "anthropic" ? "Anthropic API key" : draft.kind === "bedrock" ? "Bedrock API key" : draft.kind === "azure_openai" ? "API key" : "API key (optional)"}</Label>
+                <Input
+                  id="provider-key"
+                  type="password"
+                  value={draft.apiKey}
+                  onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
+                  placeholder={draft.id ? "Leave blank to keep the stored key" : draft.kind === "anthropic" ? "sk-ant-…" : draft.kind === "bedrock" ? "Or use an access key below, or neither for the server's AWS role" : draft.kind === "azure_openai" ? "The resource's key" : "Only if your server requires one"}
+                  autoComplete="off"
+                />
               </div>
+              {draft.kind === "bedrock" && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="provider-aws-id">Access key ID</Label>
+                    <Input id="provider-aws-id" value={draft.awsAccessKeyId} onChange={(e) => setDraft({ ...draft, awsAccessKeyId: e.target.value })} autoComplete="off" placeholder="AKIA…" />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="provider-aws-secret">Secret access key</Label>
+                    <Input id="provider-aws-secret" type="password" value={draft.awsSecretAccessKey} onChange={(e) => setDraft({ ...draft, awsSecretAccessKey: e.target.value })} autoComplete="off" />
+                  </div>
+                </div>
+              )}
+              {draft.kind !== "bedrock" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="provider-region">Region (optional)</Label>
+                  <Input id="provider-region" value={draft.region} onChange={(e) => setDraft({ ...draft, region: e.target.value })} placeholder="india, eu, centralindia…" aria-describedby="provider-region-hint" />
+                  <p id="provider-region-hint" className="text-[11px] text-muted-foreground">Where inference runs. Clients whose rulebook locks AI to a region only get providers that name it.</p>
+                </div>
+              )}
               {draft.kind === "openai_compatible" && (
                 <label className="flex items-center gap-2 text-sm">
                   <Switch checked={draft.isLocal} onCheckedChange={(v) => setDraft({ ...draft, isLocal: v })} />

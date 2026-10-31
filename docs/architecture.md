@@ -155,7 +155,33 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
    4. then the environment's Claude key;
    5. finally the built-in deterministic engine.
 
-   Providers are `anthropic.ts` (structured outputs, server-side refusal fallback) and `openai-compatible.ts` (Ollama, LM Studio, vLLM; JSON-schema output, validated, one retry).
+   Provider kinds (`ai_providers.kind`):
+   - **`anthropic`**: Claude on Anthropic's API (`anthropic.ts`). Structured outputs and server-side refusal fallback (not on Haiku).
+   - **`bedrock`**: Claude in the client's or the MSSP's own AWS account (`bedrockProvider`, through `@anthropic-ai/bedrock-sdk`'s `AnthropicBedrockMantle`, `https://bedrock-mantle.{region}.api.aws/anthropic`).
+     - **Region:** `ai_providers.region` is the AWS region it calls, so an India-locked client can run on `ap-south-1`.
+     - **Credentials:** a Bedrock API key (bearer) or an access key pair (SigV4), stored sealed as JSON. With neither, a platform provider uses the server's own AWS identity (IAM role, `AWS_*`); a client's provider must bring its own.
+     - **Models:** `anthropic.`-prefixed IDs, Claude 4.7 and later only. HELIOS's SDK sends API version 2026-10-21, which Bedrock accepts only for those.
+     - **Not on Bedrock:** server-side fallback and the models API. The connection test is a 64-token request.
+   - **`azure_openai`**: the client's Azure OpenAI resource through its `/openai/v1` API (`openai-compatible.ts` with `azure: true`).
+     - **Auth and model:** the key goes in an `api-key` header; the model is the deployment's name.
+     - **Schemas:** Azure enforces strict JSON schemas only in OpenAI's subset, so the schema is sent non-strict and the reply is checked with Zod.
+     - **Connection test:** a short chat call, because Azure's model list doesn't name deployments.
+   - **`openai_compatible`**: Ollama, LM Studio, vLLM, llama.cpp, or the HELIOS AI box (`deploy/edge-ai`). JSON-schema output, validated, one retry.
+
+   **Prompt caching.** Every Claude request marks the end of its system prompt with `cache_control`. Tools render before the mark, so they're cached too. A case's evidence comes after the mark, so it is never part of the cached prefix.
+   - **When it pays:** the next case within a few minutes reads the agent's instructions from cache. Prompts shorter than the model's minimum just aren't cached.
+   - **Investigation agent:** also uses automatic caching of its growing transcript.
+   - **OpenAI-style servers:** they cache on their own and report it as `cached_tokens`.
+   - **Recording:** each `AiRun` stores `cacheReadTokens` and `cacheWriteTokens` beside `inputTokens` (which counts every input token).
+   - **Cost:** `runCost` prices cache reads at 0.1× and writes at 1.25× the input price. `priceKey` prices `anthropic.claude-…` (Bedrock) as the same model.
+   - **AI page:** shows the share of input tokens read from cache.
+
+   **A client's own endpoint.** A client admin types the address of an OpenAI-compatible or Azure provider. HELIOS calls it through `publicFetch`: https only, public addresses only, no redirects. So it can't be pointed at the metadata endpoint or the MSSP's network. An operator running HELIOS inside the client's network allows private addresses with `HELIOS_ALLOW_PRIVATE_CLIENT_AI=1`.
+
+   **The HELIOS AI box** (`deploy/edge-ai`): Ollama (or vLLM) behind Caddy, on the client's own hardware, for clients whose rulebook allows on-premises AI only.
+   - **Caddy's job:** it terminates TLS and passes on only `POST /v1/chat/completions` and `GET /v1/models`, with the box's key as a bearer token, and bodies up to 8 MB.
+   - **Everything else is refused (401):** including Ollama's own API (pull, delete).
+   - **Tested:** the Caddyfile was run against a stand-in model server, checking the key, the wrong-key, path, method and size cases.
 5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, AI safety, kill switch, circuit breaker, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
 
 ### Investigation agent (`lib/ai/investigator`)
@@ -218,6 +244,7 @@ For a client, `resolveAgent(key, { tenantId, userId, severity })` resolves the m
 
 - **Record:** the resolution, including what was skipped and why, is stored on every `AiRun` with its `tenantId`.
 - **Masking:** with masking on, `redact.ts` turns hosts, accounts, emails and IPs into tokens before a cloud model sees the evidence, and restores them in the answer. Grounding then runs on the restored values.
+- **Regions:** a rule's region is a jurisdiction or a cloud region (`lib/regions.ts`). "india" is satisfied by `ap-south-1`, `centralindia` or `asia-south1`; "eu" by `eu-central-1` or `swedencentral`; "us" by `us-east-1` or `eastus2`.
 - **Budget:** each client has a monthly budget (`tenant_ai_policies`). The SOC manager is alerted at 80%. At 100%, low- and medium-severity cases use the built-in engine. Runs on the client's own key aren't counted.
 - **Evaluation cap:** a model the client or a user picked that has no passing `model_capabilities` score for that agent only suggests.
 

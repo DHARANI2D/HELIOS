@@ -1,0 +1,74 @@
+# The HELIOS AI box: a model server on the client's own hardware, so the
+# AI agents analyse that client's telemetry without it leaving their site.
+# Ollama serves the model; Caddy in front of it terminates TLS and lets
+# through only HELIOS's two calls (chat completions and the model list),
+# only with the box's key. See README.md.
+#
+#   cp .env.example .env   # set AI_BOX_HOST, AI_BOX_KEY, AI_BOX_MODEL
+#   docker compose up -d
+#   docker compose run --rm pull          # download the model once
+#
+# NVIDIA GPU:  docker compose -f compose.yml -f compose.gpu.yml up -d
+# vLLM instead of Ollama:  AI_BOX_UPSTREAM=vllm:8000 and --profile vllm
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+      # Long cases: room for the evidence and the reply.
+      OLLAMA_CONTEXT_LENGTH: "32768"
+    volumes:
+      - models:/root/.ollama
+    # Not published: only Caddy reaches it.
+    expose:
+      - "11434"
+
+  pull:
+    image: ollama/ollama:latest
+    profiles: ["tools"]
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["ollama", "pull", "${AI_BOX_MODEL:-qwen2.5:14b}"]
+    depends_on: [ollama]
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    profiles: ["vllm"]
+    restart: unless-stopped
+    command: ["--model", "${AI_BOX_VLLM_MODEL:-Qwen/Qwen2.5-14B-Instruct}", "--served-model-name", "${AI_BOX_MODEL:-qwen2.5-14b}", "--max-model-len", "32768", "--enable-auto-tool-choice", "--tool-call-parser", "hermes"]
+    environment:
+      HUGGING_FACE_HUB_TOKEN: "${HUGGING_FACE_HUB_TOKEN:-}"
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    expose:
+      - "8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      AI_BOX_HOST: "${AI_BOX_HOST:?set AI_BOX_HOST in .env}"
+      AI_BOX_KEY: "${AI_BOX_KEY:?set AI_BOX_KEY in .env}"
+      AI_BOX_UPSTREAM: "${AI_BOX_UPSTREAM:-ollama:11434}"
+      AI_BOX_TLS: "${AI_BOX_TLS:-}"
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [ollama]
+
+volumes:
+  models:
+  hf-cache:
+  caddy-data:

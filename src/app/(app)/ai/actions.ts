@@ -16,6 +16,7 @@ import { anthropicProvider } from "@/lib/ai/anthropic";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
 import { startEvaluation } from "@/lib/ai/evals/service";
 import { action } from "@/lib/action";
+import { providerColumns, providerInputSchema, providerSecret, type ProviderInput } from "@/lib/ai/provider-input";
 
 function revalidate() {
   revalidatePath("/ai");
@@ -48,38 +49,25 @@ export const setKillSwitchAction = action(async function setKillSwitchAction(on:
   revalidate();
 });
 
-const providerSchema = z.object({
-  id: z.string().optional(),
-  name: z.string().trim().min(2).max(80),
-  kind: z.enum(["anthropic", "openai_compatible"]),
-  baseUrl: z.string().trim().url().max(300).optional().or(z.literal("")),
-  model: z.string().trim().min(1).max(120),
-  apiKey: z.string().trim().max(400).optional(),
-  isLocal: z.boolean(),
-  isDefault: z.boolean(),
-});
+const providerSchema = z.object({ isDefault: z.boolean().default(false) });
 
-export const saveProviderAction = action(async function saveProviderAction(input: z.input<typeof providerSchema>) {
+export const saveProviderAction = action(async function saveProviderAction(input: ProviderInput & { isDefault?: boolean }) {
   const user = await requirePermission("ai.configure");
-  const p = providerSchema.parse(input);
-  if (p.kind === "openai_compatible" && !p.baseUrl) throw new Error("Local / OpenAI-compatible providers need a base URL");
-  if (p.baseUrl && !/^https?:\/\//.test(p.baseUrl)) throw new Error("Base URL must be http(s)");
+  const p = providerInputSchema.parse(input);
+  const { isDefault } = providerSchema.parse(input);
+  const secret = providerSecret(p);
   const data = {
-    name: p.name,
-    kind: p.kind,
-    baseUrl: p.kind === "anthropic" ? null : p.baseUrl || null,
-    model: p.model,
-    isLocal: p.kind === "openai_compatible" ? p.isLocal : false,
+    ...providerColumns(p),
     // A blank key on edit keeps the stored one.
-    ...(p.apiKey ? { apiKeyCipher: seal(p.apiKey) } : {}),
+    ...(secret ? { apiKeyCipher: seal(secret) } : {}),
   };
   if (p.id && !(await db.aiProvider.count({ where: { id: p.id, tenantId: null } }))) throw new Error("Not found");
   const saved = p.id ? await db.aiProvider.update({ where: { id: p.id }, data }) : await db.aiProvider.create({ data });
-  if (p.isDefault) {
+  if (isDefault) {
     await db.aiProvider.updateMany({ where: { id: { not: saved.id }, tenantId: null }, data: { isDefault: false } });
     await db.aiProvider.update({ where: { id: saved.id }, data: { isDefault: true } });
   }
-  await logAction({ actorId: user.id, action: p.id ? "ai.provider_updated" : "ai.provider_added", detail: { providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, isLocal: saved.isLocal, keyChanged: !!p.apiKey } });
+  await logAction({ actorId: user.id, action: p.id ? "ai.provider_updated" : "ai.provider_added", detail: { providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, isLocal: saved.isLocal, region: saved.region, keyChanged: !!secret } });
   revalidate();
   return { id: saved.id };
 });

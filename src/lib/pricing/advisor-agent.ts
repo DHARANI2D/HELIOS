@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { db } from "@/lib/db";
 import { resolveAgent } from "@/lib/ai/resolve";
+import { usageColumns } from "@/lib/ai/provider";
 import { getCategory, toolLabel } from "@/lib/integrations/catalog";
 import { formatMoney, normalizeConfig, toolMonthlyPrice, type PricingContext, type QuoteConfig } from "@/lib/pricing/calculator";
 import { ADVISOR_GOALS, adviseStack, type Advice, type AdvisorGoal } from "@/lib/pricing/advisor";
@@ -179,8 +180,7 @@ async function logRun(a: AiAdvice, opts: { trigger: string; requestedById?: stri
         output: { goal: a.goal, changes: a.changes, summary: a.summary, discarded: a.discarded },
         error: a.error ?? null,
         durationMs,
-        inputTokens: usage.inputTokens ?? null,
-        outputTokens: usage.outputTokens ?? null,
+        ...usageColumns(usage),
         requestedById: opts.requestedById ?? null,
       },
     })

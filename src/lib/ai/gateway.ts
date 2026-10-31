@@ -4,6 +4,7 @@ import type { z } from "zod";
 import { db } from "@/lib/db";
 import { notify, staffFor } from "@/lib/notifications";
 import { severityRank } from "@/lib/severity";
+import { regionSatisfies } from "@/lib/regions";
 import type { AgentKey } from "@/lib/ai/catalog";
 import type { AgentRequest, AgentSession, LlmProvider, StructuredRequest, TextRequest } from "@/lib/ai/provider";
 import { Redactor, type KnownEntities } from "@/lib/ai/redact";
@@ -63,7 +64,7 @@ export function whyNot(c: Candidate, tenantId: string, rules: DataRules | null):
   if (rules.residency === "onprem" && !c.isLocal) return "the client allows on-premises models only";
   if (rules.residency === "region") {
     if (c.isLocal) return null;
-    if (!c.region || !rules.regions.map((r) => r.toLowerCase()).includes(c.region.toLowerCase())) {
+    if (!rules.regions.some((r) => regionSatisfies(c.region, r))) {
       return `runs ${c.region ? `in ${c.region}` : "in an unstated region"}; the client requires ${rules.regions.join(" or ") || "a named region"}`;
     }
   }
@@ -92,7 +93,7 @@ export function monthKey(now: Date) {
 // the client's own key are billed to them directly and don't count).
 export async function clientAiSpend(tenantId: string, now = new Date()) {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const runs = await db.aiRun.findMany({ where: { tenantId, createdAt: { gte: start } }, select: { model: true, inputTokens: true, outputTokens: true, resolution: true } });
+  const runs = await db.aiRun.findMany({ where: { tenantId, createdAt: { gte: start } }, select: { model: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, resolution: true } });
   const billable = runs.filter((r) => !(r.resolution && typeof r.resolution === "object" && (r.resolution as { clientKey?: boolean }).clientKey));
   const { aiCostOf } = await import("@/lib/pricing/service");
   return { spent: await aiCostOf(billable), runs: runs.length, clientKeyRuns: runs.length - billable.length };

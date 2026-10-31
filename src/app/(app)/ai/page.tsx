@@ -8,7 +8,7 @@ import { pageGuard } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { aiSettings } from "@/lib/settings";
 import { caseVisibility } from "@/lib/access";
-import { AGENT_KEYS, AGENT_TYPES } from "@/lib/ai/catalog";
+import { AGENT_KEYS, AGENT_TYPES, type ProviderKind } from "@/lib/ai/catalog";
 import { aiCostOf } from "@/lib/pricing/service";
 import { envClaudeAvailable, loadProfile, resolveProvider } from "@/lib/ai/resolve";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
@@ -62,7 +62,7 @@ async function loadAiPage(visibility: ReturnType<typeof caseVisibility>) {
   const [settings, providers, runs, recent, feedback, executed, blocked, profilesUsage] = await Promise.all([
     aiSettings(),
     db.aiProvider.findMany({ where: { tenantId: null }, orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }], include: { _count: { select: { agents: true } } } }),
-    db.aiRun.findMany({ where: allRuns, select: { model: true, inputTokens: true, outputTokens: true, agentKey: true, status: true } }),
+    db.aiRun.findMany({ where: allRuns, select: { model: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, agentKey: true, status: true } }),
     db.aiRun.findMany({ where: { case: visibility }, orderBy: { createdAt: "desc" }, take: 30, include: { case: { select: { id: true, title: true, tenant: { select: { name: true } } } } } }),
     db.aiRun.groupBy({ by: ["feedback"], where: { ...runScope, feedback: { not: null } }, _count: { _all: true } }),
     db.responseAction.count({ where: { source: "ai", status: "EXECUTED", createdAt: { gte: since }, case: visibility } }),
@@ -89,6 +89,11 @@ export default async function AiPage() {
   const disagree = feedback.find((f) => f.feedback === "disagree")?._count._all ?? 0;
   const agreement = agree + disagree ? Math.round((agree / (agree + disagree)) * 100) : null;
   const fallbacks = runs.filter((r) => r.status === "fallback").length;
+  // Share of input tokens read from the prompt cache (agent instructions
+  // reused across cases).
+  const inputTotal = runs.reduce((n, r) => n + (r.inputTokens ?? 0), 0);
+  const cacheRead = runs.reduce((n, r) => n + (r.cacheReadTokens ?? 0), 0);
+  const cacheShare = inputTotal ? Math.round((cacheRead / inputTotal) * 100) : null;
   const runsByAgent = new Map(profilesUsage.map((p) => [p.agentKey, p._count._all]));
   const providerOptions = providers.filter((p) => p.enabled).map((p) => ({ id: p.id, name: p.name, model: p.model, isLocal: p.isLocal }));
 
@@ -137,7 +142,7 @@ export default async function AiPage() {
         <StatTile label="Analyst agreement" value={agreement == null ? "—" : `${agreement}%`} icon={ThumbsUp} />
         <StatTile label="Auto-contained (30d)" value={executed} icon={ShieldCheck} />
         <StatTile label="Blocked by guardrails" value={blocked} icon={ShieldBan} tone={blocked > 0 ? "warning" : "default"} />
-        <StatTile label="Model spend (30d, est.)" value={`$${spend.toFixed(2)}`} icon={CircleDollarSign} />
+        <StatTile label="Model spend (30d, est.)" value={`$${spend.toFixed(2)}`} icon={CircleDollarSign} hint={cacheShare != null ? `${cacheShare}% of input tokens read from the prompt cache` : undefined} />
       </div>
 
       <Card>
@@ -167,8 +172,9 @@ export default async function AiPage() {
             providers={providers.map((p) => ({
               id: p.id,
               name: p.name,
-              kind: p.kind as "anthropic" | "openai_compatible",
+              kind: p.kind as ProviderKind,
               baseUrl: p.baseUrl,
+              region: p.region,
               model: p.model,
               isLocal: p.isLocal,
               enabled: p.enabled,

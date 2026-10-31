@@ -13,6 +13,7 @@ import { investigate } from "@/lib/ai/investigator/run";
 import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
 import { withRedaction } from "@/lib/ai/gateway";
 import { analyzeCase, runReportAgent, type CaseAnalysis } from "@/lib/ai/agents";
+import { usageColumns } from "@/lib/ai/provider";
 import { SEVERITY_FROM_AI, storedTriage, type TriageOutput } from "@/lib/ai/triage";
 import { decideResponse } from "@/lib/response/policy";
 import { rulebookVerdict } from "@/lib/rulebook/service";
@@ -115,7 +116,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
         data: {
           caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
           output: { markdown: outcome.output }, error: outcome.error, durationMs: outcome.durationMs,
-          inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens, requestedById: opts.requestedBy?.id,
+          ...usageColumns(outcome.usage), requestedById: opts.requestedBy?.id,
         },
       });
       await db.caseComment.create({
@@ -136,7 +137,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
         data: {
           caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: result.engine, model: result.model, isLocal: result.isLocal, status: result.status,
           confidence: result.output.confidence, output: JSON.parse(JSON.stringify({ ...result.output, steps: result.steps })), grounding: JSON.parse(JSON.stringify(result.report)),
-          error: result.error, durationMs: result.durationMs, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, requestedById: opts.requestedBy?.id,
+          error: result.error, durationMs: result.durationMs, ...usageColumns(result.usage), requestedById: opts.requestedBy?.id,
         },
       });
       const modelCap = resolved.autonomyCap && result.engine !== "built-in" ? { autonomy: resolved.autonomyCap, reason: resolution?.capReason ?? "Model not evaluated" } : null;
@@ -161,7 +162,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
       data: {
         caseId, ...runScope, agentKey: key, trigger: opts.trigger, engine: outcome.engine, model: outcome.model, isLocal: outcome.isLocal, status: outcome.status,
         confidence: output.confidence, output: JSON.parse(JSON.stringify(output)), grounding: JSON.parse(JSON.stringify(report)),
-        error: outcome.error, durationMs: outcome.durationMs, inputTokens: outcome.usage.inputTokens, outputTokens: outcome.usage.outputTokens,
+        error: outcome.error, durationMs: outcome.durationMs, ...usageColumns(outcome.usage),
         requestedById: opts.requestedBy?.id,
       },
     });
@@ -380,6 +381,6 @@ async function applyTriage(
 }
 
 export async function aiSpend(since: Date) {
-  const runs = await db.aiRun.findMany({ where: { createdAt: { gte: since } }, select: { model: true, inputTokens: true, outputTokens: true } });
+  const runs = await db.aiRun.findMany({ where: { createdAt: { gte: since } }, select: { model: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true } });
   return aiCostOf(runs);
 }

@@ -18,7 +18,7 @@ import { completeManualAction, decideResponseAction, performResponseAction, reco
 import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook } from "@/lib/rulebook/service";
 import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { resolveForClient } from "@/lib/ai/gateway";
-import { loadProfile } from "@/lib/ai/resolve";
+import { loadProfile, providerFromRow } from "@/lib/ai/resolve";
 import { runAgentOnCase } from "@/lib/ai/first-response";
 import { runEvaluation, startEvaluation } from "@/lib/ai/evals/service";
 import { GOLDEN } from "@/lib/ai/evals/golden";
@@ -61,7 +61,7 @@ import * as casesRoute from "@/app/api/v1/cases/route";
 import * as caseRoute from "@/app/api/v1/cases/[id]/route";
 import * as commentsRoute from "@/app/api/v1/cases/[id]/comments/route";
 import { calculateQuote } from "@/lib/pricing/calculator";
-import { loadPricingContext } from "@/lib/pricing/service";
+import { aiCostOf, loadPricingContext } from "@/lib/pricing/service";
 import { clientStackConfig } from "@/lib/pricing/client-stack";
 import { createQuote } from "@/lib/pricing/quotes";
 import { reviewUpgrades } from "@/lib/pricing/upgrades";
@@ -444,11 +444,26 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await db.tenantAiPolicy.create({ data: { tenantId: other.id, defaults: { triage: own.id } } });
     expect((await resolveForClient("triage", profile, { tenantId: other.id })).resolution).toMatchObject({ providerId: cloud.id });
 
+    // Claude in the client's own AWS account in Mumbai satisfies "india";
+    // without its own credentials it never borrows the server's AWS role.
+    const bedrock = await db.aiProvider.create({ data: { name: "Test · AI choice · Bedrock", kind: "bedrock", model: "anthropic.claude-sonnet-5-5", region: "ap-south-1", tenantId: tenant.id, apiKeyCipher: await sealFor(tenant.id, JSON.stringify({ apiKey: "test-bedrock-key" })) } });
+    await db.tenantAiPolicy.update({ where: { tenantId: tenant.id }, data: { defaults: { triage: bedrock.id } } });
+    const viaBedrock = await resolveForClient("triage", profile, { tenantId: tenant.id });
+    expect(viaBedrock.resolution).toMatchObject({ source: "client", providerId: bedrock.id, clientKey: true, redacted: true });
+    expect(viaBedrock.provider).toMatchObject({ kind: "bedrock", model: "anthropic.claude-sonnet-5-5", isLocal: false });
+    await db.aiProvider.update({ where: { id: bedrock.id }, data: { apiKeyCipher: null } });
+    await expect(providerFromRow(await db.aiProvider.findUniqueOrThrow({ where: { id: bedrock.id } }))).rejects.toThrow("has no AWS credentials");
+    const usEast = await db.aiProvider.update({ where: { id: bedrock.id }, data: { region: "us-east-1" } });
+    expect((await resolveForClient("triage", profile, { tenantId: tenant.id })).resolution.skipped).toEqual(expect.arrayContaining([{ name: usEast.name, source: "client", why: "runs in us-east-1; the client requires india" }]));
+
     // Over budget: low-severity work moves to the built-in engine; client-key runs aren't counted.
     await db.tenantAiPolicy.update({ where: { tenantId: tenant.id }, data: { defaults: {}, monthlyBudgetUsd: 0.01 } });
     await saveDraft(tenant.id, { body: {}, reason: "Any provider" }, author);
     await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
     await db.aiModelPrice.upsert({ where: { model: "claude-sonnet-5-5" }, update: {}, create: { model: "claude-sonnet-5-5", provider: "anthropic", inputPer: 3, outputPer: 15, source: "test" } });
+    // Cache reads cost a tenth; Bedrock's model ID is priced as the same model.
+    const sonnet = await db.aiModelPrice.findUniqueOrThrow({ where: { model: "claude-sonnet-5-5" } });
+    expect(await aiCostOf([{ model: "anthropic.claude-sonnet-5-5", inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 1_000_000 }])).toBeCloseTo(sonnet.inputPer * 0.1);
     await db.aiRun.create({ data: { tenantId: tenant.id, agentKey: "triage", trigger: "auto", engine: "Test cloud", model: "claude-sonnet-5-5", status: "succeeded", inputTokens: 100_000, outputTokens: 10_000 } });
     expect((await resolveForClient("triage", profile, { tenantId: tenant.id, severity: "LOW" })).resolution.source).toBe("builtin");
     expect((await resolveForClient("triage", profile, { tenantId: tenant.id, severity: "CRITICAL" })).resolution.source).toBe("platform");

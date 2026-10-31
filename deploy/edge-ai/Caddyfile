@@ -1,0 +1,31 @@
+# Only HELIOS's calls, only with the box's key; everything else is refused.
+# With a public DNS name Caddy gets a certificate on its own (ports 80 and
+# 443 reachable for the ACME challenge); set AI_BOX_TLS to "tls internal" for a
+# private name and give HELIOS the CA (see README.md).
+{$AI_BOX_HOST} {
+	{$AI_BOX_TLS}
+
+	@helios {
+		method GET POST
+		path /v1/chat/completions /v1/models
+		header Authorization "Bearer {$AI_BOX_KEY}"
+	}
+	handle @helios {
+		request_body {
+			max_size 8MB
+		}
+		reverse_proxy {$AI_BOX_UPSTREAM} {
+			transport http {
+				read_timeout 5m
+			}
+		}
+	}
+	handle {
+		respond "Not allowed" 401
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -24,6 +24,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^1.1.0",
     "@anthropic-ai/sdk": "^1.2.0",
     "@auth/prisma-adapter": "^2.11.3",
     "@kenjiuno/msgreader": "1.28.0",
