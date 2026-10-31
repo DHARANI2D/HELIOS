@@ -3,6 +3,7 @@ import type { CaseSeverity, CaseSource, DetectionSource, Prisma, SecurityDomain,
 import { db } from "@/lib/db";
 import { findRelatedCases } from "@/lib/cases/related";
 import { escapeUntrusted } from "@/lib/ai/safety";
+import { describeGeo, storedGeo, type GeoInfo } from "@/lib/geoip";
 
 // Everything an AI agent may base a conclusion on, with a short reference id
 // per item (D3 = third detection, E12 = twelfth event, I2 = second
@@ -120,6 +121,10 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
         e.destIp && `dst=${e.destIp}${e.destPort ? `:${e.destPort}` : ""}`,
         e.filePath && `file=${e.filePath}`,
         e.fileHash && `sha256=${e.fileHash}`,
+        // Where the addresses are (the server's GeoIP database), else the
+        // country the source gave.
+        describeGeo(storedGeo(e.metadata, "src") as GeoInfo | null) ? `src_geo=${describeGeo(storedGeo(e.metadata, "src") as GeoInfo)}` : e.geo && `geo=${e.geo}`,
+        describeGeo(storedGeo(e.metadata, "dst") as GeoInfo | null) && `dst_geo=${describeGeo(storedGeo(e.metadata, "dst") as GeoInfo)}`,
       ].filter(Boolean);
       refs.push({ ref: `E${i + 1}`, kind: "event", text: parts.join(" ") });
     });

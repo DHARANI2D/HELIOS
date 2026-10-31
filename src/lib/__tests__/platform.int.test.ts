@@ -62,6 +62,8 @@ import * as caseRoute from "@/app/api/v1/cases/[id]/route";
 import * as commentsRoute from "@/app/api/v1/cases/[id]/comments/route";
 import { calculateQuote } from "@/lib/pricing/calculator";
 import { aiCostOf, loadPricingContext } from "@/lib/pricing/service";
+import { storedGeo } from "@/lib/geoip";
+import { testAsnDb, testCityDb } from "@/lib/__tests__/fixtures/mmdb-builder";
 import { clientStackConfig } from "@/lib/pricing/client-stack";
 import { createQuote } from "@/lib/pricing/quotes";
 import { reviewUpgrades } from "@/lib/pricing/upgrades";
@@ -410,6 +412,31 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     const allowed = await ingestTelemetry(scan("10.9.9.9"), { tenantId: tenant.id });
     expect(allowed).toMatchObject({ casesCreated: 0, casesUpdated: 0 });
     expect(allowed.allowlisted).toBeGreaterThan(0);
+  });
+
+  it("adds where addresses are to ingested events, and catches travel inside one country", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "helios-geoip-"));
+    await writeFileFs(path.join(dir, "city.mmdb"), testCityDb());
+    await writeFileFs(path.join(dir, "asn.mmdb"), testAsnDb());
+    process.env.HELIOS_GEOIP_CITY_DB = path.join(dir, "city.mmdb");
+    process.env.HELIOS_GEOIP_ASN_DB = path.join(dir, "asn.mmdb");
+    try {
+      const tenant = await db.tenant.create({ data: { name: "Test · GeoIP", slug: "test-geoip" } });
+      const t0 = Date.now() - 2 * 60 * 60 * 1000;
+      const login = (ip: string, minutes: number) => ({ source: "auth" as const, data: { user: "asha@geo.test", result: "SUCCESS", source_ip: ip, timestamp: new Date(t0 + minutes * 60_000).toISOString() } });
+      // Mumbai, then Delhi 30 minutes later: same country, ~1,100 km.
+      const r = await ingestTelemetry([login("198.51.100.7", 0), login("192.0.2.10", 30)], { tenantId: tenant.id });
+      const events = await db.securityEvent.findMany({ where: { tenantId: tenant.id }, orderBy: { timestamp: "asc" } });
+      expect(events.map((e) => e.geo)).toEqual(["IN", "IN"]);
+      expect(storedGeo(events[0].metadata)).toMatchObject({ city: "Mumbai", asn: 64500, asOrg: "Test Telecom India" });
+      expect(events[1].ocsf).toMatchObject({ src_endpoint: { ip: "192.0.2.10", location: { country: "IN", city: "Delhi" }, autonomous_system: { number: 64501 } } });
+      expect(r.casesCreated).toBe(1);
+      const travel = await db.detection.findFirstOrThrow({ where: { source: "GEO_VELOCITY", case: { tenantId: tenant.id } } });
+      expect(JSON.stringify(travel.evidence)).toMatch(/Mumbai, India and then Delhi, India/);
+    } finally {
+      delete process.env.HELIOS_GEOIP_CITY_DB;
+      delete process.env.HELIOS_GEOIP_ASN_DB;
+    }
   });
 
   it("chooses each client's AI model by its rules, key, evaluation and budget", async () => {

@@ -74,6 +74,13 @@ export function LookupForm() {
               <p>{result.cached ? "Served from 24h cache" : "Fresh lookup"}</p>
             </div>
           </div>
+          {result.geo && (
+            <p className="mt-3 text-sm">
+              <span className="text-xs text-muted-foreground">Location </span>
+              {result.geo}
+              {result.geoAttribution && <span className="ml-2 text-[11px] text-muted-foreground">{result.geoAttribution}</span>}
+            </p>
+          )}
           {result.reasons.length > 0 && (
             <ul className="mt-3 list-disc space-y-0.5 pl-5 text-sm">
               {result.reasons.map((r, i) => (

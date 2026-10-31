@@ -371,6 +371,22 @@ Logs arrive three ways, all into one durable queue:
 
 **OCSF.** Every stored event carries its OCSF 1.9 form (`security_events.ocsf`, `classUid`): Authentication, Account Change, Process, File System, Network, HTTP, DNS, API Activity, Detection Finding, or Base Event. Sources mapped OCSF-first derive the flat columns the detectors read from it (`columnsFromOcsf`). These are Windows events, syslog (CEF, OPNsense/pfSense filterlog, FortiGate and other key=value logs, OpenSSH), Entra sign-ins and audits, Okta, Google Workspace, CloudTrail, Google Cloud audit logs and the Azure Activity Log. The original telemetry adapters, uploaded investigation logs and governance decisions are written as columns, and their OCSF form is derived (`ocsfFromColumns`). Fields with no OCSF home stay in `metadata` (OCSF's `unmapped`). The source's own event id goes in `sourceEventId`, unique per integration, so a re-poll or resend is stored once. Syslog has no id, so its id is a hash of host, receive time and text. Windows fields are read by name when Fluent Bit sends `EventData`, otherwise by template position for Security events, and from the rendered message for Sysmon. Check positions against a lab forwarder before relying on a new event id.
 
+**GeoIP** (`lib/geoip.ts`). Locations come from MaxMind-format databases on the server's disk; no lookup leaves the machine.
+- **Databases:** `HELIOS_GEOIP_CITY_DB` takes GeoLite2/GeoIP2 City or Country, or DB-IP's IP-to-City Lite. `HELIOS_GEOIP_ASN_DB` takes GeoLite2-ASN or DB-IP's IP-to-ASN Lite. Both are optional.
+- **Updates:** a file replaced on disk (by geoipupdate or a monthly download) is picked up within a minute. A copy that can't be read is logged once, and the copy already loaded keeps serving.
+- **What lookups skip:** private and reserved addresses are never looked up.
+- **At ingest:** every event written (live telemetry and uploaded investigation logs) gets:
+  - `geo`: the source address's ISO country, else the destination's, when the source didn't name one;
+  - `metadata.geoip.src`/`.dst`: city, coordinates, accuracy radius, AS number and organisation;
+  - its OCSF endpoints' `location` and `autonomous_system`. What the source itself said is kept.
+- **Where it shows:**
+  - the triage evidence and the investigation agent's event lines (`src_geo=Mumbai, India · AS64500 …`);
+  - the agent's indicator lookups;
+  - the Threat Intelligence lookup;
+  - Settings (which databases are loaded, and DB-IP's attribution when its data is in use).
+- **Impossible travel:** the detector measures between GeoIP coordinates when both logins have them, less both accuracy radii, as MaxMind advises. So Mumbai to Delhi in 30 minutes is caught, which country-level data misses. Places under 500 km apart after that aren't flagged, and a country-wide guess (a 1,000 km radius) doesn't make travel. Otherwise it falls back to country centroids, which now include ISO codes.
+- **Tested:** against databases built by a test helper (`__tests__/fixtures/mmdb-builder.ts`). It writes the MaxMind DB format from its published spec, on documentation address ranges. The maxmind reader reading those files back checks the format.
+
 **Source health** (`health.ts`) counts each source's events per hour (`source_health_hours`). A source silent longer than its limit opens a case of its own (HIGH for an EDR, identity provider or forwarder, T1562), because attackers often stop logging first. When the source is back, the case gets a timeline entry; an analyst closes it.
 - **Limit:** the integration's own setting (0 = never). The default is two hours for telemetry, or a day when its median is under two events an hour since it started sending. Alert-only feeds (EDR alerts) aren't watched unless set.
 - **Old silences:** a source silent for over a week when first checked is marked quiet without a case.

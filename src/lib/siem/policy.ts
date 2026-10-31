@@ -6,6 +6,9 @@ export const SecurityPolicy = {
   geoVelocity: {
     maxKmPerHour: 800, // faster than this between two logins = impossible travel
     unknownDistanceKm: 1000, // assumed when a location isn't in the centroid table
+    // With GeoIP coordinates, two logins closer than this (after taking off
+    // each address's accuracy radius) aren't travel worth flagging.
+    minKm: 500,
   },
   threatIntel: {
     suspiciousProcesses: ["mimikatz.exe", "nc.exe", "pingsweep.ps1", "cobaltstrike.beacon", "psexec.exe"],
@@ -67,3 +70,12 @@ export const GEO_CENTROIDS: Record<string, [number, number]> = {
   "south africa": [-30.6, 22.9],
   egypt: [26.8, 30.8],
 };
+
+// ISO 3166-1 alpha-2 codes (what GeoIP databases and many sources give) for
+// the same countries.
+const ISO_NAMES: Record<string, string> = {
+  us: "united states", ca: "canada", mx: "mexico", br: "brazil", gb: "united kingdom", ie: "ireland", fr: "france", de: "germany", nl: "netherlands",
+  es: "spain", it: "italy", pl: "poland", ua: "ukraine", ru: "russia", tr: "turkey", il: "israel", ir: "iran", sa: "saudi arabia", ae: "uae", in: "india",
+  cn: "china", kp: "north korea", kr: "south korea", jp: "japan", sg: "singapore", au: "australia", ng: "nigeria", za: "south africa", eg: "egypt",
+};
+for (const [code, name] of Object.entries(ISO_NAMES)) GEO_CENTROIDS[code] ??= GEO_CENTROIDS[name];

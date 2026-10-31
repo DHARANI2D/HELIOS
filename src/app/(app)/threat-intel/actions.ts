@@ -11,6 +11,7 @@ import { indicatorReasons, indicatorVerdict, lookupIndicator } from "@/lib/threa
 import { configuredProviders } from "@/lib/threat-intel/providers";
 import { importFeed } from "@/lib/threat-intel/feeds";
 import { action } from "@/lib/action";
+import { describeGeo, geoLookup, geoStatus } from "@/lib/geoip";
 
 function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>, providersConfigured: Awaited<ReturnType<typeof configuredProviders>>) {
   const { indicator } = result;
@@ -28,6 +29,9 @@ function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>, provider
     providersConsulted: result.providersConsulted,
     providersConfigured,
     errors: result.errors,
+    // Where an IP is, from the server's GeoIP database (never sent anywhere).
+    geo: indicator.type === "IP" ? describeGeo(geoLookup(indicator.value)) : null,
+    geoAttribution: indicator.type === "IP" ? geoStatus().attribution : null,
   };
 }
 

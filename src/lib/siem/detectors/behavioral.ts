@@ -1,6 +1,7 @@
 import type { Detection, Detector, UnifiedEvent } from "@/lib/siem/types";
 import { GEO_CENTROIDS, SecurityPolicy } from "@/lib/siem/policy";
 import { localVerdict } from "@/lib/threat-intel/local-intel";
+import { storedGeo } from "@/lib/geoip";
 
 // Ported from signal-fusion's detection/detectors/{geoVelocity,fsmChain,
 // anomalousAction,threatIntel}.ts — the four original correlation detectors.
@@ -31,6 +32,25 @@ export function geoDistanceKm(a: string, b: string): number {
   return ca && cb ? haversineKm(ca, cb) : SecurityPolicy.geoVelocity.unknownDistanceKm;
 }
 
+// Where a login came from: GeoIP coordinates when ingest added them
+// (lib/geoip), else the country or place the source named.
+function placeOf(e: UnifiedEvent) {
+  const g = storedGeo(e.metadata);
+  const label = g ? [g.city, g.countryName ?? g.country].filter(Boolean).join(", ") || e.network.geo : e.network.geo;
+  return { label: label ?? "", country: (g?.country ?? e.network.geo ?? "").toLowerCase(), coords: g?.lat != null && g?.lon != null ? { at: [g.lat, g.lon] as [number, number], radius: g.accuracyKm ?? 0 } : null };
+}
+
+// How far apart two logins were. With coordinates for both, the distance
+// less both accuracy radii (MaxMind's advice: an address is only somewhere
+// within its radius); otherwise between the countries' centroids.
+export function travelKm(a: UnifiedEvent, b: UnifiedEvent): { km: number; precise: boolean } | null {
+  const pa = placeOf(a);
+  const pb = placeOf(b);
+  if (pa.coords && pb.coords) return { km: Math.max(0, haversineKm(pa.coords.at, pb.coords.at) - pa.coords.radius - pb.coords.radius), precise: true };
+  if (!pa.country || !pb.country || pa.country === pb.country) return null;
+  return { km: geoDistanceKm(pa.country, pb.country), precise: false };
+}
+
 export const geoVelocityDetector: Detector = {
   name: "Geo-Velocity Detector",
   detectionSource: "GEO_VELOCITY",
@@ -38,18 +58,21 @@ export const geoVelocityDetector: Detector = {
   techniques: ["T1078"],
   run(events) {
     const detections: Detection[] = [];
-    const logins = events.filter((e) => e.eventType === "LOGIN_SUCCESS" && e.network.geo);
+    const logins = events.filter((e) => e.eventType === "LOGIN_SUCCESS" && (e.network.geo || storedGeo(e.metadata)));
     for (const [user, list] of byUser(logins)) {
       for (let i = 0; i < list.length - 1; i++) {
         const current = list[i];
         const next = list[i + 1];
-        const from = current.network.geo!;
-        const to = next.network.geo!;
-        if (from.toLowerCase() === to.toLowerCase()) continue;
+        const from = placeOf(current).label;
+        const to = placeOf(next).label;
+        const travel = travelKm(current, next);
+        if (!travel) continue;
+        // GeoIP places within a few hundred km of each other are noise.
+        if (travel.precise && travel.km < SecurityPolicy.geoVelocity.minKm) continue;
 
         const hours = (next.timestamp.getTime() - current.timestamp.getTime()) / 3_600_000;
         if (hours <= 0) continue;
-        const km = geoDistanceKm(from, to);
+        const km = travel.km;
         const velocity = km / hours;
         if (velocity <= SecurityPolicy.geoVelocity.maxKmPerHour) continue;
 
@@ -64,7 +87,7 @@ export const geoVelocityDetector: Detector = {
           mitreTechniques: ["T1078 - Valid Accounts"],
           reasoning: [
             `User ${user} logged in from ${from} and then ${to} within ${hours.toFixed(2)} hours.`,
-            `~${Math.round(km)} km at ${Math.round(velocity)} km/h exceeds the ${SecurityPolicy.geoVelocity.maxKmPerHour} km/h travel limit.`,
+            `~${Math.round(km)} km${travel.precise ? " (GeoIP positions, less their accuracy radii)" : ""} at ${Math.round(velocity)} km/h exceeds the ${SecurityPolicy.geoVelocity.maxKmPerHour} km/h travel limit.`,
           ],
         });
       }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BellRing, Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, LockKeyhole, Mail, MonitorSmartphone, Users } from "lucide-react";
+import { BellRing, Bot, Building2, Calculator, Crosshair, FlaskConical, Globe2, KeyRound, LockKeyhole, Mail, MapPin, MonitorSmartphone, Users } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { pageGuard } from "@/lib/session";
@@ -14,6 +14,7 @@ import { keyReport } from "@/lib/keys";
 import { channelStatus } from "@/lib/alerts/send";
 import { deliveryCounts } from "@/lib/alerts/outbox";
 import { AlertChannels } from "@/components/settings/alert-channels";
+import { geoStatus } from "@/lib/geoip";
 
 const ELSEWHERE = [
   { href: "/ai", icon: Bot, title: "AI agents", text: "Providers (online and local models), agent profiles, autonomy and the kill switch" },
@@ -42,6 +43,7 @@ export default async function SettingsPage() {
     deliveryCounts(),
   ]);
   const rows = (Object.keys(PLATFORM_SECRETS) as PlatformSecret[]).map((name) => ({ name, ...PLATFORM_SECRETS[name], status: secrets[name] }));
+  const geo = geoStatus();
 
   return (
     <div className="flex flex-col gap-6">
@@ -114,6 +116,37 @@ export default async function SettingsPage() {
         </CardHeader>
         <CardContent>
           <ForensicsSettingsForm thresholds={thresholds} allowDomains={allowDomains} builtIn={domainWhitelist()} canEdit />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><MapPin className="size-4" /> IP geolocation</CardTitle>
+          <CardDescription>
+            Where event and indicator addresses are, from MaxMind-format databases on the server (looked up locally, never sent anywhere). It adds the country,
+            city and network to ingested events and sharpens impossible-travel detection.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 text-sm">
+          {[
+            { label: "City or country database", env: "HELIOS_GEOIP_CITY_DB", db: geo.city },
+            { label: "Network (ASN) database", env: "HELIOS_GEOIP_ASN_DB", db: geo.asn },
+          ].map((r) => (
+            <p key={r.env}>
+              <span className="font-medium">{r.label}: </span>
+              {r.db?.type ? (
+                <span>{r.db.type}, built {r.db.built?.slice(0, 10)}</span>
+              ) : r.db ? (
+                <span className="text-destructive">{r.db.path} can&apos;t be read</span>
+              ) : (
+                <span className="text-muted-foreground">not set (<code>{r.env}</code>)</span>
+              )}
+            </p>
+          ))}
+          <p className="text-xs text-muted-foreground">
+            MaxMind GeoLite2 (free with an account; keep it current with geoipupdate) or DB-IP&apos;s Lite databases (CC BY 4.0) both work.
+            {geo.attribution ? ` ${geo.attribution}.` : ""}
+          </p>
         </CardContent>
       </Card>
 

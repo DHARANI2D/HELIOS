@@ -9,6 +9,7 @@ import { escapeUntrusted, scanText, type InjectionFinding } from "@/lib/ai/safet
 import type { CaseEntities, EvidenceRef } from "@/lib/ai/evidence";
 import type { LlmProvider } from "@/lib/ai/provider";
 import { extractFacts, renderFacts } from "@/lib/ai/investigator/extract";
+import { describeGeo, geoLookup, storedGeo, type GeoInfo } from "@/lib/geoip";
 
 // The investigation agent's tools. Every one only reads, and only this
 // client's data (the case's tenant; internal cases see internal data): no
@@ -142,6 +143,9 @@ async function searchEvents(ctx: InvestigationContext, input: z.infer<typeof TOO
       e.filePath && `file=${field(ctx, "file path", e.filePath, 200)}`,
       e.fileHash && `sha256=${e.fileHash}`,
       e.geo && `geo=${field(ctx, "geo", e.geo, 60)}`,
+      // Where the addresses are, from the server's GeoIP database.
+      storedGeo(e.metadata, "src") && `src_geo=${field(ctx, "geo", describeGeo(storedGeo(e.metadata, "src") as GeoInfo) ?? "", 120)}`,
+      storedGeo(e.metadata, "dst") && `dst_geo=${field(ctx, "geo", describeGeo(storedGeo(e.metadata, "dst") as GeoInfo) ?? "", 120)}`,
     ].filter(Boolean);
     const line = parts.join(" ");
     const r = ref(ctx, "event", line);
@@ -268,6 +272,7 @@ async function indicator(ctx: InvestigationContext, input: z.infer<typeof TOOL_I
     row?.blockedAt ? `blocked ${stamp(row.blockedAt)}` : null,
     row ? `in ${new Set(row.caseLinks.map((l) => l.caseId)).size} of this client's cases` : null,
     sightings != null ? `${sightings} events in the last 30 days` : null,
+    type === "IP" && describeGeo(geoLookup(value)) ? `located ${field(ctx, "geo", describeGeo(geoLookup(value))!, 120)}` : null,
   ].filter(Boolean).join("; ");
   const r = ref(ctx, "indicator", line);
   return wrap("lookup_indicator", `${r}: ${line}`);

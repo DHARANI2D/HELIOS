@@ -3,6 +3,7 @@ import { unzipSync, type Unzipped } from "fflate";
 import type { CaseSeverity, Prisma, SecurityEvent } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { enrichAll } from "@/lib/geoip";
 import { rowFromColumns } from "@/lib/ocsf/rows";
 import { logAction } from "@/lib/audit";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
@@ -318,7 +319,7 @@ export async function startInvestigation(input: StartInvestigationInput) {
 
   const batchId = randomUUID();
   for (let i = 0; i < events.length; i += 1000) {
-    await db.securityEvent.createMany({ data: events.slice(i, i + 1000).map((e) => toRow(e, kase.id, batchId)) });
+    await db.securityEvent.createMany({ data: enrichAll(events.slice(i, i + 1000).map((e) => toRow(e, kase.id, batchId))) });
   }
 
   await logAction({

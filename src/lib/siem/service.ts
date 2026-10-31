@@ -20,6 +20,7 @@ import type { SecurityDomain } from "@prisma/client";
 import { touchEndpoints } from "@/lib/endpoints/service";
 import { loadIntelSnapshot } from "@/lib/threat-intel/snapshot";
 import { rowFromOcsf } from "@/lib/ocsf/rows";
+import { enrichAll } from "@/lib/geoip";
 import type { OcsfEvent } from "@/lib/ocsf/schema";
 
 // Ingestion → detection → correlation. Replaces signal-fusion's
@@ -181,7 +182,8 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
   const batchId = randomUUID();
   const tenantId = options.tenantId ?? null;
   const placement = { batchId, tenantId, integrationId: options.integrationId };
-  const rows = items.map((item) => ("ocsf" in item ? rowFromOcsf(item.ocsf, placement) : { ...toEventRow(normalize(item.source, item.data), batchId, item.sourceEventId), ...placement }));
+  // Where each address is (lib/geoip), when a GeoIP database is set.
+  const rows = enrichAll(items.map((item) => ("ocsf" in item ? rowFromOcsf(item.ocsf, placement) : { ...toEventRow(normalize(item.source, item.data), batchId, item.sourceEventId), ...placement })));
   // An event the source already sent (same source event id) is skipped.
   const inserted = rows.length ? (await db.securityEvent.createMany({ data: rows, skipDuplicates: true })).count : 0;
   await touchEndpoints(tenantId, rows, { integrationId: options.integrationId });
