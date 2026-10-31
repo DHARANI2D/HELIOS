@@ -32,7 +32,7 @@ export default async function RetentionPage() {
         <StatTile label="Events searchable" value={report.tenants.reduce((n, t) => n + t.hotEvents, 0).toLocaleString()} icon={Database} />
         <StatTile label="Events archived" value={report.tenants.reduce((n, t) => n + t.archivedEvents, 0).toLocaleString()} icon={Archive} hint={bytes(report.tenants.reduce((n, t) => n + t.archivedBytes, 0))} />
         <StatTile label="Legal holds in force" value={holds.filter((h) => !h.releasedAt).length} icon={Lock} />
-        <StatTile label="Data in India" value={report.store ? (report.store.inIndia && (report.store.kind === "s3" || report.database.inIndia) ? "Yes" : "Not shown") : "No archive"} icon={MapPin} tone={certIn.length && !(report.store?.inIndia && report.database.inIndia) ? "warning" : "default"} hint={`Database: ${report.database.region ?? "region not declared"}`} />
+        <StatTile label="Logs in India" value={report.inIndia ? "Yes" : "Not shown"} icon={MapPin} tone={certIn.length && !report.inIndia ? "warning" : "default"} hint={`Database: ${report.database.region ?? "region not declared"}${report.store ? ` · archive: ${report.store.region ?? "region unknown"}` : ""}`} />
       </div>
 
       <Card>

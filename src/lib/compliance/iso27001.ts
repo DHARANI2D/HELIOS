@@ -5,6 +5,8 @@ import { activeRulebook } from "@/lib/rulebook/service";
 import { masterKeySource } from "@/lib/secrets";
 import { parseProtections } from "@/lib/endpoints/controls";
 import { DATA_CATEGORIES, median } from "@/lib/ingest/health";
+import { CERT_IN_DAYS } from "@/lib/retention/service";
+import { residency } from "@/lib/retention/storage";
 
 // ISO/IEC 27001:2022 Annex A controls that HELIOS produces evidence for, and
 // what it shows for each over a period: real counts from the platform's own
@@ -44,7 +46,7 @@ export async function evidenceMap(tenantId: string | null, days = 90, now = new 
   const caseWhere: Prisma.CaseWhereInput = { ...t, createdAt: { gte: since } };
 
   const scopeTenants = tenantId ? [{ id: tenantId }] : await db.tenant.findMany({ where: { status: { not: "SUSPENDED" } }, select: { id: true } });
-  const [cases, actions, notices, sources, endpoints, timeline, audit, staff, clients, rulebooks, keys, indicators, playbooks, outcomes] = await Promise.all([
+  const [cases, actions, notices, sources, endpoints, timeline, audit, staff, clients, rulebooks, keys, indicators, playbooks, outcomes, kept] = await Promise.all([
     db.case.findMany({ where: caseWhere, select: { createdAt: true, acknowledgedAt: true, slaDueAt: true, containedAt: true, resolvedAt: true, disposition: true, rootCauseNarrative: true, status: true }, take: 20_000 }),
     db.responseAction.findMany({ where: { ...t, createdAt: { gte: since }, status: { in: ["EXECUTED", "ROLLED_BACK", "MANUAL_REQUIRED", "FAILED"] } }, select: { status: true, result: true }, take: 20_000 }),
     db.regulatoryNotice.findMany({ where: { ...t, createdAt: { gte: since } }, select: { status: true, dueAt: true, submittedAt: true } }),
@@ -59,6 +61,7 @@ export async function evidenceMap(tenantId: string | null, days = 90, now = new 
     db.caseIndicator.count({ where: { case: caseWhere } }),
     db.playbook.count({ where: { enabled: true } }),
     db.aiDecisionOutcome.count({ where: { ...t, createdAt: { gte: since } } }),
+    db.tenant.findMany({ where: { id: { in: scopeTenants.map((x) => x.id) } }, select: { id: true, logHotDays: true, logRetentionDays: true } }),
   ]);
 
   const acked = cases.filter((c) => c.acknowledgedAt);
@@ -104,6 +107,11 @@ export async function evidenceMap(tenantId: string | null, days = 90, now = new 
   const ob = book?.body.obligations;
   const reviewDue = book?.signedAt ? new Date(book.signedAt.getTime() + book.body.reviewEveryDays * DAY) : null;
   const every = (x: number) => n > 0 && x === n;
+  // Log retention against CERT-In's 180 days in India, for the clients it
+  // applies to.
+  const keptDays = new Map(kept.map((x) => [x.id, x]));
+  const certInKept = scopeTenants.filter((x, i) => books[i]?.obligations.regulatedEntity && (keptDays.get(x.id)?.logRetentionDays ?? 0) >= CERT_IN_DAYS).length;
+  const where = residency();
 
   return [
     {
@@ -210,12 +218,16 @@ export async function evidenceMap(tenantId: string | null, days = 90, now = new 
     {
       id: "8.15",
       name: "Logging",
-      status: status([dataSources.length > 0, live.length === dataSources.length && dataSources.length > 0], 2),
+      status: status([dataSources.length > 0, live.length === dataSources.length && dataSources.length > 0, certInKept === certIn, certIn === 0 || where.inIndia], 4),
       evidence: [
         { label: "Log sources connected", value: String(dataSources.length), href: "/integrations" },
         { label: "Sending in the last day", value: `${live.length} of ${dataSources.length}` },
+        tenantId
+          ? { label: "Logs kept for", value: kept[0] ? `${kept[0].logRetentionDays} days (${kept[0].logHotDays} searchable)` : "—", href: "/retention" }
+          : { label: `Keeping logs ${CERT_IN_DAYS} days or more`, value: `${certInKept} of the ${certIn} client${certIn === 1 ? "" : "s"} CERT-In applies to`, href: "/retention" },
+        { label: "Logs shown to be in India", value: where.inIndia ? "Yes" : `No: database ${where.database.region ?? "region not declared"}${where.store ? `, archive ${where.store.region ?? "region unknown"}` : ""}` },
       ],
-      note: "Retention isn't evidenced yet: CERT-In asks for 180 days of logs kept in India.",
+      note: certIn > 0 ? `CERT-In asks for logs kept for a rolling ${CERT_IN_DAYS} days within Indian jurisdiction. HELIOS shows the regions it is configured with, not where the servers physically are.` : undefined,
     },
     {
       id: "8.16",

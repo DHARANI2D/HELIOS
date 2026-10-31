@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { openSealed, sealFor } from "@/lib/keys";
 import { activeRulebook } from "@/lib/rulebook/service";
-import { archiveStore, inIndia, type ArchiveStore } from "@/lib/retention/storage";
+import { archiveStore, residency, type ArchiveStore } from "@/lib/retention/storage";
 
 // Log retention. Events stay searchable in the database for a client's hot
 // period, then move to the archive store one UTC day at a time (compressed
@@ -20,6 +20,7 @@ import { archiveStore, inIndia, type ArchiveStore } from "@/lib/retention/storag
 const DAY = 86_400_000;
 export const CERT_IN_DAYS = 180;
 const PART_EVENTS = 20_000;
+const PURGE_BATCH = 10_000;
 const INTERNAL = { hotDays: 90, retentionDays: 365 };
 const MAGIC = Buffer.from("HLA1");
 
@@ -36,14 +37,14 @@ export async function retentionRules(tenantId: string | null) {
 }
 
 export async function setRetention(tenantId: string, input: { hotDays: number; retentionDays: number }, actorId: string) {
-  const { minDays, certIn } = await retentionRules(tenantId);
+  const { minDays, certIn, hotDays: wasHot, retentionDays: wasTotal } = await retentionRules(tenantId);
   const hot = Math.round(input.hotDays);
   const total = Math.round(input.retentionDays);
   if (!(hot >= 7 && hot <= 730)) throw new Error("Keep events searchable for between 7 and 730 days");
   if (!(total >= minDays && total <= 3650)) throw new Error(certIn ? `CERT-In's directions apply to this client: keep logs for at least ${CERT_IN_DAYS} days` : `Keep logs for between ${minDays} and 3650 days`);
   if (hot > total) throw new Error("The searchable period can't be longer than the whole retention");
-  const before = await db.tenant.update({ where: { id: tenantId }, data: { logHotDays: hot, logRetentionDays: total } });
-  await logAction({ actorId, action: "retention.changed", detail: { tenantId, hotDays: hot, retentionDays: total, previous: { hotDays: before.logHotDays, retentionDays: before.logRetentionDays } } });
+  await db.tenant.update({ where: { id: tenantId }, data: { logHotDays: hot, logRetentionDays: total } });
+  await logAction({ actorId, action: "retention.changed", detail: { tenantId, hotDays: hot, retentionDays: total, previous: { hotDays: wasHot, retentionDays: wasTotal } } });
 }
 
 // ---------------------------------------------------------------- holds
@@ -168,10 +169,15 @@ export async function purgeDue(now = new Date(), store: ArchiveStore | null = ar
       await db.eventArchive.update({ where: { id: a.id }, data: { deletedAt: now, deleteReason: `Past the ${retentionDays}-day retention` } });
       archives++;
     }
-    // Events never archived (no store) that are past retention.
+    // Events never archived (no store) that are past retention, in batches
+    // so a long backlog doesn't become one huge delete.
     const keep: Prisma.SecurityEventWhereInput[] = holds.map((h) => ({ timestamp: { gte: h.fromAt, ...(h.toAt ? { lte: h.toAt } : {}) } }));
-    const { count } = await db.securityEvent.deleteMany({ where: { ...eventScope(tenantId), timestamp: { lt: cutoff }, ...(keep.length ? { NOT: { OR: keep } } : {}) } });
-    events += count;
+    const where: Prisma.SecurityEventWhereInput = { ...eventScope(tenantId), timestamp: { lt: cutoff }, ...(keep.length ? { NOT: { OR: keep } } : {}) };
+    for (;;) {
+      const batch = await db.securityEvent.findMany({ where, select: { id: true }, take: PURGE_BATCH });
+      if (!batch.length) break;
+      events += (await db.securityEvent.deleteMany({ where: { id: { in: batch.map((r) => r.id) } } })).count;
+    }
   }
   if (archives || events) await logAction({ action: "retention.purged", detail: { archives, events, held } });
   return { archives, events, held };
@@ -201,7 +207,6 @@ export const archiveLines = (gz: Buffer) => gunzipSync(gz).toString("utf8").trim
 // ---------------------------------------------------------------- report
 
 export async function retentionReport(now = new Date()) {
-  const store = archiveStore();
   const tenants = await db.tenant.findMany({ select: { id: true, name: true, isTest: true, logHotDays: true, logRetentionDays: true }, orderBy: { name: "asc" } });
   const rows = await Promise.all(
     tenants.map(async (t) => {
@@ -229,9 +234,5 @@ export async function retentionReport(now = new Date()) {
       };
     }),
   );
-  return {
-    store: store ? { kind: store.kind, describe: store.describe, region: store.region, inIndia: inIndia(store.region) } : null,
-    database: { region: process.env.HELIOS_DATA_REGION?.trim() || null, inIndia: inIndia(process.env.HELIOS_DATA_REGION ?? null) },
-    tenants: rows,
-  };
+  return { ...residency(), tenants: rows };
 }

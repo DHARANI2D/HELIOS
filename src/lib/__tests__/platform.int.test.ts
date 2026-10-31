@@ -68,6 +68,10 @@ import { reviewUpgrades } from "@/lib/pricing/upgrades";
 import { processDeliveries, queueToContact } from "@/lib/alerts/outbox";
 import { investigate } from "@/lib/ai/investigator/run";
 import { addTuning, checkRules, importRules, setRuleStatus } from "@/lib/detections/service";
+import { archiveDue, archiveLines, placeHold, purgeDue, readArchive, releaseHold, setRetention } from "@/lib/retention/service";
+import { mkdtemp, readFile as readFileFs, writeFile as writeFileFs } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { AgentRequest, AgentStep, AgentToolResult, LlmProvider } from "@/lib/ai/provider";
 import { setSetting } from "@/lib/settings";
 import { createHmac } from "node:crypto";
@@ -1310,6 +1314,66 @@ tags: [attack.execution, attack.t1059.001]`;
     // A changed rule goes back to testing.
     await importRules(rule.replace("level: high", "level: critical"), { tenantId: null, actorId: adminId });
     expect(await db.detectionRule.findUniqueOrThrow({ where: { id: imported.id! } })).toMatchObject({ status: "TESTING", level: "critical", testHits: 0 });
+  });
+
+  it("archives events past their searchable period, deletes them after retention, and keeps what a hold covers", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "helios-archive-"));
+    process.env.HELIOS_ARCHIVE_DIR = dir;
+    try {
+      const DAY = 86_400_000;
+      const now = new Date();
+      const tenant = await db.tenant.create({ data: { name: "Test · Retention", slug: "test-retention" } });
+      // CERT-In applies: nothing under 180 days.
+      await saveDraft(tenant.id, { body: { obligations: { regulatedEntity: true } }, reason: "CERT-In" }, { id: adminId, name: "Test Admin" });
+      await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved by email today");
+      await expect(setRetention(tenant.id, { hotDays: 30, retentionDays: 90 }, adminId)).rejects.toThrow(/at least 180 days/);
+      await setRetention(tenant.id, { hotDays: 30, retentionDays: 180 }, adminId);
+      const changed = await db.auditLog.findFirstOrThrow({ where: { action: "retention.changed" }, orderBy: { seq: "desc" } });
+      expect(changed.detail).toMatchObject({ hotDays: 30, retentionDays: 180, previous: { hotDays: 90, retentionDays: 365 } });
+
+      const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Retention evidence", severity: "LOW", tenantId: tenant.id, deferPipelines: true });
+      const at = (daysAgo: number) => new Date(now.getTime() - daysAgo * DAY);
+      await db.securityEvent.createMany({
+        data: [
+          { tenantId: tenant.id, timestamp: at(200), source: "endpoint", eventType: "process_start", hostName: "RET-OLD" },
+          { tenantId: tenant.id, timestamp: at(200), source: "endpoint", eventType: "process_start", hostName: "RET-OLD-2" },
+          { tenantId: tenant.id, timestamp: at(60), source: "endpoint", eventType: "process_start", hostName: "RET-MID" },
+          { tenantId: tenant.id, timestamp: at(5), source: "endpoint", eventType: "process_start", hostName: "RET-NEW" },
+          { tenantId: tenant.id, caseId: kase.id, timestamp: at(250), source: "endpoint", eventType: "process_start", hostName: "RET-EVIDENCE" },
+        ],
+      });
+
+      // Past 30 days: archived day by day; the case's event stays.
+      const archived = await archiveDue(now);
+      expect(archived).toMatchObject({ archived: 3, objects: 2 });
+      expect((await db.securityEvent.findMany({ where: { tenantId: tenant.id }, select: { hostName: true }, orderBy: { hostName: "asc" } })).map((e) => e.hostName)).toEqual(["RET-EVIDENCE", "RET-NEW"]);
+      const archives = await db.eventArchive.findMany({ where: { tenantId: tenant.id }, orderBy: { day: "asc" } });
+      expect(archives.map((a) => a.events)).toEqual([2, 1]);
+      const file = path.join(dir, archives[0].objectKey);
+      expect((await readFileFs(file)).includes(Buffer.from("RET-OLD"))).toBe(false);
+      const { gz } = await readArchive(archives[0].id, adminId);
+      expect(archiveLines(gz).map((l) => l.hostName).sort()).toEqual(["RET-OLD", "RET-OLD-2"]);
+
+      // A hold keeps the 200-day-old archive past its 180 days.
+      const hold = await placeHold({ tenantId: tenant.id, reason: "Litigation hold, matter 2026-17", fromAt: at(210), toAt: at(190) }, adminId);
+      expect(await purgeDue(now)).toMatchObject({ archives: 0, held: 1 });
+      await releaseHold(hold.id, "Matter closed", adminId);
+      expect(await purgeDue(now)).toMatchObject({ archives: 1 });
+      expect(await db.eventArchive.findUniqueOrThrow({ where: { id: archives[0].id } })).toMatchObject({ deletedAt: expect.any(Date), deleteReason: "Past the 180-day retention" });
+      await expect(readFileFs(file)).rejects.toThrow();
+      await expect(readArchive(archives[0].id, adminId)).rejects.toThrow(/deleted/);
+      // The case's evidence outlives the retention.
+      expect(await db.securityEvent.count({ where: { caseId: kase.id } })).toBe(1);
+
+      // A changed object is refused on read.
+      const second = path.join(dir, archives[1].objectKey);
+      const bytes = await readFileFs(second);
+      bytes[bytes.length - 1] ^= 1;
+      await writeFileFs(second, bytes);
+      await expect(readArchive(archives[1].id, adminId)).rejects.toThrow(/recorded hash/);
+    } finally {
+      delete process.env.HELIOS_ARCHIVE_DIR;
+    }
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

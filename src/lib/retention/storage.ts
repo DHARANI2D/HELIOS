@@ -86,6 +86,17 @@ export function archiveStore(): ArchiveStore | null {
   return dir ? localStore(dir) : null;
 }
 
-// Indian jurisdiction, as far as the configuration says: an AWS Indian
-// region, or a region the operator declares as India.
-export const inIndia = (region: string | null) => !!region && /^(ap-south-[12]|in|india|in-[a-z]+)$/i.test(region.trim());
+// Indian jurisdiction, as far as the configuration says: an Indian region
+// of AWS, Azure or Google Cloud, or a region the operator declares as India.
+export const inIndia = (region: string | null) => !!region && /^(ap-south-[12]|asia-south[12]|(central|south|west)india|in|india|in-[a-z]+)$/i.test(region.trim());
+
+// Where the logs are: the database (the region the operator declares in
+// HELIOS_DATA_REGION) and, once events are archived, the archive store.
+// Shown in India only when both are.
+export function residency() {
+  const store = archiveStore();
+  const region = process.env.HELIOS_DATA_REGION?.trim() || null;
+  const database = { region, inIndia: inIndia(region) };
+  const archive = store ? { kind: store.kind, describe: store.describe, region: store.region, inIndia: inIndia(store.region) } : null;
+  return { store: archive, database, inIndia: database.inIndia && (!archive || archive.inIndia) };
+}

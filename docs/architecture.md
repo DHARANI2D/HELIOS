@@ -57,7 +57,7 @@
   - **Record:** every step is in the audit chain and on the case's timeline.
 - **ISO/IEC 27001 evidence.** `evidenceMap` reports, for 15 Annex A controls, what the platform's records show over a period: cases, containment, filings, audit entries, sources, two-step sign-in, data keys.
   - **Scope:** for one client or as "X of Y clients" across all of them.
-  - **Gaps:** a control with nothing behind it (clock synchronisation on client systems, retention until it's built) is shown as a gap.
+  - **Gaps:** a control with nothing behind it (clock synchronisation on client systems) is shown as a gap. Logging (A.8.15) counts retention: whether every client CERT-In applies to keeps 180 days or more, and whether the configured stores are in India.
 - **Isolation:** `regulatory_notices` carries a `tenantId` and has the same row-level policy as the other client tables.
 
 ### Alerts and approvals (`lib/alerts`, `app/(app)/approvals`)
@@ -250,8 +250,9 @@ Timers in the server process:
 | Pull collectors (each stream on its own interval) | 30 seconds |
 | Source health | 5 minutes |
 | Finished-batch cleanup | Hour |
+| Log retention (archive, then delete what's past retention) | Hour |
 
-Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them. With `HELIOS_INGEST_WORKER=external`, the last four run in `npm run worker` (`src/worker.ts`) instead of the web process; any number of workers can run.
+Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable them. With `HELIOS_INGEST_WORKER=external`, the last five run in `npm run worker` (`src/worker.ts`) instead of the web process; any number of workers can run.
 
 ### Response actions (`lib/response`)
 
@@ -323,6 +324,23 @@ Logs arrive three ways, all into one durable queue:
 - **Limit:** the integration's own setting (0 = never). The default is two hours for telemetry, or a day when its median is under two events an hour since it started sending. Alert-only feeds (EDR alerts) aren't watched unless set.
 - **Old silences:** a source silent for over a week when first checked is marked quiet without a case.
 - **Go-live:** a client can't move from onboarding to active until every data source has sent something in the last day and none is quiet.
+
+### Log retention (`lib/retention`, `/retention`)
+
+- **Two periods per client.** Events stay searchable in the database for the client's hot period (default 90 days), then move to the archive, and are deleted when the whole retention (default 365 days) ends. Platform admins and SOC managers set both on the Data Retention page; every change is in the audit log with the values before.
+  - **CERT-In:** for a client whose rulebook says CERT-In's directions apply, retention can't be set below 180 days.
+  - **Case evidence:** events attached to a case are never archived or deleted with the rest; they stay with the case.
+- **The archive.** The hourly job takes one UTC day of a client's events at a time (up to 20,000 per object, more parts for a busier day):
+  - **Format:** NDJSON, gzipped, then encrypted with AES-256-GCM under a fresh key for that object. The key is sealed with the client's data key, so destroying the client's key makes its archive unreadable (crypto-shredding). The day, part and client are bound in as associated data, so an object can't be passed off as another.
+  - **Integrity:** the SHA-256 of each object is recorded in `event_archives`; reading checks it before decrypting. Events leave the database only once their object is written and recorded.
+  - **Stores:** an S3 bucket (`HELIOS_ARCHIVE_S3_BUCKET`, region `HELIOS_ARCHIVE_S3_REGION`, default `ap-south-1` Mumbai; `HELIOS_ARCHIVE_S3_ENDPOINT` for S3-compatible stores; SigV4 with the standard AWS credential variables) or a directory (`HELIOS_ARCHIVE_DIR`). With neither, nothing is archived and events stay in the database until their retention ends.
+  - **One runner:** a lease row in `platform_settings` keeps two instances from archiving at once.
+  - **Downloads:** an archive downloads decrypted (`/retention/archives/<id>`), and each download is in the audit log.
+- **Deletion.** Archive objects past retention are removed from the store and their row marked deleted with the reason; events never archived are deleted from the database in batches of 10,000.
+- **Legal holds.** A hold covers a client's data over a date range (open-ended if no end), optionally tied to a case. Nothing in its range is deleted while it's in force. Placing and releasing need a reason and go in the audit log.
+- **India.** The page says whether the logs are shown to be in India: the database region the operator declares (`HELIOS_DATA_REGION`) and the archive store's region, both Indian (AWS `ap-south-1`/`ap-south-2`, Azure Central/South/West India, Google Cloud `asia-south1`/`asia-south2`). HELIOS can only report what it's configured with, not where the servers physically are.
+- **Not built:** the events table isn't partitioned by time; archiving and deletion work through it in bounded batches instead. Partitioning is worth adding once a deployment holds hundreds of millions of events.
+- **Isolation:** `event_archives` and `legal_holds` carry a `tenantId` and have the same row-level policy as the other client tables.
 
 ## One write path
 
