@@ -46,6 +46,8 @@ See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit togeth
 
 ## User guides
 
+[`docs/HELIOS-documentation.pdf`](docs/HELIOS-documentation.pdf) is the whole product in one document. It opens with a brochure (what HELIOS is and does, how it works, why it can be trusted, who uses it). Then comes the full documentation: getting started, how each part works, roles and access, every screen with screenshots, end-to-end procedures, guidelines and reference.
+
 `docs/guides/` has a PDF guide for each of the eleven roles. Each covers:
 - the role and its responsibilities;
 - its exact permissions and pages, taken from the code;
