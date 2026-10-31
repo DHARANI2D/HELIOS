@@ -58,6 +58,13 @@ See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit togeth
 
 ## User guides
 
+[`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 14-page product brochure, to give to clients and partners. It covers:
+- what HELIOS is and how it works;
+- AI-led containment and its governance, and change control;
+- capabilities, the client portal, trust and security, and roles;
+- AI models, deployment options and compliance in India;
+- getting started.
+
 [`docs/HELIOS-documentation.pdf`](docs/HELIOS-documentation.pdf) is the whole product in one document. It opens with a brochure (what HELIOS is and does, how it works, why it can be trusted, who uses it). Then comes the full documentation: getting started, how each part works, roles and access, every screen with screenshots, end-to-end procedures, guidelines and reference.
 
 `docs/guides/` has a PDF guide for each of the eleven roles. Each covers:
