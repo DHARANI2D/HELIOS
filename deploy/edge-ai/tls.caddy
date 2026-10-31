@@ -1,0 +1,18 @@
+# How the box gets its certificate and whether it checks HELIOS's.
+# Uncomment one block.
+#
+# 1. A public DNS name with ports 80 and 443 reachable: leave this file as it
+#    is; Caddy gets a Let's Encrypt certificate.
+#
+# 2. A private name: Caddy's own CA (give HELIOS its root as HELIOS_AI_CA).
+# tls internal
+#
+# 3. Mutual TLS: only a client presenting a certificate signed by the MSSP's
+#    CA (certs/helios-ca.pem, from make-certs.sh) gets a connection. Write
+#    "tls internal {" instead of "tls {" for a private name.
+# tls {
+# 	client_auth {
+# 		mode require_and_verify
+# 		trust_pool file /etc/caddy/certs/helios-ca.pem
+# 	}
+# }

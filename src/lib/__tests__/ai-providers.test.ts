@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { anthropicProvider, bedrockProvider, parseBedrockAuth, usageOf } from "@/lib/ai/anthropic";
-import { azureBaseUrl, openAiCompatibleProvider } from "@/lib/ai/openai-compatible";
+import { azureBaseUrl, openAiCompatibleProvider, reason } from "@/lib/ai/openai-compatible";
 import { bedrockModelProblem } from "@/lib/ai/catalog";
 import { providerColumns, providerInputSchema, providerSecret } from "@/lib/ai/provider-input";
 import { addUsage } from "@/lib/ai/provider";
@@ -131,6 +131,17 @@ describe("Azure OpenAI", () => {
     const missing = (async () => new Response("{}", { status: 404 })) as unknown as typeof fetch;
     const q = openAiCompatibleProvider({ name: "Azure", baseUrl: "https://soc-ai.openai.azure.com", model: "nope", apiKey: "k", isLocal: false, azure: true, fetch: missing });
     expect(await q.check()).toEqual({ ok: false, message: "No deployment named nope at https://soc-ai.openai.azure.com/openai/v1" });
+  });
+
+  it("says why a connection failed, not just that fetch failed", () => {
+    const failed = (cause: object) => Object.assign(new TypeError("fetch failed"), { cause });
+    expect(reason(failed({ message: "C0DC:error:0A00045C:SSL routines:ssl3_read_bytes:tlsv13 alert certificate required:...\n" }))).toMatch(/wants a client certificate/);
+    expect(reason(failed({ message: "SSL routines:ssl3_read_bytes:tlsv13 alert unknown ca" }))).toBe("the server didn't accept HELIOS's client certificate");
+    expect(reason(failed({ code: "SELF_SIGNED_CERT_IN_CHAIN", message: "self-signed certificate in certificate chain" }))).toMatch(/isn't trusted .*HELIOS_AI_CA/);
+    expect(reason(failed({ code: "ECONNREFUSED" }))).toBe("nothing is listening there");
+    expect(reason(failed({ code: "ENOTFOUND", message: "getaddrinfo ENOTFOUND box.example" }))).toBe("the name doesn't resolve");
+    expect(reason(failed({ message: "socket hang up" }))).toBe("fetch failed (socket hang up)");
+    expect(reason(new Error("plain"))).toBe("plain");
   });
 
   it("local servers keep strict schemas and bearer keys", async () => {

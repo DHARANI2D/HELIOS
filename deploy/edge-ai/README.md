@@ -11,6 +11,9 @@ that HELIOS's agents call instead.
   calls HELIOS makes (`POST /v1/chat/completions`, `GET /v1/models`), only
   with the box's key. Ollama's own API (pulling or deleting models) isn't
   reachable from outside.
+- **Mutual TLS** (optional, recommended): the box also requires HELIOS's
+  client certificate, signed by the MSSP's own CA, before it reads a
+  request.
 
 HELIOS talks to it as an OpenAI-compatible provider: structured output via
 JSON schema, and tool calls for the investigation agent where the model
@@ -59,19 +62,51 @@ curl -s https://$AI_BOX_HOST/v1/models -H "Authorization: Bearer $AI_BOX_KEY"
 curl -s -o /dev/null -w "%{http_code}\n" https://$AI_BOX_HOST/api/tags   # 401
 ```
 
-## Network
+## Network and certificates
 
-- **A public name** (DNS points at the box, ports 80 and 443 open to the
-  internet for the certificate): Caddy gets a Let's Encrypt certificate on
-  its own. Then restrict 443 to HELIOS's outbound addresses at the client's
-  firewall.
-- **A private name or address** (reached over a VPN or private link):
-  set `AI_BOX_TLS="tls internal"`. Caddy then uses its own CA. Give HELIOS
-  that CA's root (`docker compose exec proxy cat /data/caddy/pki/authorities/local/root.crt`)
-  through `NODE_EXTRA_CA_CERTS`. A hosted HELIOS only calls a client's own
-  model at a public address; an operator running HELIOS inside the
-  client's network allows private ones with
-  `HELIOS_ALLOW_PRIVATE_CLIENT_AI=1`.
+`tls.caddy` decides how the box gets its certificate and whether it checks
+HELIOS's. Uncomment one block in it:
+
+1. **A public name** (DNS points at the box, ports 80 and 443 open to the
+   internet for the certificate): leave the file as it is. Caddy gets a
+   Let's Encrypt certificate on its own. Then restrict 443 to HELIOS's
+   outbound addresses at the client's firewall.
+2. **A private name or address** (reached over a VPN or private link):
+   `tls internal`, Caddy's own CA. Give HELIOS that CA's root
+   (`docker compose exec proxy cat /data/caddy/pki/authorities/local/root.crt`)
+   as `HELIOS_AI_CA`.
+3. **Mutual TLS**, with either of the above: once, the MSSP runs
+   `./make-certs.sh` (somewhere safe, not on a box). It writes a CA and a
+   client certificate for HELIOS.
+   - **Each box:** copy `helios-ca.pem` into the box's `certs/` and uncomment block 3.
+   - **HELIOS:** set `HELIOS_AI_CLIENT_CERT` and `HELIOS_AI_CLIENT_KEY` to `helios-client.pem` and `helios-client.key`.
+   - **What HELIOS does:** it presents the certificate to every local (on-premises) OpenAI-compatible provider.
+   - **What the box does:** it refuses the connection to anything without it. The box's key is still checked on top.
+   - **The CA key:** keep `helios-ca.key` offline.
+
+A hosted HELIOS only calls a client's own model at a public address. An
+operator running HELIOS inside the client's network allows private ones with
+`HELIOS_ALLOW_PRIVATE_CLIENT_AI=1`.
+
+When the Test button fails, its message says why:
+- the box wants a client certificate;
+- the box didn't accept HELIOS's certificate;
+- the box's certificate isn't trusted (set `HELIOS_AI_CA`);
+- nothing is listening;
+- the name doesn't resolve.
+
+### Tested
+
+The Caddyfile and `make-certs.sh` were run with Caddy 2.10 against a
+stand-in model server, through HELIOS's own provider code:
+- the right key and certificate connect;
+- a wrong key gets 401, and paths or methods other than HELIOS's two calls get 401;
+- bodies over 8 MB get 413;
+- no client certificate, or one from another CA, is refused at the handshake;
+- a box on Caddy's own CA is trusted only with `HELIOS_AI_CA`.
+
+The Ollama and vLLM containers themselves weren't run here (no Docker
+daemon); `docker compose config` validates the compose files.
 
 ## Connect it in HELIOS
 

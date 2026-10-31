@@ -7,6 +7,7 @@ import type { Effort, LlmProvider } from "@/lib/ai/provider";
 import { anthropicProvider, bedrockProvider, parseBedrockAuth } from "@/lib/ai/anthropic";
 import { openAiCompatibleProvider } from "@/lib/ai/openai-compatible";
 import { publicFetch } from "@/lib/net/public-fetch";
+import { localModelFetch } from "@/lib/ai/mtls";
 
 // Which model runs which agent. Order of precedence:
 //   HELIOS_AI_ENGINE=builtin (or INVESTIGATIONS_ENGINE=heuristic for the
@@ -61,9 +62,9 @@ function forcedBuiltin(key: AgentKey) {
 // the platform's own network). An operator running HELIOS inside a client's
 // network, where the client's model is on a private address, turns that off
 // with HELIOS_ALLOW_PRIVATE_CLIENT_AI=1.
-export function clientEndpointFetch(): typeof fetch | undefined {
-  if (process.env.HELIOS_ALLOW_PRIVATE_CLIENT_AI === "1") return undefined;
-  return ((url: string | URL | Request, init?: RequestInit) => publicFetch(String(url instanceof Request ? url.url : url), init)) as typeof fetch;
+export function clientEndpointFetch(transport?: typeof fetch): typeof fetch | undefined {
+  if (process.env.HELIOS_ALLOW_PRIVATE_CLIENT_AI === "1") return transport;
+  return ((url: string | URL | Request, init?: RequestInit) => publicFetch(String(url instanceof Request ? url.url : url), init, transport)) as typeof fetch;
 }
 
 export async function providerFromRow(row: AiProvider, modelOverride?: string | null): Promise<LlmProvider> {
@@ -80,7 +81,10 @@ export async function providerFromRow(row: AiProvider, modelOverride?: string | 
     return bedrockProvider({ name: row.name, model, region: row.region, auth });
   }
   if (!row.baseUrl) throw new Error(`Provider ${row.name} has no base URL`);
-  const guarded = row.tenantId ? clientEndpointFetch() : undefined;
+  // An on-premises server gets HELIOS's client certificate, if one is set
+  // (lib/ai/mtls).
+  const transport = row.kind === "openai_compatible" && row.isLocal ? localModelFetch() : undefined;
+  const guarded = row.tenantId ? clientEndpointFetch(transport) : transport;
   return openAiCompatibleProvider({ name: row.name, baseUrl: row.baseUrl, model, apiKey: secret, isLocal: row.isLocal, azure: row.kind === "azure_openai", fetch: guarded });
 }
 

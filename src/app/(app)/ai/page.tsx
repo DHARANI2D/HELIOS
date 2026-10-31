@@ -161,8 +161,9 @@ export default async function AiPage() {
         <CardHeader>
           <CardTitle className="text-base">Model providers</CardTitle>
           <CardDescription>
-            Claude online today; add a local model server (Ollama, LM Studio, vLLM, llama.cpp) for offline or data-residency deployments. With no provider at all,
-            every agent runs on HELIOS&apos;s built-in deterministic engine.
+            Claude on Anthropic&apos;s API or in your own AWS account (Amazon Bedrock, in the region you choose), Azure OpenAI, or a local model server (Ollama,
+            LM Studio, vLLM, the HELIOS AI box) for offline or data-residency deployments. With no provider at all, every agent runs on HELIOS&apos;s built-in
+            deterministic engine.
           </CardDescription>
         </CardHeader>
         <CardContent>

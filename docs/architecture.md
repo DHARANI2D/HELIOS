@@ -181,7 +181,9 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
    **The HELIOS AI box** (`deploy/edge-ai`): Ollama (or vLLM) behind Caddy, on the client's own hardware, for clients whose rulebook allows on-premises AI only.
    - **Caddy's job:** it terminates TLS and passes on only `POST /v1/chat/completions` and `GET /v1/models`, with the box's key as a bearer token, and bodies up to 8 MB.
    - **Everything else is refused (401):** including Ollama's own API (pull, delete).
-   - **Tested:** the Caddyfile was run against a stand-in model server, checking the key, the wrong-key, path, method and size cases.
+   - **Mutual TLS (optional):** the box also requires a client certificate from the MSSP's CA (`make-certs.sh`, `tls.caddy`). HELIOS presents `HELIOS_AI_CLIENT_CERT`/`HELIOS_AI_CLIENT_KEY` to every on-premises OpenAI-compatible provider (`lib/ai/mtls.ts`, an undici agent). `HELIOS_AI_CA` trusts a box on Caddy's own CA alongside the public roots.
+   - **Failed connection tests say why:** a client certificate is wanted, or was refused; the server isn't trusted; nothing is listening; the name doesn't resolve.
+   - **Tested:** the Caddyfile and certificates were run with Caddy against a stand-in model server, through the provider code. Checked: the key, wrong key, path, method, size, missing or foreign client certificate, and untrusted server cases.
 5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, AI safety, kill switch, circuit breaker, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
 
 ### Investigation agent (`lib/ai/investigator`)

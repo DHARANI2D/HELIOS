@@ -45,6 +45,23 @@ export function extractJson(content: string): unknown {
   return JSON.parse(start > 0 ? cleaned.slice(start) : cleaned);
 }
 
+// Why a request didn't connect: fetch's own message is just "fetch failed",
+// the cause says which (a refused client certificate, an untrusted server
+// certificate, DNS).
+export function reason(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause as { code?: string; message?: string } | undefined;
+  const detail = `${cause?.code ?? ""} ${cause?.message ?? ""}`;
+  if (/certificate required/i.test(detail)) return "the server wants a client certificate (set HELIOS_AI_CLIENT_CERT and HELIOS_AI_CLIENT_KEY)";
+  if (/alert (unknown ca|bad certificate|certificate unknown|decrypt error)/i.test(detail)) return "the server didn't accept HELIOS's client certificate";
+  if (/SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|CERT_UNTRUSTED/i.test(detail)) return "the server's certificate isn't trusted (for a box on Caddy's own CA, set HELIOS_AI_CA)";
+  if (/CERT_HAS_EXPIRED/i.test(detail)) return "the server's certificate has expired";
+  if (/ENOTFOUND|EAI_AGAIN/i.test(detail)) return "the name doesn't resolve";
+  if (/ECONNREFUSED/i.test(detail)) return "nothing is listening there";
+  const first = (cause?.message ?? cause?.code ?? "").split("\n")[0].trim();
+  return first && first !== err.message ? `${err.message} (${first.slice(0, 160)})` : err.message;
+}
+
 // An Azure OpenAI resource's endpoint as people copy it from the portal
 // (https://NAME.openai.azure.com/) becomes its v1 API base.
 export function azureBaseUrl(endpoint: string) {
@@ -201,7 +218,7 @@ export function openAiCompatibleProvider(options: Options): LlmProvider {
         }
         return { ok: true, message: `Connected — ${model} available` };
       } catch (err) {
-        return { ok: false, message: `Can't reach ${baseUrl}: ${err instanceof Error ? err.message : String(err)}` };
+        return { ok: false, message: `Can't reach ${baseUrl}: ${reason(err)}` };
       }
     },
   };

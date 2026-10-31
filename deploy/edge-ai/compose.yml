@@ -2,7 +2,8 @@
 # AI agents analyse that client's telemetry without it leaving their site.
 # Ollama serves the model; Caddy in front of it terminates TLS and lets
 # through only HELIOS's two calls (chat completions and the model list),
-# only with the box's key. See README.md.
+# only with the box's key, and (with mutual TLS on, tls.caddy) only from a
+# client holding the MSSP's certificate. See README.md.
 #
 #   cp .env.example .env   # set AI_BOX_HOST, AI_BOX_KEY, AI_BOX_MODEL
 #   docker compose up -d
@@ -59,12 +60,13 @@ services:
       AI_BOX_HOST: "${AI_BOX_HOST:?set AI_BOX_HOST in .env}"
       AI_BOX_KEY: "${AI_BOX_KEY:?set AI_BOX_KEY in .env}"
       AI_BOX_UPSTREAM: "${AI_BOX_UPSTREAM:-ollama:11434}"
-      AI_BOX_TLS: "${AI_BOX_TLS:-}"
     ports:
       - "443:443"
       - "80:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./tls.caddy:/etc/caddy/tls.caddy:ro
+      - ./certs:/etc/caddy/certs:ro
       - caddy-data:/data
     depends_on: [ollama]
 

@@ -84,7 +84,7 @@ None of the integrations is required. Provider keys can be saved under **Setting
 | MxToolbox key (`MXTOOLBOX_API_KEY`) | Email forensics skips sender-domain diagnostics |
 | `DETONATION_PROXY` (else `HTTPS_PROXY` / `HTTP_PROXY`) | Link detonation connects directly |
 
-A client's own AI provider (an OpenAI-compatible or Azure endpoint its admin types in) is only called at a public https address. When HELIOS runs inside a client's network and that client's model is on a private address, set `HELIOS_ALLOW_PRIVATE_CLIENT_AI=1`. A platform Bedrock provider saved without credentials uses the server's own AWS identity (its IAM role, or `AWS_*`).
+A client's own AI provider (an OpenAI-compatible or Azure endpoint its admin types in) is only called at a public https address. When HELIOS runs inside a client's network and that client's model is on a private address, set `HELIOS_ALLOW_PRIVATE_CLIENT_AI=1`. A platform Bedrock provider saved without credentials uses the server's own AWS identity (its IAM role, or `AWS_*`). For on-premises AI boxes that require mutual TLS (`deploy/edge-ai`), set `HELIOS_AI_CLIENT_CERT` and `HELIOS_AI_CLIENT_KEY` (and `HELIOS_AI_CA` for a box on its own CA).
 
 The ingest workers (queue, pull collectors, source health) run in the web process. To run them on their own, set `HELIOS_INGEST_WORKER=external` on the web servers and run `npm run worker` (any number of them). `HELIOS_INGEST_MAX_PENDING` sets how many batches a client may have waiting (200).
 
