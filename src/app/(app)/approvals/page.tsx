@@ -9,6 +9,7 @@ import { formatDateTime, formatRelative } from "@/lib/format";
 import { ACTION_LABEL } from "@/lib/response/executor";
 import { approvalsOf } from "@/lib/response/service";
 import { NOTICE_LABEL, clockOf, formatSpan } from "@/lib/compliance/notices";
+import { KIND_LABEL } from "@/lib/changes/rules";
 import { ActionDecision } from "@/components/approvals/action-decision";
 import { ExecutionDecision } from "@/components/playbooks/execution-decision";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -19,7 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 // Everything waiting on someone's yes, in one place: containment the policy
 // held, playbooks that need approval, regulatory notices with the client,
-// and rulebooks waiting to be signed. Each links to where it's decided;
+// and rule changes waiting for approval. Each links to where it's decided;
 // containment can be decided right here.
 export default async function ApprovalsPage() {
   const user = await pageGuard("containment.approve");
@@ -43,7 +44,7 @@ export default async function ApprovalsPage() {
     can(user, "compliance.view")
       ? db.regulatoryNotice.findMany({ where: { ...tenantWhere, status: "AWAITING_APPROVAL" }, include: { case: { select: { id: true, title: true } }, tenant: { select: { name: true } } }, orderBy: { dueAt: { sort: "asc", nulls: "last" } } })
       : Promise.resolve([]),
-    can(user, "rulebook.view") ? db.orgPolicy.findMany({ where: { ...tenantWhere, status: "AWAITING_SIGNATURE" }, include: { tenant: { select: { id: true, name: true } } }, orderBy: { submittedAt: "asc" } }) : Promise.resolve([]),
+    can(user, "rulebook.view") ? db.ruleChange.findMany({ where: { ...(user.isClient ? tenantWhere : can(user, "ai.configure") ? {} : { tenantId: { not: null } }), status: "PENDING" }, include: { tenant: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
   ]);
   const total = actions.length + playbooks.length + notices.length + rulebooks.length;
   const client = user.isClient;
@@ -58,7 +59,7 @@ export default async function ApprovalsPage() {
       {total === 0 && (
         <Card>
           <CardContent>
-            <EmptyState icon={CheckCircle2} title="Nothing is waiting for approval" description="Containment the policy holds, playbooks that need a yes, regulatory notices for you to approve and rulebooks to sign all show up here." />
+            <EmptyState icon={CheckCircle2} title="Nothing is waiting for approval" description="Containment the policy holds, playbooks that need a yes, regulatory notices for you to approve and rule changes to approve all show up here." />
           </CardContent>
         </Card>
       )}
@@ -144,17 +145,19 @@ export default async function ApprovalsPage() {
       {rulebooks.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Rulebooks to sign</CardTitle>
-            <CardDescription>A new version of what HELIOS may do on the client&apos;s estate applies only once it&apos;s signed.</CardDescription>
+            <CardTitle className="text-base">Rule changes to approve</CardTitle>
+            <CardDescription>Changes to the rules containment runs under. Each takes effect only once the client and HELIOS have both approved it (platform changes: a second HELIOS approver).</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col divide-y">
             {rulebooks.map((r) => (
               <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{client ? `Rulebook v${r.version}` : `${r.tenant.name} · rulebook v${r.version}`}</p>
-                  <p className="text-xs text-muted-foreground">{r.reason ?? "No reason given"}{r.submittedAt ? ` · sent ${formatRelative(r.submittedAt, now)}` : ""}</p>
+                  <p className="text-sm font-medium break-words">{client || !r.tenant ? r.summary : `${r.tenant.name} · ${r.summary}`}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {KIND_LABEL[r.kind]} · asked by {r.requestedByName} {formatRelative(r.createdAt, now)} · {r.clientApprovedAt || !r.tenantId ? "" : "client's approval waiting · "}{r.heliosApprovedAt ? "HELIOS approved" : "HELIOS's approval waiting"}
+                  </p>
                 </div>
-                <Button size="sm" variant="outline" asChild><Link href={client ? "/rulebook" : `/rulebook?tenant=${r.tenant.id}`}>Review</Link></Button>
+                <Button size="sm" variant="outline" asChild><Link href={r.tenantId ? "/changes" : "/changes?scope=platform"}>Review</Link></Button>
               </div>
             ))}
           </CardContent>

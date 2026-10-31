@@ -33,16 +33,17 @@ export function SafetyControls(props: Props) {
 
   const kill = useMutation({
     mutationFn: (on: boolean) => unwrap(setKillSwitchAction(on)),
-    onSuccess: (_, on) => {
-      toast[on ? "warning" : "success"](on ? "Kill switch ON — AI agents can only suggest" : "Kill switch off — autonomy restored to profile settings");
+    onSuccess: (r, on) => {
+      if (on) toast.warning("Kill switch ON — AI agents can only suggest");
+      else toast.success(r?.pending ? "Turning the kill switch off needs a second HELIOS approver: sent to Rule changes" : "Kill switch off — autonomy restored to profile settings");
       router.refresh();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
   const save = useMutation({
     mutationFn: () => unwrap(saveAiSettingsAction({ killSwitch: props.killSwitch, firstResponse, minSeverity, maxAutoActionsPerHour: maxAuto })),
-    onSuccess: () => {
-      toast.success("AI settings saved");
+    onSuccess: (r) => {
+      toast.success(r?.pending ? `These settings give the AI more room (${r.widening.join("; ")}): they take effect once a second HELIOS approver approves them in Rule changes` : "AI settings saved");
       router.refresh();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),

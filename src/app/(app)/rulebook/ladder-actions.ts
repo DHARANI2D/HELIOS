@@ -9,12 +9,14 @@ import { can } from "@/lib/rbac";
 import { requireUser, type SessionUser } from "@/lib/session";
 import { RULED_ACTIONS } from "@/lib/rulebook/schema";
 import { MAX_LEVEL, PROMOTION, promotionCheck } from "@/lib/shadow/ladder";
-import { decidePromotion, ladderStats, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
+import { decidePromotion, ladderStats, proposePromotion, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
 import { action } from "@/lib/action";
+import { changeActorOf } from "@/lib/changes/rules";
 
 // The autonomy ladder: staff who configure AI start shadow mode, lower a
-// level, or propose a promotion; the client admin approves promotions (staff
-// only on the client's recorded instruction).
+// level at once, or propose a promotion. A promotion takes effect once the
+// client (its admin, or staff on its recorded instruction) and HELIOS (an
+// approver other than whoever proposed it) have both approved it.
 async function actor(tenantId: string, need: "manage" | "approve"): Promise<SessionUser> {
   const user = await requireUser();
   const ok = user.isClient
@@ -56,17 +58,17 @@ export const proposePromotionAction = action(async function proposePromotionActi
   const stats = (await ladderStats(tenantId, new Date(Date.now() - PROMOTION.windowDays * 86_400_000))).byAction.get(a);
   const check = promotionCheck(row.level, stats ?? { decisions: 0, agreed: 0, falseContainments: 0, criticalFalseContainments: 0, misses: 0 });
   if (!check.eligible) throw new Error(`Not yet: ${check.reasons.join("; ")}`);
-  await db.autonomyLevel.update({ where: { tenantId_actionType: { tenantId, actionType: a } }, data: { proposedLevel: row.level + 1, proposedAt: new Date(), proposalStats: JSON.parse(JSON.stringify(stats)) } });
-  const admins = await db.user.findMany({ where: { tenantId, role: "CLIENT_ADMIN", active: true }, select: { id: true } });
-  const { notify } = await import("@/lib/notifications");
-  await notify(admins.map((x) => x.id), { kind: "ai", title: "A promotion of AI autonomy is waiting for you", body: "Review the shadow-mode record and approve or decline it on your rulebook page.", href: "/rulebook" });
+  if (row.proposedLevel != null) throw new Error("A promotion is already waiting for approval");
+  await proposePromotion(tenantId, a, row.level, stats!, changeActorOf(await requireUser()));
   done();
+  revalidatePath("/changes");
 });
 
-export const decidePromotionAction = action(async function decidePromotionAction(tenantId: string, actionType: string, approve: boolean, note: string) {
+export const decidePromotionAction = action(async function decidePromotionAction(tenantId: string, actionType: string, approve: boolean, note: string, side?: "client" | "helios") {
   const user = await actor(tenantId, "approve");
-  await decidePromotion(tenantId, ruledAction.parse(actionType) as PlaybookActionType, approve, { ...who(user), isClient: user.isClient }, String(note ?? "").slice(0, 1000));
+  await decidePromotion(tenantId, ruledAction.parse(actionType) as PlaybookActionType, approve, changeActorOf(user), String(note ?? "").slice(0, 1000), user.isClient ? "client" : side === "client" ? "client" : "helios");
   done();
+  revalidatePath("/changes");
 });
 
 // Lift the circuit breaker once the connector problem is understood.

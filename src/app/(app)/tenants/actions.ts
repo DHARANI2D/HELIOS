@@ -9,6 +9,9 @@ import { goLiveBlockers } from "@/lib/ingest/health";
 import { logAction } from "@/lib/audit";
 import { requirePermission, requireUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
+import { requestChange } from "@/lib/changes/service";
+import { autonomyWidens, changeActorOf } from "@/lib/changes/rules";
+import { AUTONOMY_LABEL } from "@/lib/ai/catalog";
 import { action } from "@/lib/action";
 
 const tenantSchema = z.object({
@@ -57,18 +60,31 @@ export const saveTenantAction = action(async function saveTenantAction(input: z.
   return { id: saved.id };
 });
 
-// The client's consent for AI containment on their estate. Set by the MSSP
-// (tenants.manage) or by the client's own admin.
-export const setAiCapAction = action(async function setAiCapAction(tenantId: string, cap: string) {
+// The client's consent for AI containment on their estate. Lowering it
+// applies at once (it only takes power away from the AI). Raising it is a
+// rule change: it takes effect once the client and HELIOS have approved it
+// (lib/changes). Asked for by the MSSP (tenants.manage) or the client admin.
+export const setAiCapAction = action(async function setAiCapAction(tenantId: string, cap: string, reason?: string) {
   const user = await requireUser();
   const own = user.role === "CLIENT_ADMIN" && user.tenantId === tenantId;
   if (!own && !can(user, "tenants.manage")) throw new Error("Forbidden");
   const value = z.enum(["OFF", "SUGGEST", "CONTAIN_WITH_APPROVAL", "AUTO_CONTAIN"]).parse(cap);
-  const before = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { aiAutonomyCap: true } });
+  const before = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { aiAutonomyCap: true, name: true } });
+  if (before.aiAutonomyCap === value) return { pending: false };
+  if (autonomyWidens(before.aiAutonomyCap, value)) {
+    await requestChange(
+      { tenantId, kind: "AI_CONSENT", summary: `AI containment consent for ${before.name}: ${AUTONOMY_LABEL[before.aiAutonomyCap]} → ${AUTONOMY_LABEL[value]}`, reason: String(reason ?? "").trim() || "Allow HELIOS's AI to do more on the estate", payload: { from: before.aiAutonomyCap, to: value } },
+      changeActorOf(user),
+    );
+    revalidatePath(`/tenants/${tenantId}`);
+    revalidatePath("/changes");
+    return { pending: true };
+  }
   await db.tenant.update({ where: { id: tenantId }, data: { aiAutonomyCap: value } });
   await logAction({ actorId: user.id, action: "tenant.ai_consent_changed", detail: { tenantId, from: before.aiAutonomyCap, to: value, byClient: own } });
   revalidatePath(`/tenants/${tenantId}`);
   revalidatePath("/");
+  return { pending: false };
 });
 
 // A client's own data key: rotate it (credentials re-sealed), or destroy it

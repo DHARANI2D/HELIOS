@@ -15,7 +15,8 @@ import { agentForToken, issueAgentIdentity } from "@/lib/governance/agents";
 import { evaluateAgentAction } from "@/lib/governance/runtime";
 import { createCase } from "@/lib/cases/writer";
 import { completeManualAction, decideResponseAction, performResponseAction, recordResponseAction, requestAnalystAction } from "@/lib/response/service";
-import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook } from "@/lib/rulebook/service";
+import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
+import { approveChange, rejectChange, requestChange, withdrawChange, type ChangeActor } from "@/lib/changes/service";
 import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { resolveForClient } from "@/lib/ai/gateway";
 import { loadProfile, providerFromRow } from "@/lib/ai/resolve";
@@ -51,7 +52,7 @@ import { buildSampleEmail } from "@/lib/__tests__/fixtures/forensics";
 import { analyzeSubmission } from "@/lib/forensics/service";
 import { findRelatedCases } from "@/lib/cases/related";
 import { gatherEvidence } from "@/lib/ai/evidence";
-import { getSetting } from "@/lib/settings";
+import { aiSettings, getSetting } from "@/lib/settings";
 import { platformSecret, platformSecretStatus, storePlatformSecret } from "@/lib/platform-secrets";
 import { adoptAsTestEnvironment } from "../../../prisma/seed-test";
 import { CaseReportPdf, loadCaseReport } from "@/lib/pdf/case-report";
@@ -131,6 +132,25 @@ let stubUrl = "";
 
 describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
   let adminId: string;
+
+  // People as change control records them.
+  const adminActor = (): ChangeActor => ({ id: adminId, name: "Test Admin", role: "ADMIN", isClient: false, tenantId: null });
+  const staffActor = async (email: string, role: UserRole = "SOC_MANAGER"): Promise<ChangeActor> => {
+    const u = await db.user.upsert({ where: { email }, update: {}, create: { email, name: email.split("@")[0], role } });
+    return { id: u.id, name: u.name ?? email, role: u.role, isClient: false, tenantId: null };
+  };
+  const clientActor = async (tenantId: string, email: string): Promise<ChangeActor> => {
+    const u = await db.user.upsert({ where: { email }, update: {}, create: { email, name: email.split("@")[0], role: "CLIENT_ADMIN", tenantId } });
+    return { id: u.id, name: u.name ?? email, role: u.role, isClient: true, tenantId };
+  };
+  // Puts a client's draft in force the way change control requires: sent for
+  // approval, the client's approval recorded on its instruction, and HELIOS's
+  // from a second approver.
+  const putInForce = async (tenantId: string, note = "Client approved by email today") => {
+    if (!(await db.orgPolicy.count({ where: { tenantId, status: "AWAITING_SIGNATURE" } }))) await submitForSignature(tenantId, adminActor());
+    await signRulebook(tenantId, adminActor(), note, "client");
+    return signRulebook(tenantId, await staffActor("second.approver@test.local"), "", "helios");
+  };
 
   afterAll(() => {
     stub.close();
@@ -373,9 +393,17 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     };
     await saveDraft(tenant.id, { body, reason: "Onboarding" }, author);
     expect(await rulebookVerdict({ tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "TEST-DC-01", severity: "HIGH" })).toBeNull();
-    await expect(signRulebook(tenant.id, { ...author, isClient: false }, "short")).rejects.toThrow();
-    const v1 = await signRulebook(tenant.id, { ...author, isClient: false }, "Client CISO approved by email on 25 Oct");
-    expect(v1).toMatchObject({ status: "ACTIVE", version: 1 });
+    // Sent for approval: it applies only once the client and HELIOS have both approved it.
+    await submitForSignature(tenant.id, adminActor());
+    await expect(signRulebook(tenant.id, adminActor(), "short")).rejects.toThrow(/client's instruction/);
+    await expect(signRulebook(tenant.id, adminActor(), "", "helios")).rejects.toThrow(/other than the requester/);
+    const ciso = await clientActor(tenant.id, "ciso@rulebook.test");
+    await expect(signRulebook(tenant.id, ciso, "", "helios")).rejects.toThrow(/Only HELIOS approvers/);
+    expect(await signRulebook(tenant.id, ciso, "Read and approved")).toMatchObject({ version: 1, active: false });
+    expect(await rulebookVerdict({ tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "TEST-DC-01", severity: "HIGH", fresh: true })).toBeNull();
+    const soc = await staffActor("soc.manager@test.local");
+    expect(await signRulebook(tenant.id, soc, "Reviewed", "helios")).toMatchObject({ version: 1, active: true });
+    expect(await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } })).toMatchObject({ version: 1, signedByName: "ciso", heliosApprovedByName: "soc.manager" });
     expect(await db.auditLog.count({ where: { action: "rulebook.activated" } })).toBe(1);
 
     const verdict = await rulebookVerdict({ tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "TEST-DC-01", severity: "HIGH", fresh: true });
@@ -406,8 +434,14 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(timedOut.status).toBe("SUGGESTED");
     expect(timedOut.policyReason).toContain("downgraded to a suggestion");
 
-    // Allowlisted entities don't open cases.
-    await addAllowlistEntry(tenant.id, { kind: "ip", value: "10.9.9.9", reason: "Vulnerability scanner", owner: "Client IT", expiresAt: null }, author);
+    // Allowlisting is a rule change too: the client admin's request carries the
+    // client's approval, and nothing is allowlisted until HELIOS approves it.
+    const entry = await addAllowlistEntry(tenant.id, { kind: "ip", value: "10.9.9.9", reason: "Vulnerability scanner", owner: "Client IT", expiresAt: null }, ciso);
+    expect(entry.clientApprovedAt).not.toBeNull();
+    expect(await db.policyAllowlistEntry.count({ where: { tenantId: tenant.id } })).toBe(0);
+    await expect(approveChange(entry.id, "helios", ciso)).rejects.toThrow(/Only HELIOS approvers/);
+    expect(await approveChange(entry.id, "helios", soc)).toMatchObject({ applied: true });
+    expect(await db.policyAllowlistEntry.count({ where: { tenantId: tenant.id, value: "10.9.9.9" } })).toBe(1);
     const scan = (ip: string) => Array.from({ length: 15 }, (_, i) => ({ source: "network" as const, data: { timestamp: new Date(Date.now() - i * 1000).toISOString(), src_ip: ip, dst_ip: "10.0.0.5", dst_port: 1000 + i } }));
     const control = await ingestTelemetry(scan("10.9.9.8"), { tenantId: tenant.id });
     expect(control.casesCreated).toBeGreaterThan(0);
@@ -453,7 +487,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
 
     // On-premises only: the cloud default is skipped, the local server runs it.
     await saveDraft(tenant.id, { body: { dataHandling: { residency: "onprem", redactPii: true } }, reason: "Residency" }, author);
-    await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
+    await putInForce(tenant.id, "Client DPO approved by email");
     await db.tenantAiPolicy.create({ data: { tenantId: tenant.id, defaults: { triage: local.id } } });
     const onprem = await resolveForClient("triage", profile, { tenantId: tenant.id });
     expect(onprem.resolution).toMatchObject({ source: "client", providerId: local.id, isLocal: true, redacted: false });
@@ -464,7 +498,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
 
     // The client's own key, region-locked; masked for the cloud; never used for others.
     await saveDraft(tenant.id, { body: { dataHandling: { residency: "region", regions: ["india"], redactPii: true } }, reason: "Region" }, author);
-    await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
+    await putInForce(tenant.id, "Client DPO approved by email");
     const own = await db.aiProvider.create({ data: { name: "Test · AI choice · Own Claude", kind: "anthropic", model: "claude-haiku-5-5", region: "india", tenantId: tenant.id } });
     await db.tenantAiPolicy.update({ where: { tenantId: tenant.id }, data: { defaults: { triage: own.id } } });
     const byo = await resolveForClient("triage", profile, { tenantId: tenant.id });
@@ -488,7 +522,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     // Over budget: low-severity work moves to the built-in engine; client-key runs aren't counted.
     await db.tenantAiPolicy.update({ where: { tenantId: tenant.id }, data: { defaults: {}, monthlyBudgetUsd: 0.01 } });
     await saveDraft(tenant.id, { body: {}, reason: "Any provider" }, author);
-    await signRulebook(tenant.id, { ...author, isClient: false }, "Client DPO approved by email");
+    await putInForce(tenant.id, "Client DPO approved by email");
     await db.aiModelPrice.upsert({ where: { model: "claude-sonnet-5-5" }, update: {}, create: { model: "claude-sonnet-5-5", provider: "anthropic", inputPer: 3, outputPer: 15, source: "test" } });
     // Cache reads cost a tenth; Bedrock's model ID is priced as the same model.
     const sonnet = await db.aiModelPrice.findUniqueOrThrow({ where: { model: "claude-sonnet-5-5" } });
@@ -552,6 +586,81 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     }
   });
 
+  it("changes the rules containment runs under only with the client's and HELIOS's approval", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Change control", slug: "test-change-control", aiAutonomyCap: "SUGGEST" } });
+    const other = await db.tenant.create({ data: { name: "Test · Change control B", slug: "test-change-control-b" } });
+    const admin = adminActor();
+    const soc = await staffActor("cc.soc@test.local");
+    const client = await clientActor(tenant.id, "cc.admin@test.local");
+    const outsider = await clientActor(other.id, "cc.other@test.local");
+
+    // A rulebook version turned down goes back to being a draft; nothing is in force.
+    await saveDraft(tenant.id, { body: { actions: { BLOCK_IP: { mode: "auto", autoFrom: "HIGH" } } }, reason: "First rules" }, admin);
+    const { changeId } = await submitForSignature(tenant.id, admin);
+    await expect(rejectChange(changeId, outsider, "Not ours")).rejects.toThrow(/Not found/);
+    await rejectChange(changeId, client, "Block IP should need approval");
+    expect(await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id } })).toMatchObject({ status: "DRAFT" });
+    expect(await db.ruleChange.findUniqueOrThrow({ where: { id: changeId } })).toMatchObject({ status: "REJECTED", decidedByName: "cc.admin" });
+
+    // Editing a submitted version lapses the approvals already given.
+    const again = await submitForSignature(tenant.id, admin);
+    await signRulebook(tenant.id, client, "Fine now");
+    await saveDraft(tenant.id, { body: { actions: { BLOCK_IP: { mode: "approve", autoFrom: "HIGH" } } }, reason: "Changed after review" }, admin);
+    expect(await db.ruleChange.findUniqueOrThrow({ where: { id: again.changeId } })).toMatchObject({ status: "WITHDRAWN" });
+    await expect(signRulebook(tenant.id, soc, "", "helios")).rejects.toThrow(/no version waiting/);
+    await submitForSignature(tenant.id, admin);
+    await signRulebook(tenant.id, client, "Approved");
+    await signRulebook(tenant.id, soc, "", "helios");
+    expect((await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } })).version).toBe(1);
+
+    // Raising the client's AI consent waits for both approvals; the stored value doesn't move until then.
+    const consent = await requestChange({ tenantId: tenant.id, kind: "AI_CONSENT", summary: "Consent: suggest → auto", reason: "Pilot went well", payload: { from: "SUGGEST", to: "AUTO_CONTAIN" } }, admin);
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).aiAutonomyCap).toBe("SUGGEST");
+    await approveChange(consent.id, "client", soc, "CISO approved on the 31 Oct call");
+    await expect(approveChange(consent.id, "helios", soc)).rejects.toThrow(/recorded the client's approval/);
+    await expect(approveChange(consent.id, "helios", admin)).rejects.toThrow(/other than the requester/);
+    await approveChange(consent.id, "helios", await staffActor("cc.manager2@test.local"));
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).aiAutonomyCap).toBe("AUTO_CONTAIN");
+
+    // A change whose subject moved on lapses instead of applying.
+    const stale = await requestChange({ tenantId: tenant.id, kind: "AI_CONSENT", summary: "Consent: suggest → approval", reason: "Old request", payload: { from: "SUGGEST", to: "CONTAIN_WITH_APPROVAL" } }, client);
+    await expect(approveChange(stale.id, "helios", soc)).rejects.toThrow(/can't take effect/);
+    expect(await db.ruleChange.findUniqueOrThrow({ where: { id: stale.id } })).toMatchObject({ status: "STALE" });
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).aiAutonomyCap).toBe("AUTO_CONTAIN");
+
+    // Only the requester withdraws.
+    const removal = await requestChange({ tenantId: tenant.id, kind: "ALLOWLIST_ADD", summary: "Allow host SCAN-01", reason: "Scanner", payload: { kind: "host", value: "SCAN-01", reason: "Scanner", owner: "IT", expiresAt: null } }, client);
+    await expect(withdrawChange(removal.id, admin)).rejects.toThrow(/Only the person who asked/);
+    await withdrawChange(removal.id, client);
+    expect(await db.policyAllowlistEntry.count({ where: { tenantId: tenant.id } })).toBe(0);
+
+    // Platform AI limits: a second HELIOS approver, never a client, never the requester.
+    await setSetting("ai.killSwitch", true);
+    const before = { killSwitch: true, firstResponse: true, minSeverity: "MEDIUM", maxAutoActionsPerHour: 10 };
+    for (const [k, v] of Object.entries({ "ai.firstResponse.enabled": true, "ai.firstResponse.minSeverity": "MEDIUM", "ai.maxAutoActionsPerHour": 10 })) await setSetting(k as never, v as never);
+    await expect(requestChange({ tenantId: tenant.id, kind: "AI_SETTINGS", summary: "x", reason: "x", payload: { before, after: before, widening: [] } }, admin)).rejects.toThrow(/aren't a client's/);
+    const killOff = await requestChange({ tenantId: null, kind: "AI_SETTINGS", summary: "Turn the AI kill switch off", reason: "Incident over", payload: { before, after: { ...before, killSwitch: false }, widening: ["turns the kill switch off"] } }, admin);
+    await expect(approveChange(killOff.id, "client", soc)).rejects.toThrow(/doesn't need that approval/);
+    await expect(approveChange(killOff.id, "helios", client)).rejects.toThrow(/Not found/);
+    await expect(approveChange(killOff.id, "helios", admin)).rejects.toThrow(/other than the requester/);
+    expect((await aiSettings()).killSwitch).toBe(true);
+    expect(await approveChange(killOff.id, "helios", soc)).toMatchObject({ applied: true });
+    expect((await aiSettings()).killSwitch).toBe(false);
+    // A client's own users never see platform changes, or another client's.
+    const seen = await tenantDb(other.id).ruleChange.findMany();
+    expect(seen).toEqual([]);
+
+    // Every step is in the audit chain.
+    for (const a of ["change.requested", "change.approved", "change.rejected", "change.withdrawn", "change.applied", "change.stale"]) expect(await db.auditLog.count({ where: { action: a } })).toBeGreaterThan(0);
+
+    // A rulebook changed outside HELIOS stops automatic containment for that client.
+    await db.orgPolicy.updateMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, data: { body: { actions: { ISOLATE_HOST: { mode: "auto", autoFrom: "LOW" } } } } });
+    const tampered = await rulebookVerdict({ tenantId: tenant.id, actionType: "BLOCK_IP", target: "203.0.113.9", severity: "CRITICAL", fresh: true });
+    expect(tampered?.hits).toEqual([expect.objectContaining({ rule: "rulebook.integrity", outcome: "PENDING_APPROVAL" })]);
+    expect(await db.auditLog.count({ where: { action: "rulebook.integrity_failed" } })).toBe(1);
+    await setSetting("ai.killSwitch", false);
+  });
+
   it("measures AI in shadow mode and moves the ladder on the record", async () => {
     const tenant = await db.tenant.create({ data: { name: "Test · Shadow", slug: "test-shadow" } });
     const author = { id: adminId, name: "Test Admin" };
@@ -576,13 +685,20 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await db.aiDecisionOutcome.createMany({ data: Array.from({ length: 20 }, () => ({ tenantId: tenant.id, caseId: kase.id, kind: "action", actionType: "BLOCK_IP" as const, aiOutcome: "EXECUTED", humanOutcome: "took", agreed: true, severity: "HIGH" as const })) });
     await reviewLadders();
     expect(await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).toMatchObject({ level: 0, proposedLevel: 1 });
-    await expect(decidePromotion(tenant.id, "BLOCK_IP", true, { ...author, isClient: false }, "short")).rejects.toThrow();
-    await decidePromotion(tenant.id, "BLOCK_IP", true, { ...author, isClient: true }, "");
+    expect(await db.ruleChange.findFirstOrThrow({ where: { tenantId: tenant.id, kind: "AUTONOMY_RAISE" } })).toMatchObject({ status: "PENDING", requestedByName: "automatic review", requestedById: null });
+    // Staff recording the client's approval need its instruction; the client's approval alone isn't enough.
+    await expect(decidePromotion(tenant.id, "BLOCK_IP", true, adminActor(), "short", "client")).rejects.toThrow(/instruction/);
+    const clientAdmin = await clientActor(tenant.id, "admin@shadow.test");
+    expect(await decidePromotion(tenant.id, "BLOCK_IP", true, clientAdmin, "")).toMatchObject({ applied: false });
+    expect((await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).level).toBe(0);
+    expect(await decidePromotion(tenant.id, "BLOCK_IP", true, adminActor(), "Shadow record reviewed", "helios")).toMatchObject({ applied: true });
     expect((await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).level).toBe(1);
     expect(observing(await ladderFor(tenant.id))).toBe(false);
+    // Nobody raises a level directly.
+    await expect(setAutonomyLevel(tenant.id, "BLOCK_IP", 3, author, "Test")).rejects.toThrow(/approval/);
 
     // A wrong containment of a critical asset this week drops it back.
-    await setAutonomyLevel(tenant.id, "BLOCK_IP", 3, author, "Test");
+    await db.autonomyLevel.update({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } }, data: { level: 3 } });
     await db.aiDecisionOutcome.create({ data: { tenantId: tenant.id, caseId: kase.id, kind: "action", actionType: "BLOCK_IP", aiOutcome: "EXECUTED", humanOutcome: "did_not", agreed: false, falseContainment: true, critical: true, severity: "HIGH" } });
     await reviewLadders();
     expect((await db.autonomyLevel.findUniqueOrThrow({ where: { tenantId_actionType: { tenantId: tenant.id, actionType: "BLOCK_IP" } } })).level).toBe(1);
@@ -647,7 +763,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
 
       // A time-boxed IP block rolls itself back when its time is up.
       await saveDraft(tenant.id, { body: { timeBoxes: { blockIpHours: 1 } }, reason: "Time boxes" }, { id: adminId, name: "Test Admin" });
-      await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved by email today");
+      await putInForce(tenant.id, "Client approved by email today");
       await onboardIntegration({ tenantId: tenant.id, vendor: "response_webhook", config: { responseWebhookUrl: `${stubUrl}/actions` } }, adminId);
       const block = await recordResponseAction({ caseId: kase.id, actionType: "BLOCK_IP", target: "203.0.113.88", source: "analyst", status: "PENDING_APPROVAL" });
       expect((await performResponseAction(block.id, { id: adminId, name: "Test Admin" })).status).toBe("EXECUTED");
@@ -1071,7 +1187,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
         body: { obligations: { regulatedEntity: true, certInContact: { name: "Client CISO", email: "ciso@client.test", phone: "+91 11 0000 0000" }, certInMinSeverity: "HIGH", reportRecipients: ["soc@client.test"], dpdpFiduciary: true, dpdpContact: { name: "Client DPO", email: "dpo@client.test", phone: "" }, dpdpWithoutDelayHours: 12 } },
         reason: "Reporting obligations",
       }, author);
-      await signRulebook(tenant.id, { ...author, isClient: false }, "Client CISO approved by email today");
+      await putInForce(tenant.id, "Client CISO approved by email today");
       await db.endpoint.create({ data: { tenantId: tenant.id, hostname: "CERT-DB-01", ipAddress: "10.9.0.5", os: "Windows Server 2022", assetClass: "server", assetType: "database_server", criticality: "critical" } });
       const clientUser = await db.user.create({ data: { email: "ciso@client.test", name: "Client CISO", role: "CLIENT_ADMIN", tenantId: tenant.id } });
       const staff: SessionUser = { id: adminId, role: "ADMIN", name: "Test Admin", email: "admin@test.local", tenantId: null, tenantName: null, domains: [], isClient: false };
@@ -1205,7 +1321,7 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
       // A client approver chain texts its approver, through the same outbox.
       const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Alerting test", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
       await saveDraft(tenant.id, { body: { approvers: { chain: [{ name: "Night CISO", contact: "+91 98000 00009", channel: "sms", timeoutMinutes: 10 }] } }, reason: "Approvers" }, { id: adminId, name: "Test Admin" });
-      await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved by email today");
+      await putInForce(tenant.id, "Client approved by email today");
       await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "BLOCK_IP", target: "203.0.113.9", source: "ai", status: "PENDING_APPROVAL" } });
       await escalatePendingApprovals();
       const asked = await db.alertDelivery.findFirstOrThrow({ where: { to: "+919800000009" } });
@@ -1465,7 +1581,7 @@ tags: [attack.execution, attack.t1059.001]`;
       const tenant = await db.tenant.create({ data: { name: "Test · Retention", slug: "test-retention" } });
       // CERT-In applies: nothing under 180 days.
       await saveDraft(tenant.id, { body: { obligations: { regulatedEntity: true } }, reason: "CERT-In" }, { id: adminId, name: "Test Admin" });
-      await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved by email today");
+      await putInForce(tenant.id, "Client approved by email today");
       await expect(setRetention(tenant.id, { hotDays: 30, retentionDays: 90 }, adminId)).rejects.toThrow(/at least 180 days/);
       await setRetention(tenant.id, { hotDays: 30, retentionDays: 180 }, adminId);
       const changed = await db.auditLog.findFirstOrThrow({ where: { action: "retention.changed" }, orderBy: { seq: "desc" } });
@@ -1832,7 +1948,7 @@ tags: [attack.execution, attack.t1059.001]`;
     expect((await db.responseAction.findFirstOrThrow({ where: { caseId: kase.id, actionType: "PURGE_EMAIL" } })).result).toMatchObject({ summary: expect.stringContaining("Remove message <lure-1@evil.example> from ann@corp.example, bob@corp.example") });
 
     await saveDraft(tenant.id, { body: { identities: { breakGlass: ["break-glass*"] } }, reason: "Onboarding" }, author);
-    await signRulebook(tenant.id, { ...author, isClient: false }, "Client approved by email today");
+    await putInForce(tenant.id, "Client approved by email today");
     const reset = await requestAnalystAction({ caseId: kase.id, actionType: "RESET_PASSWORD", target: "break-glass-01@corp.example", actor: author, canApprove: true });
     expect(reset.status).toBe("BLOCKED");
   });
@@ -1847,7 +1963,7 @@ tags: [attack.execution, attack.t1059.001]`;
     expect((await db.responseAction.findFirstOrThrow({ where: { caseId: kase.id, actionType: "COLLECT_FORENSICS" } })).result).toMatchObject({ summary: expect.stringContaining("Collect an investigation package from FOR-WS-22 in the EDR console") });
     // A crown jewel needs a person's approval for it too.
     await saveDraft(tenant.id, { body: { assets: { crownJewels: [{ kind: "hostname", value: "FOR-DB-*", note: "Core banking database" }] } }, reason: "Onboarding" }, author);
-    await signRulebook(tenant.id, { ...author, isClient: false }, "Client approved by email today");
+    await putInForce(tenant.id, "Client approved by email today");
     const jewel = await requestAnalystAction({ caseId: kase.id, actionType: "COLLECT_FORENSICS", target: "FOR-DB-01", actor: author, canApprove: false });
     expect(jewel.status).toBe("PENDING_APPROVAL");
   });
@@ -1892,7 +2008,7 @@ tags: [attack.execution, attack.t1059.001]`;
     expect(seen.length).toBe(fetched);
 
     // Review reminders: two weeks ahead, then overdue, once each.
-    await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved the Git version by email");
+    await putInForce(tenant.id, "Client approved the Git version by email");
     const active = await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } });
     await db.orgPolicy.update({ where: { id: active.id }, data: { signedAt: new Date(Date.now() - 20 * DAY) } });
     await remindRulebookReviews(new Date());

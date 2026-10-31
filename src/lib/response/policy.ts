@@ -9,7 +9,9 @@ import { levelCap } from "@/lib/shadow/ladder";
 // model proposes, this policy disposes. Each layer sets a ceiling and the
 // most restrictive one wins, in a fixed order of precedence:
 //   grounding → AI safety → kill switch → circuit breaker → plan → client consent → client rulebook →
-//   autonomy ladder → agent profile → the model's evaluation → rate limit.
+//   autonomy ladder → agent profile (and the AI's initial-containment scope) → the model's evaluation → rate limit.
+// None of these can be changed by an AI: each is set by people, and a change
+// that gives the AI more room takes effect only once approved (lib/changes).
 // Every decision carries the reason shown to analysts and written to the
 // audit chain, and a trace naming every rule that restricted it.
 
@@ -70,6 +72,12 @@ export interface PolicyDecision {
 // easy to get wrong at scale. They can still be approved by a human.
 const ALWAYS_HUMAN: PlaybookActionType[] = ["DISABLE_USER", "KILL_PROCESS"];
 
+// What the AI may run on its own: the first, reversible steps of
+// containment (and collecting logs), each one undoable from the case. All
+// else it proposes needs a person, whatever the rules allow: the AI contains
+// first, people take every decision after that.
+export const AI_INITIAL_CONTAINMENT: PlaybookActionType[] = ["ISOLATE_HOST", "BLOCK_IP", "QUARANTINE_FILE", "BLOCK_SENDER", "COLLECT_LOGS"];
+
 function capOutcome(cap: AiAutonomy): Outcome {
   return cap === "AUTO_CONTAIN" ? "EXECUTED" : cap === "CONTAIN_WITH_APPROVAL" ? "PENDING_APPROVAL" : "SUGGESTED";
 }
@@ -102,6 +110,7 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
   if (agent === "SUGGESTED") add("agent", "agent.autonomy", "SUGGESTED", "Containment controller is set to suggest only");
   else if (agent === "PENDING_APPROVAL") add("agent", "agent.autonomy", "PENDING_APPROVAL", "Containment requires analyst approval");
   if (ALWAYS_HUMAN.includes(input.actionType)) add("agent", "agent.alwaysHuman", "PENDING_APPROVAL", "This action always needs a human");
+  else if (!AI_INITIAL_CONTAINMENT.includes(input.actionType)) add("agent", "agent.initialContainment", "PENDING_APPROVAL", "Beyond initial containment: the AI only isolates, blocks, quarantines and collects logs on its own; a person decides this one");
   if (!input.allowedActions.includes(input.actionType)) add("agent", "agent.allowedActions", "PENDING_APPROVAL", "Action isn't on the pre-approved list");
   if (input.confidence < input.minConfidence) add("agent", "agent.minConfidence", "PENDING_APPROVAL", `Confidence ${pct(input.confidence)} is below the ${pct(input.minConfidence)} bar`);
   if (input.targetUnknown) add("agent", "agent.targetInInventory", "PENDING_APPROVAL", "The host isn't in the client's asset inventory — isolation needs approval");

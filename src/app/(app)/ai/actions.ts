@@ -9,13 +9,15 @@ import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { requirePermission } from "@/lib/session";
 import { seal } from "@/lib/secrets";
-import { setSetting } from "@/lib/settings";
+import { aiSettings, setSetting } from "@/lib/settings";
 import { AGENT_KEYS, AGENT_TYPES, PROVIDER_PRESETS, type AgentKey } from "@/lib/ai/catalog";
 import { providerFromRow } from "@/lib/ai/resolve";
 import { anthropicProvider } from "@/lib/ai/anthropic";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
 import { startEvaluation } from "@/lib/ai/evals/service";
 import { action } from "@/lib/action";
+import { requestChange } from "@/lib/changes/service";
+import { changeActorOf, profileWidening, settingsWidening, type ContainmentProfile } from "@/lib/changes/rules";
 import { providerColumns, providerInputSchema, providerSecret, type ProviderInput } from "@/lib/ai/provider-input";
 
 function revalidate() {
@@ -30,23 +32,48 @@ const settingsSchema = z.object({
   maxAutoActionsPerHour: z.number().int().min(0).max(100),
 });
 
-export const saveAiSettingsAction = action(async function saveAiSettingsAction(input: z.input<typeof settingsSchema>) {
+// Platform AI settings. Anything that gives the AI more room (kill switch
+// off, first response on or for lower severities, a higher hourly limit)
+// waits for a second HELIOS approver (lib/changes); anything that gives it
+// less applies at once.
+export const saveAiSettingsAction = action(async function saveAiSettingsAction(input: z.input<typeof settingsSchema>, reason?: string) {
   const user = await requirePermission("ai.configure");
   const s = settingsSchema.parse(input);
+  const before = await aiSettings();
+  const widening = settingsWidening(before, s);
+  if (widening.length) {
+    await requestChange({ tenantId: null, kind: "AI_SETTINGS", summary: `Platform AI settings: ${widening.join("; ")}`, reason: String(reason ?? "").trim() || widening.join("; "), payload: { before, after: s, widening } }, changeActorOf(user));
+    revalidate();
+    revalidatePath("/changes");
+    return { pending: true, widening };
+  }
   await setSetting("ai.killSwitch", s.killSwitch, user.id);
   await setSetting("ai.firstResponse.enabled", s.firstResponse, user.id);
   await setSetting("ai.firstResponse.minSeverity", s.minSeverity, user.id);
   await setSetting("ai.maxAutoActionsPerHour", s.maxAutoActionsPerHour, user.id);
   await logAction({ actorId: user.id, action: "ai.settings_changed", detail: s });
   revalidate();
+  return { pending: false, widening };
 });
 
 // The kill switch has its own action so it's one click from anywhere.
-export const setKillSwitchAction = action(async function setKillSwitchAction(on: boolean) {
+// Turning it on stops the AI at once; turning it off needs a second
+// HELIOS approver.
+export const setKillSwitchAction = action(async function setKillSwitchAction(on: boolean, reason?: string) {
   const user = await requirePermission("ai.configure");
-  await setSetting("ai.killSwitch", on, user.id);
-  await logAction({ actorId: user.id, action: on ? "ai.kill_switch_on" : "ai.kill_switch_off" });
+  if (!on) {
+    const before = await aiSettings();
+    if (!before.killSwitch) return { pending: false };
+    const after = { ...before, killSwitch: false };
+    await requestChange({ tenantId: null, kind: "AI_SETTINGS", summary: "Turn the AI kill switch off", reason: String(reason ?? "").trim() || "Resume AI containment under the rules in force", payload: { before, after, widening: ["turns the kill switch off"] } }, changeActorOf(user));
+    revalidate();
+    revalidatePath("/changes");
+    return { pending: true };
+  }
+  await setSetting("ai.killSwitch", true, user.id);
+  await logAction({ actorId: user.id, action: "ai.kill_switch_on" });
   revalidate();
+  return { pending: false };
 });
 
 const providerSchema = z.object({ isDefault: z.boolean().default(false) });
@@ -141,9 +168,30 @@ export const saveAgentProfileAction = action(async function saveAgentProfileActi
     allowedActions: p.allowedActions,
     instructions: p.instructions?.trim() || null,
   };
+  // The containment agent's limits are rules: giving it more room waits for
+  // a second HELIOS approver (lib/changes); the rest of the profile, and
+  // anything that narrows it, applies at once.
+  let pending: string[] = [];
+  if (p.key === "containment") {
+    const row = await db.aiAgentProfile.findUnique({ where: { key: p.key } });
+    const before: ContainmentProfile = row ? { enabled: row.enabled, autonomy: row.autonomy, minConfidence: row.minConfidence, allowedActions: row.allowedActions } : { enabled: false, autonomy: "SUGGEST", minConfidence: 1, allowedActions: [] };
+    const after: ContainmentProfile = { enabled: p.enabled, autonomy: p.autonomy, minConfidence: p.minConfidence, allowedActions: p.allowedActions };
+    pending = profileWidening(before, after);
+    if (pending.length) {
+      // Save everything else now, keeping the current limits until approved.
+      Object.assign(data, before);
+      await db.aiAgentProfile.upsert({ where: { key: p.key }, update: data, create: { key: p.key, ...data } });
+      await requestChange({ tenantId: null, kind: "AGENT_PROFILE", summary: `Containment agent: ${pending.join("; ")}`, reason: pending.join("; "), payload: { key: "containment", before, after, widening: pending } }, changeActorOf(user));
+      await logAction({ actorId: user.id, action: "ai.profile_updated", detail: { ...p, instructions: p.instructions ? `${p.instructions.length} chars` : null, awaitingApproval: pending } });
+      revalidate();
+      revalidatePath("/changes");
+      return { pending };
+    }
+  }
   await db.aiAgentProfile.upsert({ where: { key: p.key }, update: data, create: { key: p.key, ...data } });
   await logAction({ actorId: user.id, action: "ai.profile_updated", detail: { ...p, instructions: p.instructions ? `${p.instructions.length} chars` : null } });
   revalidate();
+  return { pending };
 });
 
 const evalSchema = z.object({

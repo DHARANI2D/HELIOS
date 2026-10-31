@@ -66,8 +66,8 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
         allowedActions: p.allowedActions as never,
         instructions: p.instructions,
       })),
-    onSuccess: () => {
-      toast.success(`${p.name} saved`);
+    onSuccess: (r) => {
+      toast.success(r?.pending?.length ? `${p.name} saved; giving it more room (${r.pending.join("; ")}) waits for a second HELIOS approver in Rule changes` : `${p.name} saved`);
       router.refresh();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),

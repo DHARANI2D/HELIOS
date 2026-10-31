@@ -3,10 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Check, Eye, Loader2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Eye, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { decidePromotionAction, lowerLevelAction, proposePromotionAction, resumeAutomationAction, startShadowModeAction } from "@/app/(app)/rulebook/ladder-actions";
+import { lowerLevelAction, proposePromotionAction, resumeAutomationAction, startShadowModeAction } from "@/app/(app)/rulebook/ladder-actions";
 import { DEMOTION, LEVELS, PROMOTION } from "@/lib/shadow/ladder";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -50,8 +50,7 @@ export function LadderPanel({ tenantId, started, rows, verdicts, canManage, canA
   const [note, setNote] = React.useState("");
   const start = useAct(() => unwrap(startShadowModeAction(tenantId)), "Shadow mode started: the AI observes and is measured against your analysts");
   const lower = useAct(({ a, level }: { a: string; level: number }) => unwrap(lowerLevelAction(tenantId, a, level, note || "Lowered by the SOC")), "Level lowered");
-  const propose = useAct((a: string) => unwrap(proposePromotionAction(tenantId, a)), "Promotion proposed to the client");
-  const decide = useAct(({ a, approve }: { a: string; approve: boolean }) => unwrap(decidePromotionAction(tenantId, a, approve, note)), "Done");
+  const propose = useAct((a: string) => unwrap(proposePromotionAction(tenantId, a)), "Promotion proposed: it takes effect once the client and HELIOS approve it");
 
   return (
     <div className="flex flex-col gap-4">
@@ -118,12 +117,7 @@ export function LadderPanel({ tenantId, started, rows, verdicts, canManage, canA
                         {r.proposedLevel != null ? (
                           <div className="flex flex-col items-end gap-1 rounded-md border border-primary/40 bg-primary/5 p-1.5">
                             <span className="text-[11px]">Proposed: L{r.proposedLevel} {LEVELS[r.proposedLevel].name}</span>
-                            {canApprove && (
-                              <div className="flex gap-1">
-                                <Button size="sm" className="h-6 px-2 text-[11px]" onClick={() => decide.mutate({ a: r.actionType, approve: true })} disabled={decide.isPending || (!isClient && note.trim().length < 10)}><Check /> Approve</Button>
-                                <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={() => decide.mutate({ a: r.actionType, approve: false })} disabled={decide.isPending}><X /> Decline</Button>
-                              </div>
-                            )}
+                            <a href="#rule-changes" className="text-[10px] text-muted-foreground underline-offset-2 hover:underline">Needs the client&apos;s and HELIOS&apos;s approval{canApprove ? ": decide below" : ""}</a>
                           </div>
                         ) : (
                           canManage && r.level < 4 && (
@@ -146,7 +140,7 @@ export function LadderPanel({ tenantId, started, rows, verdicts, canManage, canA
             </table>
           </div>
           {(canManage || canApprove) && (
-            <Input className="h-8 text-xs" value={note} onChange={(e) => setNote(e.target.value)} placeholder={isClient ? "Note (optional)" : "Reason for a change, or the client's instruction when approving on their behalf"} aria-label="Note for ladder changes" />
+            <Input className="h-8 text-xs" value={note} onChange={(e) => setNote(e.target.value)} placeholder={isClient ? "Note (optional)" : "Reason for lowering a level"} aria-label="Note for ladder changes" />
           )}
         </>
       )}

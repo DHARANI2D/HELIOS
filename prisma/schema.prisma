@@ -199,6 +199,7 @@ model Tenant {
   aiProviders  AiProvider[]
   aiPolicy     TenantAiPolicy?
   autonomy     AutonomyLevel[]
+  ruleChanges  RuleChange[]
   keys         TenantKey[]
   notices      RegulatoryNotice[]
   tunings      DetectionTuning[]
@@ -1043,24 +1044,28 @@ enum OrgPolicyStatus {
 // versioned, hashed and signed by the client. One ACTIVE version at a time;
 // the response policy reads it on every decision.
 model OrgPolicy {
-  id             String          @id @default(cuid())
-  tenantId       String
-  version        Int
-  status         OrgPolicyStatus @default(DRAFT)
-  body           Json
-  contentHash    String
-  template       String?
-  reason         String?         @db.Text
-  authoredById   String?
-  authoredByName String
-  submittedAt    DateTime?
-  signedById     String?
-  signedByName   String?
-  signedAt       DateTime?
-  signatureNote  String?         @db.Text
-  effectiveFrom  DateTime?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                   String          @id @default(cuid())
+  tenantId             String
+  version              Int
+  status               OrgPolicyStatus @default(DRAFT)
+  body                 Json
+  contentHash          String
+  template             String?
+  reason               String?         @db.Text
+  authoredById         String?
+  authoredByName       String
+  submittedAt          DateTime?
+  signedById           String?
+  signedByName         String?
+  signedAt             DateTime?
+  signatureNote        String?         @db.Text
+  // HELIOS's approval, the second of the two a version needs (lib/changes).
+  heliosApprovedById   String?
+  heliosApprovedByName String?
+  heliosApprovedAt     DateTime?
+  effectiveFrom        DateTime?
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
@@ -1110,6 +1115,72 @@ enum ResponseActionStatus {
 // How far AI may go for one client and one action type, earned in shadow
 // mode (lib/shadow/ladder.ts): 0 observe, 1 suggest, 2 approve, 3 act and
 // notify, 4 act. A promotion waits for the client's approval.
+// Change control for the rules containment runs under (lib/changes): a
+// rulebook version, an allowlist entry added or removed, a rise in AI
+// autonomy or consent, or a wider platform AI setting takes effect only once
+// it's approved: by the client and by HELIOS for a client's rules, by a
+// second HELIOS approver for platform settings. Nobody approves their own
+// request for HELIOS, and no AI agent can request or approve anything.
+// Changes that only take power away from the AI (kill switch, lowering a
+// level or consent) apply at once.
+enum RuleChangeKind {
+  RULEBOOK_VERSION
+  ALLOWLIST_ADD
+  ALLOWLIST_REMOVE
+  AUTONOMY_RAISE
+  AI_CONSENT
+  AGENT_PROFILE
+  AI_SETTINGS
+}
+
+enum RuleChangeStatus {
+  PENDING
+  APPLIED
+  REJECTED
+  WITHDRAWN
+  // What it would change moved on before it was approved.
+  STALE
+}
+
+model RuleChange {
+  id                   String           @id @default(cuid())
+  // null for platform settings (agent profiles, AI settings).
+  tenantId             String?
+  kind                 RuleChangeKind
+  status               RuleChangeStatus @default(PENDING)
+  summary              String           @db.Text
+  reason               String           @db.Text
+  payload              Json
+  payloadHash          String
+  // null when HELIOS's automatic ladder review proposed it.
+  requestedById        String?
+  requestedByName      String
+  requestedByClient    Boolean          @default(false)
+  clientApprovedById   String?
+  clientApprovedByName String?
+  clientApprovedAt     DateTime?
+  // Recorded by HELIOS staff on the client's instruction.
+  clientOnBehalf       Boolean          @default(false)
+  clientApprovalNote   String?          @db.Text
+  heliosApprovedById   String?
+  heliosApprovedByName String?
+  heliosApprovedAt     DateTime?
+  heliosApprovalNote   String?          @db.Text
+  decidedById          String?
+  decidedByName        String?
+  decidedAt            DateTime?
+  decisionNote         String?          @db.Text
+  appliedAt            DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status])
+  @@index([status, createdAt])
+  @@map("rule_changes")
+}
+
 model AutonomyLevel {
   tenantId      String
   actionType    PlaybookActionType

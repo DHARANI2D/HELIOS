@@ -68,7 +68,7 @@
 - **Channels.** Email uses the SMTP server (`lib/mail.ts`). SMS and WhatsApp go through Twilio's Messages API, or a JSON webhook to any other gateway (e.g. a DLT-registered Indian SMS provider), signed with `X-Helios-Timestamp` and `X-Helios-Signature`, an HMAC-SHA256 of `timestamp.body`.
   - **WhatsApp templates:** WhatsApp only takes free text inside a conversation the person opened in the last 24 hours. For anything else, set an approved Content template; its `{{1}}` gets the alert and `{{2}}` the link.
   - **Where it's set:** under Settings → Alert channels; the credentials are provider keys.
-- **Approvals inbox.** `/approvals` lists what's waiting on someone's yes, in the viewer's scope: containment the policy held (decided right there), playbooks needing approval, regulatory notices with the client, and rulebooks to sign. The response policy still applies to each decision.
+- **Approvals inbox.** `/approvals` lists what's waiting on someone's yes, in the viewer's scope: containment the policy held (decided right there), playbooks needing approval, regulatory notices with the client, and rule changes to approve. The response policy still applies to each decision.
 
 ### Reference data in the database
 
@@ -184,7 +184,7 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
    - **Mutual TLS (optional):** the box also requires a client certificate from the MSSP's CA (`make-certs.sh`, `tls.caddy`). HELIOS presents `HELIOS_AI_CLIENT_CERT`/`HELIOS_AI_CLIENT_KEY` to every on-premises OpenAI-compatible provider (`lib/ai/mtls.ts`, an undici agent). `HELIOS_AI_CA` trusts a box on Caddy's own CA alongside the public roots.
    - **Failed connection tests say why:** a client certificate is wanted, or was refused; the server isn't trusted; nothing is listening; the name doesn't resolve.
    - **Tested:** the Caddyfile and certificates were run with Caddy against a stand-in model server, through the provider code. Checked: the key, wrong key, path, method, size, missing or foreign client certificate, and untrusted server cases.
-5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, AI safety, kill switch, circuit breaker, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
+5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, AI safety, kill switch, circuit breaker, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. The AI runs only *initial containment* on its own (`AI_INITIAL_CONTAINMENT`): isolating a host, blocking an IP or a sender, quarantining a file and collecting logs, each reversible from the case. Everything else it proposes waits for a person, whatever the rules allow. Every containment it runs notifies the SOC's managers and the case's watchers at once, and the client's admins (except at ladder level 4, which reports in the digest). Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
 
 ### Investigation agent (`lib/ai/investigator`)
 
@@ -213,7 +213,7 @@ An analyst can send the investigation agent onto a case. It works the case on it
 
 ### Client rulebooks (`lib/rulebook`)
 
-Each client signs a versioned rulebook (`org_policies`, one ACTIVE version, hashed). The rules can only restrict what the plan and the client's consent allow.
+Each client has a versioned rulebook (`org_policies`, one ACTIVE version, hashed). A version takes effect only once the client has signed it and HELIOS has approved it (see *Change control* below). The rules can only restrict what the plan and the client's consent allow.
 
 - **Shape** (`schema.ts`, shared with the editor):
   - crown-jewel and never-isolate assets, matched by hostname pattern, IP, asset group, type or criticality;
@@ -226,16 +226,17 @@ Each client signs a versioned rulebook (`org_policies`, one ACTIVE version, hash
   - CERT-In obligations and a review interval.
 - **Evaluation** (`evaluate.ts`): pure; returns every rule that restricts an action. *Hard* rules bind people too: never-isolate assets, protected accounts, actions the client forbids, and the two-person rule. The executor re-checks them against the latest active version at the moment of acting, for AI, analysts, playbooks and direct isolation alike.
 - **Approvals**: a two-person action counts distinct approvers. `escalation.ts` walks pending approvals along the client's chain on a background job: app users are notified, Slack or Teams get a post, email, SMS and WhatsApp approvers get a message through the alert outbox (`lib/alerts`), and for a phone call, or a channel that isn't set up, the SOC is asked to make contact. The rulebook editor's test button sends a real message on each channel. When the chain runs out, the action holds or becomes a suggestion, as the rulebook says.
-- **Allowlist** (`policy_allowlist`): every entry has an owner, a reason and an expiry. Allowlisted hosts, IPs and accounts open no SIEM cases, and AI containment against them is only suggested.
+- **Allowlist** (`policy_allowlist`): every entry has an owner, a reason and an expiry. Allowlisted hosts, IPs and accounts open no SIEM cases, and AI containment against them is only suggested. Adding or removing an entry is a rule change, so it needs both approvals: otherwise a hijacked client account could shield an attacker's host.
+- **Integrity:** the version in force is re-hashed each time it's loaded. If the stored text no longer matches the approved fingerprint (it was edited outside HELIOS), every AI action for that client needs a person (`rulebook.integrity`), and the audit chain and SOC managers hear of it.
 - **Lifecycle** (`service.ts`, `/rulebook`):
   - drafts start from industry templates;
   - the dry run (`dry-run.ts`) replays the last 30 days of AI proposals and probes each action;
   - versions show diffs;
-  - the client admin signs, or staff activate on the client's recorded instruction;
+  - sent for approval, a version needs the client's signature (its admin, or staff recording the client's instruction) and HELIOS's approval (an approver other than whoever sent it); editing it afterwards lapses both;
   - YAML import and export.
 - **Kept in Git** (`git-sync.ts`): a client can keep the rulebook as YAML in its own repository (GitHub's contents API, GitLab's repository files API on gitlab.com or a self-managed host, or any https URL that returns the file), with an optional read-only token sealed with the client's key.
   - **Hourly:** the job reads the file. A changed file becomes a draft that names its source and file hash. A file that's already in force, or already the open draft, creates nothing.
-  - **Signing:** a draft from Git applies only once it's signed in HELIOS, so a commit alone never changes what HELIOS may do.
+  - **Approval:** a draft from Git applies only once it's approved in HELIOS by both sides, so a commit alone never changes what HELIOS may do.
   - **Errors:** bad YAML, an invalid rulebook, a missing file or a refused token is recorded on the page and notified once per distinct problem.
   - **Outbound address check** (`lib/net/public-fetch.ts`): client admins enter the address, so only https to hosts that resolve to public addresses is fetched, and redirects aren't followed. That keeps out the cloud metadata endpoint and internal services.
 - **Reviews** (`reminders.ts`, every 6 hours): client admins and SOC managers hear two weeks before a signed rulebook's review date (every 90 days unless the client sets otherwise) and again once it's overdue. Allowlist entries are flagged a week before they lapse. Each reminder goes once.
@@ -285,7 +286,26 @@ Each client has an autonomy ladder per action type (`autonomy_levels`): L0 obser
 
 - **L0:** proposals are recorded as `SHADOW`, with the outcome they would have had. With every action at L0, the AI's analysis stays hidden on the case until it closes.
 - **Closing:** a case can only be closed with a disposition (true positive, benign true positive, false positive) and a reason. `scoreClosedCase` then scores each AI proposal against what analysts did, recording matched decisions, containments analysts wouldn't have done (and whether the asset was critical), and misses. It also scores the AI's verdict.
-- **Review:** the hourly review demotes after a bad week, or straight to L1 after a critical mistake. It proposes promotions on a clean 30-day record, which the client admin approves.
+- **Review:** the hourly review demotes after a bad week, or straight to L1 after a critical mistake. It proposes promotions on a clean 30-day record. A promotion is a rule change: it takes effect only once the client and HELIOS have both approved it. Lowering a level (by hand or by the review) applies at once.
+
+### Change control (`lib/changes`, `/changes`)
+
+The AI contains threats only within rules people set, and the rules change only with approval. Every change to what containment runs under is a `rule_changes` row with a fingerprint (SHA-256 of its kind, client and payload):
+
+| Change | Approvals before it takes effect |
+| --- | --- |
+| Rulebook version | Client (its admin signs, or staff record its instruction) and HELIOS |
+| Allowlist entry added or removed | Client and HELIOS |
+| AI autonomy raised (ladder promotion) | Client and HELIOS |
+| Client's AI containment consent raised | Client and HELIOS |
+| Containment agent given more room (on, more autonomy, a lower confidence bar, more pre-approved actions) | A second HELIOS approver |
+| Platform AI limits widened (kill switch off, first response on or for lower severities, a higher hourly limit) | A second HELIOS approver |
+
+- **Who:** HELIOS's approval comes from an approver (`rulebook.sign`, or `ai.configure` for platform changes) who didn't ask for the change. A client admin's own request carries the client's approval, except a rulebook version, which the client signs after reading it. Staff who record the client's approval on its instruction can't also give HELIOS's.
+- **No AI takeover:** requests and approvals come only from signed-in, active people. No agent has a session, an account or a tool that reaches change control, the rulebook, the ladder or the AI settings. The hourly ladder review (deterministic code, not an AI) can propose a promotion, never approve one.
+- **Applying:** the last approval applies the change in one transaction, exactly once, after checking that what it changes is still as it was when asked (the same rulebook text, the same level, consent, profile or settings). Otherwise the change lapses (`STALE`) and has to be asked for again.
+- **Stopping never waits:** the kill switch on, lowering a level or the client's consent, and narrowing the agent or the platform limits all apply at once and are audited.
+- **Trail:** each request, approval, rejection, withdrawal, application and lapse is in the audit chain with the fingerprint. The people who need to act are notified. `/changes` lists what's waiting and what was decided; the rulebook page shows its client's pending changes, and `/approvals` counts them.
 
 ### Background jobs (`src/instrumentation.ts`, `lib/jobs/scheduler.ts`)
 

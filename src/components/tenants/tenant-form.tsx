@@ -138,8 +138,8 @@ export function AiConsentSelect({ tenantId, value, canEdit }: { tenantId: string
   const router = useRouter();
   const mut = useMutation({
     mutationFn: (cap: string) => unwrap(setAiCapAction(tenantId, cap)),
-    onSuccess: () => {
-      toast.success("AI consent updated");
+    onSuccess: (r) => {
+      toast.success(r?.pending ? "Raising AI consent takes effect once the client and HELIOS approve it: sent to Rule changes" : "AI consent updated");
       router.refresh();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),

@@ -26,7 +26,9 @@ import { RulebookEditor } from "@/components/rulebook/rulebook-editor";
 import { RulebookSummary } from "@/components/rulebook/rulebook-summary";
 import { ClientAiPanel } from "@/components/rulebook/client-ai-panel";
 import { LadderPanel, ResumeAutomationButton } from "@/components/rulebook/ladder-panel";
-import { AllowlistPanel, CodePanel, DraftControls, DryRunPanel, SignPanel } from "@/components/rulebook/rulebook-panels";
+import { AllowlistPanel, CodePanel, DraftControls, DryRunPanel } from "@/components/rulebook/rulebook-panels";
+import { ChangeCard } from "@/components/changes/change-card";
+import { changeView } from "@/lib/changes/view";
 import { GitSyncPanel } from "@/components/rulebook/git-sync-panel";
 
 const STATUS_LABEL = { DRAFT: "Draft", AWAITING_SIGNATURE: "Awaiting signature", ACTIVE: "In force", SUPERSEDED: "Superseded" } as const;
@@ -104,6 +106,8 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
     ladderStats(tenant.id, daysAgo(DEMOTION.windowDays)),
     db.rulebookGitSync.findUnique({ where: { tenantId: tenant.id } }),
   ]);
+  // Changes to this client's rules waiting for the client's and HELIOS's approval.
+  const pendingChanges = (await db.ruleChange.findMany({ where: { tenantId: tenant.id, status: "PENDING" }, include: { tenant: { select: { name: true } } }, orderBy: { createdAt: "asc" } })).map((c) => changeView(c, { id: user.id, role: user.role, isClient: user.isClient, tenantId: user.tenantId, active: true }));
 
   const canEdit = can(user, "rulebook.edit");
   const canSign = can(user, "rulebook.sign");
@@ -169,7 +173,8 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
               <>
                 <Badge variant="success">v{state.active.version} in force</Badge>
                 <span className="text-xs text-muted-foreground">
-                  Signed by {state.active.signedByName} {state.active.signedAt && formatRelative(state.active.signedAt, now)} · fingerprint <code className="font-mono">{state.active.contentHash.slice(0, 12)}</code>
+                  Signed by {state.active.signedByName ?? "the client"} {state.active.signedAt && formatRelative(state.active.signedAt, now)}
+                  {state.active.heliosApprovedByName ? ` · approved for HELIOS by ${state.active.heliosApprovedByName}` : ""} · fingerprint <code className="font-mono">{state.active.contentHash.slice(0, 12)}</code>
                 </span>
               </>
             ) : (
@@ -193,10 +198,16 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
             <div className="flex flex-col gap-2">
               {state.draft.reason && <p className="text-xs text-muted-foreground">Draft v{state.draft.version} by {state.draft.authoredByName}: {state.draft.reason}</p>}
               <DraftControls tenantId={tenant.id} status={state.draft.status as "DRAFT" | "AWAITING_SIGNATURE"} version={state.draft.version} canEdit={canEdit} />
-              {canSign && (state.draft.status === "AWAITING_SIGNATURE" || !user.isClient) && <SignPanel tenantId={tenant.id} version={state.draft.version} isClient={user.isClient} />}
-              {user.isClient && state.draft.status === "DRAFT" && <p className="text-xs text-muted-foreground">Your SOC is still drafting this version; you&apos;ll be asked to sign it.</p>}
+              {user.isClient && state.draft.status === "DRAFT" && <p className="text-xs text-muted-foreground">This version is still a draft; once it&apos;s sent, you sign it and HELIOS approves it before it takes effect.</p>}
             </div>
           )}
+          <div id="rule-changes" className="flex scroll-mt-20 flex-col gap-2">
+            <p className="text-sm font-medium">Waiting for approval{pendingChanges.length ? ` (${pendingChanges.length})` : ""}</p>
+            <p className="text-xs text-muted-foreground">
+              A change to these rules (a new version, an allowlist entry, more AI autonomy or consent) takes effect only once {user.isClient ? "you" : "the client"} and HELIOS have both approved it; until then the rules in force keep deciding. Lowering the AI&apos;s autonomy or consent, or the kill switch, applies at once. {canSign ? "" : "Only the client's admins and HELIOS's approvers can approve."}
+            </p>
+            {pendingChanges.length === 0 ? <p className="text-xs text-muted-foreground">Nothing waiting.</p> : pendingChanges.map((c) => <ChangeCard key={c.id} change={c} />)}
+          </div>
         </CardContent>
       </Card>
 

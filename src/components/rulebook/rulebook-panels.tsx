@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { Download, FlaskConical, Loader2, PenLine, Plus, Send, Trash2, Upload, X } from "lucide-react";
+import { Download, FlaskConical, Loader2, Plus, Send, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -13,7 +13,6 @@ import {
   exportRulebookYamlAction,
   importRulebookYamlAction,
   removeAllowlistEntryAction,
-  signRulebookAction,
   submitRulebookAction,
 } from "@/app/(app)/rulebook/actions";
 import type { DryRunResult } from "@/lib/rulebook/dry-run";
@@ -44,42 +43,18 @@ function useAct<T, R = unknown>(fn: (v: T) => Promise<R>, done: (r: R) => string
 // ---------------------------------------------------------------- draft & sign
 
 export function DraftControls({ tenantId, status, version, canEdit }: { tenantId: string; status: "DRAFT" | "AWAITING_SIGNATURE"; version: number; canEdit: boolean }) {
-  const submit = useAct(() => unwrap(submitRulebookAction(tenantId)), (r) => `Sent for signature${r.notified ? ` to ${r.notified} client admin${r.notified === 1 ? "" : "s"}` : " (the client has no admin account yet)"}`);
+  const submit = useAct(() => unwrap(submitRulebookAction(tenantId)), (r) => `Sent for approval: it takes effect once the client signs it${r.notified ? ` (${r.notified} admin${r.notified === 1 ? "" : "s"} told)` : " (the client has no admin account yet)"} and HELIOS approves it`);
   const discard = useAct(() => unwrap(discardRulebookDraftAction(tenantId)), () => "Draft discarded");
   if (!canEdit) return null;
   return (
     <div className="flex flex-wrap gap-2">
       {status === "DRAFT" && (
         <Button size="sm" onClick={() => submit.mutate(undefined)} disabled={submit.isPending}>
-          {submit.isPending ? <Loader2 className="animate-spin" /> : <Send />} Send v{version} for the client&apos;s signature
+          {submit.isPending ? <Loader2 className="animate-spin" /> : <Send />} Send v{version} for approval
         </Button>
       )}
       <Button size="sm" variant="outline" onClick={() => discard.mutate(undefined)} disabled={discard.isPending}>
         <Trash2 /> Discard draft
-      </Button>
-    </div>
-  );
-}
-
-export function SignPanel({ tenantId, version, isClient }: { tenantId: string; version: number; isClient: boolean }) {
-  const [note, setNote] = React.useState("");
-  const [ack, setAck] = React.useState(false);
-  const sign = useAct(() => unwrap(signRulebookAction(tenantId, { note, acknowledged: ack })), (r) => `Rulebook v${r.version} is in force`);
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
-      <p className="text-sm font-medium">{isClient ? `Sign rulebook v${version}` : `Activate v${version} on the client's behalf`}</p>
-      <p className="text-xs text-muted-foreground">
-        {isClient
-          ? "Signing puts these rules in force: HELIOS will only act on your estate within them. Your name and the time are recorded with the version's fingerprint."
-          : "Only with the client's written instruction. Record who approved it, when and how (e.g. email from the CISO on 25 Oct); it goes into the audit chain."}
-      </p>
-      <Textarea className="min-h-14 text-xs" value={note} onChange={(e) => setNote(e.target.value)} placeholder={isClient ? "Optional note" : "Client's instruction (required)"} aria-label="Signature note" />
-      <label className="flex items-center gap-2 text-xs">
-        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-        {isClient ? "I've read this rulebook and authorise HELIOS to act under it" : "The client has approved this exact version"}
-      </label>
-      <Button size="sm" className="w-fit" onClick={() => sign.mutate(undefined)} disabled={sign.isPending || !ack || (!isClient && note.trim().length < 10)}>
-        {sign.isPending ? <Loader2 className="animate-spin" /> : <PenLine />} {isClient ? "Sign and put in force" : "Activate"}
       </Button>
     </div>
   );
@@ -192,13 +167,13 @@ export function AllowlistPanel({ tenantId, rows, canEdit }: { tenantId: string; 
   const [d, setD] = React.useState({ kind: "ip" as keyof typeof KINDS, value: "", reason: "", owner: "", expiresAt: "" });
   const add = useAct(() => unwrap(addAllowlistEntryAction(tenantId, { ...d, expiresAt: d.expiresAt || null })), () => {
     setD({ ...d, value: "", reason: "" });
-    return "Added to the allowlist";
+    return "Sent for approval: it's allowlisted once the client and HELIOS approve it";
   });
-  const remove = useAct((id: string) => unwrap(removeAllowlistEntryAction(tenantId, id)), () => "Removed");
+  const remove = useAct((id: string) => unwrap(removeAllowlistEntryAction(tenantId, id)), () => "Removal sent for approval");
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        Activity the client vouches for: a vulnerability scanner, an admin tool, an expected job. Detections about an allowlisted host, IP or account don&apos;t open cases, and AI containment against them is only suggested. Every entry has an owner, a reason and ideally an expiry.
+        Activity the client vouches for: a vulnerability scanner, an admin tool, an expected job. Detections about an allowlisted host, IP or account don&apos;t open cases, and AI containment against them is only suggested. Every entry has an owner, a reason and ideally an expiry. Adding or removing one is a rule change: it takes effect once the client and HELIOS have both approved it.
       </p>
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing allowlisted.</p>

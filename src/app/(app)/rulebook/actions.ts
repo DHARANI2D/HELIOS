@@ -14,6 +14,7 @@ import { approverSchema, rulebookSchema } from "@/lib/rulebook/schema";
 import { dryRunRulebook } from "@/lib/rulebook/dry-run";
 import { addAllowlistEntry, discardDraft, removeAllowlistEntry, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
 import { action } from "@/lib/action";
+import { changeActorOf } from "@/lib/changes/rules";
 import { removeGitSync, saveGitSync, syncRulebook, type GitSyncInput } from "@/lib/rulebook/git-sync";
 
 // Client users work on their own rulebook only; staff on any client's.
@@ -56,17 +57,21 @@ export const discardRulebookDraftAction = action(async function discardRulebookD
 
 export const submitRulebookAction = action(async function submitRulebookAction(tenantId: string) {
   const user = await actorFor(tenantId, "rulebook.edit");
-  const result = await submitForSignature(tenantId, author(user));
+  const result = await submitForSignature(tenantId, changeActorOf(user));
   done(tenantId);
   return result;
 });
 
-export const signRulebookAction = action(async function signRulebookAction(tenantId: string, input: { note: string; acknowledged: boolean }) {
+// One of the two approvals a submitted version needs: the client's (its
+// admin, or staff recording the client's instruction) or HELIOS's.
+export const signRulebookAction = action(async function signRulebookAction(tenantId: string, input: { note: string; acknowledged: boolean; side?: "client" | "helios" }) {
   const user = await actorFor(tenantId, "rulebook.sign");
   if (!input.acknowledged) throw new Error("Confirm you've read the rulebook and authorise HELIOS to act under it");
-  const activated = await signRulebook(tenantId, { ...author(user), isClient: user.isClient }, String(input.note ?? "").slice(0, 1000));
+  const side = user.isClient ? "client" : input.side === "helios" ? "helios" : "client";
+  const result = await signRulebook(tenantId, changeActorOf(user), String(input.note ?? "").slice(0, 1000), side);
   done(tenantId);
-  return { version: activated.version };
+  revalidatePath("/changes");
+  return result;
 });
 
 export const dryRunRulebookAction = action(async function dryRunRulebookAction(tenantId: string, body: unknown) {
@@ -116,14 +121,16 @@ export const addAllowlistEntryAction = action(async function addAllowlistEntryAc
   const data = allowlistInput.parse(input);
   const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
   if (expiresAt && (Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date())) throw new Error("Expiry must be a future date");
-  await addAllowlistEntry(tenantId, { kind: data.kind, value: data.value, reason: data.reason, owner: data.owner, expiresAt }, author(user));
+  await addAllowlistEntry(tenantId, { kind: data.kind, value: data.value, reason: data.reason, owner: data.owner, expiresAt }, changeActorOf(user));
   done(tenantId);
+  revalidatePath("/changes");
 });
 
-export const removeAllowlistEntryAction = action(async function removeAllowlistEntryAction(tenantId: string, entryId: string) {
+export const removeAllowlistEntryAction = action(async function removeAllowlistEntryAction(tenantId: string, entryId: string, reason?: string) {
   const user = await actorFor(tenantId, "rulebook.edit");
-  await removeAllowlistEntry(tenantId, entryId, author(user));
+  await removeAllowlistEntry(tenantId, entryId, changeActorOf(user), String(reason ?? "").trim().slice(0, 500) || "No longer needed");
   done(tenantId);
+  revalidatePath("/changes");
 });
 
 // A live ping to one approver, so a dead channel shows up before it matters.

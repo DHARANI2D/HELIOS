@@ -293,14 +293,18 @@ async function applyTriage(
     if (decision.status === "EXECUTED") {
       await db.responseAction.update({ where: { id: action.id }, data: { decidedAt: new Date() } });
       const done = await performResponseAction(action.id, { name: `${agentName} (auto-contain)` });
-      // Level 3: the client hears straight away, with how to undo it.
-      if (level === 3 && done.status === "EXECUTED" && kase.tenantId) {
-        const admins = await db.user.findMany({ where: { tenantId: kase.tenantId, role: "CLIENT_ADMIN", active: true }, select: { id: true } });
+      // Every containment the AI runs on its own is watched: the SOC's
+      // managers and the case's watchers hear at once, and so does the
+      // client, except at level 4 where it's reported in the digest. Each
+      // can be rolled back from the case.
+      if (done.status === "EXECUTED") {
+        const admins = kase.tenantId && level !== 4 ? await db.user.findMany({ where: { tenantId: kase.tenantId, role: "CLIENT_ADMIN", active: true }, select: { id: true } }) : [];
         const watchers = await db.caseWatcher.findMany({ where: { caseId }, select: { userId: true } });
-        await notify([...admins.map((a) => a.id), ...watchers.map((w) => w.userId)], {
+        const managers = await staffFor(["SOC_MANAGER"]);
+        await notify([...admins.map((a) => a.id), ...watchers.map((w) => w.userId), ...managers], {
           kind: "ai",
-          title: `HELIOS acted: ${ACTION_LABEL[proposed.action]} ${target}`,
-          body: `On "${kase.title}". It can be rolled back from the case.`,
+          title: `HELIOS AI contained: ${ACTION_LABEL[proposed.action]} ${target}`,
+          body: `On "${kase.title}", under rulebook ${decision.policyVersion ? `v${decision.policyVersion}` : "defaults"}: ${decision.reason}. It can be rolled back from the case.`,
           caseId,
           actorName: agentName,
         });

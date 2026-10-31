@@ -3,10 +3,10 @@ import type { CaseSeverity, OrgPolicy, PlaybookActionType, Prisma } from "@prism
 
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
-import { notify } from "@/lib/notifications";
 import { endpointClass } from "@/lib/assets/inventory";
 import { canonicalJson, isRuledAction, rulebookSchema, type Rulebook } from "@/lib/rulebook/schema";
 import { humanGate, rulebookHits, type AllowlistFact, type AssetFacts, type RuleHit } from "@/lib/rulebook/evaluate";
+import { approveChange, requestChange, withdrawRulebookChange, type ChangeActor } from "@/lib/changes/service";
 
 // Client rulebooks on the server: the active version (cached briefly, since
 // the response policy reads it on every decision), drafts, signing, the
@@ -21,6 +21,9 @@ export interface ActiveRulebook {
   body: Rulebook;
   signedByName: string | null;
   signedAt: Date | null;
+  // The stored text no longer matches the hash that was approved: someone
+  // changed it outside HELIOS. Nothing runs automatically under it.
+  tampered?: boolean;
 }
 
 export function hashRulebook(body: Rulebook | unknown) {
@@ -45,10 +48,26 @@ export async function activeRulebook(tenantId: string | null | undefined, fresh 
   const hit = cache.get(tenantId);
   if (!fresh && hit && Date.now() - hit.at < TTL_MS) return hit.value;
   const row = await db.orgPolicy.findFirst({ where: { tenantId, status: "ACTIVE" }, orderBy: { version: "desc" } });
-  const value = row ? { id: row.id, version: row.version, hash: row.contentHash, body: parseStored(row), signedByName: row.signedByName, signedAt: row.signedAt } : null;
+  const tampered = !!row && hashRulebook(row.body) !== row.contentHash;
+  const value = row ? { id: row.id, version: row.version, hash: row.contentHash, body: parseStored(row), signedByName: row.signedByName, signedAt: row.signedAt, tampered } : null;
   cache.set(tenantId, { at: Date.now(), value });
+  if (tampered) await reportTampering(tenantId, row!.version);
   return value;
 }
+
+// Once an hour at most per client: the SOC's managers and the audit chain hear of it.
+const tamperReported = new Map<string, number>();
+async function reportTampering(tenantId: string, version: number) {
+  const last = tamperReported.get(tenantId) ?? 0;
+  if (Date.now() - last < 3_600_000) return;
+  tamperReported.set(tenantId, Date.now());
+  await logAction({ action: "rulebook.integrity_failed", detail: { tenantId, version } });
+  const { notify, staffFor } = await import("@/lib/notifications");
+  await notify(await staffFor(["ADMIN", "SOC_MANAGER"]), { kind: "rulebook", title: "A client's rulebook doesn't match what was approved", body: `Version ${version} was changed outside HELIOS. AI containment for this client now needs a person until a version is approved again.`, href: "/rulebook" });
+}
+
+// The hit a tampered rulebook puts on every decision.
+export const TAMPERED_HIT: RuleHit = { rule: "rulebook.integrity", outcome: "PENDING_APPROVAL", reason: "The rulebook in force doesn't match the text that was approved; a person decides", hard: false };
 
 // ---------------------------------------------------------------- decisions
 
@@ -107,6 +126,7 @@ export async function rulebookVerdict(input: {
   fresh?: boolean;
 }): Promise<RulebookVerdict | null> {
   const rb = await activeRulebook(input.tenantId, input.fresh);
+  if (rb?.tampered) return { version: rb.version, hash: rb.hash, hits: [TAMPERED_HIT] };
   if (!rb || !input.tenantId || !isRuledAction(input.actionType)) return rb && { version: rb.version, hash: rb.hash, hits: [] };
   const now = input.now ?? new Date();
   const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
@@ -153,6 +173,8 @@ export async function saveDraft(tenantId: string, input: { body: unknown; reason
     if (open) return tx.orgPolicy.update({ where: { id: open.id }, data });
     return tx.orgPolicy.create({ data: { ...data, tenantId, version: await nextVersion(tx, tenantId) } });
   });
+  // An edit after submission is a new text: the approvals asked for lapse.
+  await withdrawRulebookChange(tenantId, saved.id, author, "The draft was edited after it was submitted");
   await logAction({ actorId: author.id, action: "rulebook.draft_saved", detail: { tenantId, version: saved.version, hash: contentHash, reason } });
   return saved;
 }
@@ -160,55 +182,38 @@ export async function saveDraft(tenantId: string, input: { body: unknown; reason
 export async function discardDraft(tenantId: string, author: Author) {
   const open = await db.orgPolicy.findFirst({ where: { tenantId, status: { in: ["DRAFT", "AWAITING_SIGNATURE"] } } });
   if (!open) return;
+  await withdrawRulebookChange(tenantId, open.id, author, "The draft was discarded");
   await db.orgPolicy.delete({ where: { id: open.id } });
   await logAction({ actorId: author.id, action: "rulebook.draft_discarded", detail: { tenantId, version: open.version } });
 }
 
-export async function submitForSignature(tenantId: string, author: Author) {
+// A draft goes for approval. It takes effect only once the client has
+// signed it and HELIOS has approved it (lib/changes): until then the version
+// in force keeps deciding.
+export async function submitForSignature(tenantId: string, author: ChangeActor) {
   const draft = await db.orgPolicy.findFirst({ where: { tenantId, status: "DRAFT" } });
   if (!draft) throw new Error("There's no draft to send");
+  if (hashRulebook(draft.body) !== draft.contentHash) throw new Error("This draft changed since it was saved; save it again");
   await db.orgPolicy.update({ where: { id: draft.id }, data: { status: "AWAITING_SIGNATURE", submittedAt: new Date() } });
-  const admins = await db.user.findMany({ where: { tenantId, role: "CLIENT_ADMIN", active: true }, select: { id: true } });
-  await notify(admins.map((a) => a.id), {
-    kind: "approval",
-    title: `Rulebook v${draft.version} is ready to sign`,
-    body: draft.reason ?? "Review what HELIOS may do on your estate, then sign it to put it in force.",
-    actorName: author.name,
-    href: "/rulebook",
-  });
-  await logAction({ actorId: author.id, action: "rulebook.submitted", detail: { tenantId, version: draft.version, hash: draft.contentHash, notified: admins.length } });
-  return { notified: admins.length };
+  const change = await requestChange(
+    { tenantId, kind: "RULEBOOK_VERSION", summary: `Rulebook v${draft.version}${draft.reason ? `: ${draft.reason}` : ""}`, reason: draft.reason ?? "New rulebook version", payload: { policyId: draft.id, version: draft.version, contentHash: draft.contentHash } },
+    author,
+  );
+  await logAction({ actorId: author.id, action: "rulebook.submitted", detail: { tenantId, version: draft.version, hash: draft.contentHash, changeId: change.id } });
+  const admins = await db.user.count({ where: { tenantId, role: "CLIENT_ADMIN", active: true } });
+  return { notified: admins, changeId: change.id };
 }
 
-// The client admin signs and the version takes effect. Staff can activate
-// on the client's behalf only with a note recording the client's instruction.
-export async function signRulebook(tenantId: string, signer: Author & { isClient: boolean }, note: string) {
-  const text = note.trim();
-  if (!signer.isClient && text.length < 10) throw new Error("Record the client's instruction (who approved it, when and how)");
-  const pending = await db.orgPolicy.findFirst({ where: { tenantId, status: { in: signer.isClient ? ["AWAITING_SIGNATURE"] : ["AWAITING_SIGNATURE", "DRAFT"] } } });
-  if (!pending) throw new Error("There's no version waiting to be signed");
-  // The stored body must still match its hash: what was reviewed is what runs.
-  parseStored(pending); // and still valid under the current schema
-  // Hashed as stored, so defaults added to the schema since don't count as a change.
-  if (hashRulebook(pending.body) !== pending.contentHash) throw new Error("This version changed since it was saved; save it again");
-  const now = new Date();
-  const activated = await db.$transaction(async (tx) => {
-    await tx.orgPolicy.updateMany({ where: { tenantId, status: "ACTIVE" }, data: { status: "SUPERSEDED" } });
-    return tx.orgPolicy.update({
-      where: { id: pending.id },
-      data: {
-        status: "ACTIVE",
-        signedById: signer.id,
-        signedByName: signer.name,
-        signedAt: now,
-        effectiveFrom: now,
-        signatureNote: signer.isClient ? text || null : `Activated by ${signer.name} on the client's instruction: ${text}`,
-      },
-    });
-  });
-  forgetRulebook(tenantId);
-  await logAction({ actorId: signer.id, action: "rulebook.activated", detail: { tenantId, version: activated.version, hash: activated.contentHash, onBehalf: !signer.isClient, note: text || null } });
-  return activated;
+// One of the two approvals a submitted version needs: the client's (its
+// admin signs, or HELIOS staff record the client's instruction) or HELIOS's
+// (an approver other than whoever submitted it). The second one puts the
+// version in force.
+export async function signRulebook(tenantId: string, signer: ChangeActor, note: string, side: "client" | "helios" = "client") {
+  const change = await db.ruleChange.findFirst({ where: { tenantId, kind: "RULEBOOK_VERSION", status: "PENDING" }, orderBy: { createdAt: "desc" } });
+  if (!change) throw new Error("There's no version waiting to be signed");
+  const result = await approveChange(change.id, side, signer, note);
+  const version = (change.payload as { version: number }).version;
+  return { version, active: result.applied };
 }
 
 export async function rulebookState(tenantId: string) {
@@ -220,17 +225,26 @@ export async function rulebookState(tenantId: string) {
 
 // ---------------------------------------------------------------- allowlist
 
-export async function addAllowlistEntry(tenantId: string, input: { kind: string; value: string; reason: string; owner: string; expiresAt: Date | null }, author: Author) {
-  const row = await db.policyAllowlistEntry.create({ data: { tenantId, ...input, createdById: author.id } });
-  await logAction({ actorId: author.id, action: "rulebook.allowlist_added", detail: { tenantId, entryId: row.id, kind: row.kind, value: row.value, reason: row.reason, owner: row.owner, expiresAt: row.expiresAt?.toISOString() ?? null } });
-  return row;
+// Allowlist entries stop containment of what they name, so adding or
+// removing one is a rule change: it takes effect once the client and HELIOS
+// have approved it (lib/changes).
+export async function addAllowlistEntry(tenantId: string, input: { kind: string; value: string; reason: string; owner: string; expiresAt: Date | null }, author: ChangeActor) {
+  return requestChange(
+    {
+      tenantId,
+      kind: "ALLOWLIST_ADD",
+      summary: `Allow ${input.kind} ${input.value} (${input.reason}; owner ${input.owner}${input.expiresAt ? `; until ${input.expiresAt.toISOString().slice(0, 10)}` : ""})`,
+      reason: input.reason,
+      payload: { kind: input.kind, value: input.value, reason: input.reason, owner: input.owner, expiresAt: input.expiresAt?.toISOString() ?? null },
+    },
+    author,
+  );
 }
 
-export async function removeAllowlistEntry(tenantId: string, entryId: string, author: Author) {
+export async function removeAllowlistEntry(tenantId: string, entryId: string, author: ChangeActor, reason = "No longer needed") {
   const row = await db.policyAllowlistEntry.findFirst({ where: { id: entryId, tenantId } });
   if (!row) throw new Error("Not found");
-  await db.policyAllowlistEntry.delete({ where: { id: row.id } });
-  await logAction({ actorId: author.id, action: "rulebook.allowlist_removed", detail: { tenantId, entryId, kind: row.kind, value: row.value } });
+  return requestChange({ tenantId, kind: "ALLOWLIST_REMOVE", summary: `Stop allowing ${row.kind} ${row.value}`, reason, payload: { entryId: row.id, kind: row.kind, value: row.value } }, author);
 }
 
 // What needs a look: a rulebook past its review date, allowlist entries

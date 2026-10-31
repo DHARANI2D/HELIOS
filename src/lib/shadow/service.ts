@@ -8,10 +8,13 @@ import { RULED_ACTIONS } from "@/lib/rulebook/schema";
 import { activeRulebook } from "@/lib/rulebook/service";
 import { matchesAsset } from "@/lib/rulebook/evaluate";
 import { DEMOTION, EMPTY_STATS, LEVELS, MAX_LEVEL, PROMOTION, demotionCheck, promotionCheck, scoreActions, scoreVerdict, type LadderStats } from "@/lib/shadow/ladder";
+import { AUTOMATIC_REVIEW, approveChange, rejectChange, requestChange, type ChangeActor } from "@/lib/changes/service";
 
 // Shadow mode on the server: each client's ladder, the decisions scored
-// when a case closes, and the periodic review that proposes promotions (for
-// the client to approve) and demotes automatically.
+// when a case closes, and the periodic review that proposes promotions and
+// demotes automatically. A promotion is a rule change: it takes effect only
+// once the client and HELIOS have approved it (lib/changes). A demotion only
+// takes power away from the AI, so it applies at once.
 
 export interface Actor {
   id: string;
@@ -45,10 +48,12 @@ export async function startShadowMode(tenantId: string, actor: Actor) {
   await logAction({ actorId: actor.id, action: "autonomy.shadow_started", detail: { tenantId } });
 }
 
+// Lowers a level at once. Raising one goes through proposePromotion.
 export async function setAutonomyLevel(tenantId: string, actionType: PlaybookActionType, level: number, actor: Actor, reason: string) {
   if (level < 0 || level > MAX_LEVEL) throw new Error("Unknown level");
   const row = await db.autonomyLevel.findUnique({ where: { tenantId_actionType: { tenantId, actionType } } });
   if (!row) throw new Error("Start shadow mode for this client first");
+  if (level > row.level) throw new Error("Raising a level needs the client's and HELIOS's approval: propose a promotion");
   await db.autonomyLevel.update({ where: { tenantId_actionType: { tenantId, actionType } }, data: { level, reason, changedByName: actor.name, proposedLevel: null, proposedAt: null, proposalStats: undefined } });
   await logAction({ actorId: actor.id, action: "autonomy.level_changed", detail: { tenantId, actionType, from: row.level, to: level, reason } });
 }
@@ -159,8 +164,7 @@ export async function reviewLadders(now = new Date()) {
       const stats = month.byAction.get(row.actionType) ?? EMPTY_STATS;
       const p = promotionCheck(row.level, stats);
       if (p.eligible && row.proposedLevel == null) {
-        await db.autonomyLevel.update({ where: { tenantId_actionType: { tenantId, actionType: row.actionType } }, data: { proposedLevel: row.level + 1, proposedAt: now, proposalStats: JSON.parse(JSON.stringify(stats)) } });
-        await tell(tenantId, `Ready for more AI autonomy: ${ACTION_LABEL[row.actionType]} for ${tenant?.name}`, `${stats.agreed} of ${stats.decisions} AI decisions matched the analysts' in ${PROMOTION.windowDays} days, with no wrong containment of a critical asset. Approve the move to ${LEVELS[row.level + 1].name} on the rulebook page.`);
+        await proposePromotion(tenantId, row.actionType, row.level, stats, AUTOMATIC_REVIEW, now);
         changes++;
       }
     }
@@ -168,19 +172,33 @@ export async function reviewLadders(now = new Date()) {
   return changes;
 }
 
-// The client approves (or turns down) a proposed promotion. Staff can
-// approve only on the client's recorded instruction.
-export async function decidePromotion(tenantId: string, actionType: PlaybookActionType, approve: boolean, actor: Actor & { isClient: boolean }, note: string) {
-  const row = await db.autonomyLevel.findUnique({ where: { tenantId_actionType: { tenantId, actionType } } });
-  if (!row?.proposedLevel) throw new Error("No promotion is waiting for this action");
-  if (approve && !actor.isClient && note.trim().length < 10) throw new Error("Record the client's instruction (who approved it, when and how)");
-  await db.autonomyLevel.update({
-    where: { tenantId_actionType: { tenantId, actionType } },
-    data: approve
-      ? { level: row.proposedLevel, reason: `Promoted on the shadow-mode record${actor.isClient ? "" : `; client's instruction: ${note.trim()}`}`, changedByName: actor.name, proposedLevel: null, proposedAt: null }
-      : { proposedLevel: null, proposedAt: null },
-  });
-  await logAction({ actorId: actor.id, action: approve ? "autonomy.promoted" : "autonomy.promotion_declined", detail: { tenantId, actionType, from: row.level, to: approve ? row.proposedLevel : row.level, stats: row.proposalStats, note: note || null } });
+// Proposes the next level for one action, on its shadow-mode record. HELIOS's
+// review does it automatically; staff can do it once the record supports it.
+export async function proposePromotion(tenantId: string, actionType: PlaybookActionType, from: number, stats: LadderStats, actor: ChangeActor | typeof AUTOMATIC_REVIEW, now = new Date()) {
+  if (from >= MAX_LEVEL) throw new Error("Already at the top level");
+  const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+  const to = from + 1;
+  await db.autonomyLevel.update({ where: { tenantId_actionType: { tenantId, actionType } }, data: { proposedLevel: to, proposedAt: now, proposalStats: JSON.parse(JSON.stringify(stats)) } });
+  return requestChange(
+    {
+      tenantId,
+      kind: "AUTONOMY_RAISE",
+      summary: `${ACTION_LABEL[actionType]} for ${tenant?.name ?? "the client"}: ${LEVELS[from].name} → ${LEVELS[to].name}`,
+      reason: `${stats.agreed} of ${stats.decisions} AI decisions matched the analysts' in ${PROMOTION.windowDays} days, with no wrong containment of a critical asset`,
+      payload: { actionType, from, to, stats },
+    },
+    actor,
+  );
+}
+
+// One side's decision on a proposed promotion: approving it (the client's
+// admin, or staff recording the client's instruction, and a HELIOS approver)
+// or turning it down.
+export async function decidePromotion(tenantId: string, actionType: PlaybookActionType, approve: boolean, actor: ChangeActor, note: string, side: "client" | "helios" = actor.isClient ? "client" : "helios") {
+  const change = (await db.ruleChange.findMany({ where: { tenantId, kind: "AUTONOMY_RAISE", status: "PENDING" }, orderBy: { createdAt: "desc" } })).find((c) => (c.payload as { actionType?: string }).actionType === actionType);
+  if (!change) throw new Error("No promotion is waiting for this action");
+  if (!approve) return rejectChange(change.id, actor, note || "Declined");
+  return approveChange(change.id, side, actor, note);
 }
 
 export function dispositionLabel(d: CaseDisposition) {
