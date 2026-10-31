@@ -1,0 +1,138 @@
+# The web server: stateless, several replicas behind the ingress. It runs
+# no timed jobs (HELIOS_JOBS=none); the worker does.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helios-web
+  labels:
+    app.kubernetes.io/name: helios-web
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helios-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: helios-web
+    spec:
+      serviceAccountName: helios
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 40
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: helios-web }
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: helios-web }
+      containers:
+        - name: web
+          image: helios
+          args: ["server.js"]
+          ports:
+            - { name: http, containerPort: 3000 }
+          envFrom:
+            - configMapRef: { name: helios-config }
+          env:
+            - { name: HELIOS_JOBS, value: none }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: DATABASE_URL } }
+            - name: AUTH_SECRET
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: AUTH_SECRET } }
+            - name: HELIOS_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: HELIOS_ENCRYPTION_KEY, optional: true } }
+            - name: HELIOS_ENCRYPTION_KEY_KMS
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: HELIOS_ENCRYPTION_KEY_KMS, optional: true } }
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: ANTHROPIC_API_KEY, optional: true } }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 1536Mi }
+          # Liveness never touches the database, so a database outage marks
+          # pods unready instead of restarting them all.
+          startupProbe:
+            httpGet: { path: /api/health/live, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet: { path: /api/health/live, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            # Let the ingress stop sending requests before shutdown begins.
+            preStop:
+              sleep: { seconds: 10 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: next-cache, mountPath: /app/.next/cache }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+        - name: next-cache
+          emptyDir: { sizeLimit: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: helios-web
+  labels:
+    app.kubernetes.io/name: helios-web
+spec:
+  selector:
+    app.kubernetes.io/name: helios-web
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: helios-web
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helios-web
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: helios-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: helios-web
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }

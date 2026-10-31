@@ -1,0 +1,33 @@
+# HTTPS in, through ingress-nginx. TLS ends here (cert-manager, or the
+# overlay's load balancer); the app adds its own security headers and CSP.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: helios
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Log bundles and mail files upload up to 25 MB (next.config.ts).
+    nginx.ingress.kubernetes.io/proxy-body-size: "26m"
+    # Streamed pages and long AI calls.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    # A ceiling per client address; sign-in has its own lockout on top.
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "40"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [helios.example.com]
+      secretName: helios-tls
+  rules:
+    - host: helios.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: helios-web
+                port: { name: http }

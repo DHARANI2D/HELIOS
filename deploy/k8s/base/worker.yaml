@@ -1,0 +1,62 @@
+# The worker: every timed job (escalation, connector checks, regulatory
+# clocks, paging, digests) and log collection (ingest queue, collectors,
+# retention). Jobs are safe on several replicas: batches are claimed with
+# SKIP LOCKED and each job tolerates running twice.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: helios-worker
+  labels:
+    app.kubernetes.io/name: helios-worker
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: helios-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: helios-worker
+    spec:
+      serviceAccountName: helios
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: helios
+          args: ["worker.mjs"]
+          envFrom:
+            - configMapRef: { name: helios-config }
+          env:
+            - { name: HELIOS_JOBS, value: "core,ingest" }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: DATABASE_URL } }
+            - name: AUTH_SECRET
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: AUTH_SECRET } }
+            - name: HELIOS_ENCRYPTION_KEY
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: HELIOS_ENCRYPTION_KEY, optional: true } }
+            - name: HELIOS_ENCRYPTION_KEY_KMS
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: HELIOS_ENCRYPTION_KEY_KMS, optional: true } }
+            - name: ANTHROPIC_API_KEY
+              valueFrom: { secretKeyRef: { name: helios-secrets, key: ANTHROPIC_API_KEY, optional: true } }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 512Mi }

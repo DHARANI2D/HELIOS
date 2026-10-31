@@ -1,3 +1,7 @@
+# Postgres only, for `npm run dev` on your machine (DATABASE_URL in .env:
+# postgresql://helios:helios@localhost:5432/helios). To run all of HELIOS in
+# containers instead, use docker-compose.yml (docs/deployment.md).
+#   docker compose -f docker-compose.dev.yml up -d
 services:
   postgres:
     image: postgres:16-alpine
@@ -6,9 +10,9 @@ services:
       POSTGRES_PASSWORD: helios
       POSTGRES_DB: helios
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-dev-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U helios"]
       interval: 5s
@@ -16,4 +20,4 @@ services:
       retries: 5
 
 volumes:
-  postgres-data:
+  postgres-dev-data:

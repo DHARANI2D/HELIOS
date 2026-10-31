@@ -1,0 +1,136 @@
+# HELIOS in containers on one machine: your Mac for testing, or a single
+# server. Postgres, a one-off migrate job, the web server and the worker.
+# Set up once, then start:
+#   ./deploy/compose/setup.sh            # writes .env.docker and .env.db with fresh secrets
+#   docker compose up -d --build         # http://localhost:3000
+# Local AI on the same machine: see docs/deployment.md ("AI models").
+# Every container runs as an unprivileged user with no Linux capabilities,
+# can't gain privileges, and (web, worker) has a read-only filesystem.
+
+x-hardened: &hardened
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 512
+  tmpfs:
+    - /tmp:size=256m,uid=65532,gid=65532
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+  # A model server on this machine (Ollama, LM Studio) answers here; Docker
+  # Desktop on a Mac provides the name already, Linux needs the mapping.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: [.env.db]
+    environment:
+      POSTGRES_DB: helios
+      POSTGRES_USER: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    # Only from this machine (psql, a database tool); containers use the
+    # internal network.
+    ports:
+      - "127.0.0.1:${HELIOS_DB_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/db/roles.sql:/helios-db/roles.sql:ro
+      - ./deploy/db/docker-init.sh:/docker-entrypoint-initdb.d/10-helios-roles.sh:ro
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d helios"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+
+  # Applies migrations as the schema owner, narrows the app role, and seeds
+  # the first admin and reference data. Runs to completion on each `up`.
+  migrate:
+    image: ${HELIOS_TOOLS_IMAGE:-helios-tools:local}
+    build:
+      context: .
+      target: tools
+      args:
+        NODE_IMAGE: ${HELIOS_NODE_IMAGE:-node:22-bookworm}
+    env_file: [.env.db]
+    depends_on:
+      postgres: { condition: service_healthy }
+    read_only: true
+    tmpfs: ["/tmp:size=256m,uid=65532,gid=65532"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [backend]
+
+  web:
+    <<: *hardened
+    image: ${HELIOS_IMAGE:-helios:local}
+    build:
+      context: .
+      target: runtime
+      args:
+        NODE_IMAGE: ${HELIOS_NODE_IMAGE:-node:22-bookworm}
+        HELIOS_DEPLOYMENT_ID: ${HELIOS_DEPLOYMENT_ID:-local}
+    env_file: [.env.docker]
+    environment:
+      HELIOS_JOBS: none
+      # Straight to the container, no proxy in front: don't trust X-Forwarded-For.
+      HELIOS_TRUSTED_PROXIES: ${HELIOS_TRUSTED_PROXIES:-0}
+    ports:
+      - "127.0.0.1:${HELIOS_PORT:-3000}:3000"
+    tmpfs:
+      - /tmp:size=256m,uid=65532,gid=65532
+      - /app/.next/cache:size=256m,uid=65532,gid=65532
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    stop_grace_period: 30s
+    networks: [backend, frontend]
+
+  worker:
+    <<: *hardened
+    image: ${HELIOS_IMAGE:-helios:local}
+    env_file: [.env.docker]
+    environment:
+      HELIOS_JOBS: core,ingest
+      HELIOS_ARCHIVE_DIR: /var/lib/helios/archive
+    command: ["worker.mjs"]
+    volumes:
+      - archive:/var/lib/helios/archive
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    stop_grace_period: 30s
+    networks: [backend, frontend]
+
+  # Optional: an Ollama model server in a container (`--profile local-ai`).
+  # On a Mac, run the Ollama app natively instead: Docker can't use the GPU
+  # there (docs/deployment.md).
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [local-ai]
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    security_opt: ["no-new-privileges:true"]
+    # frontend only so `ollama pull` can download models.
+    networks: [backend, frontend]
+
+networks:
+  # Postgres sits on a network with no way out.
+  backend:
+    internal: true
+  frontend: {}
+
+volumes:
+  postgres-data:
+  archive:
+  ollama-models:

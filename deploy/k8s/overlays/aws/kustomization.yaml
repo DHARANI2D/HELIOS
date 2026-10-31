@@ -1,0 +1,74 @@
+# HELIOS on Amazon EKS in ap-south-1 (Mumbai), the recommended production
+# setup (docs/deployment.md, "Cloud"): RDS for PostgreSQL, secrets from AWS
+# Secrets Manager through the External Secrets Operator, an Application Load
+# Balancer with AWS WAF in front, IAM roles for service accounts for KMS
+# and the S3 log archive. Replace every value marked change-me (grep -rn change-me .), then:
+#   kubectl apply -k deploy/k8s/overlays/aws
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: helios
+resources:
+  - ../../base
+  - externalsecret.yaml
+  - database-egress.yaml
+images:
+  - name: helios
+    newName: change-me-ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com/helios
+    newTag: change-me-VERSION
+  - name: helios-tools
+    newName: change-me-ACCOUNT.dkr.ecr.ap-south-1.amazonaws.com/helios-tools
+    newTag: change-me-VERSION
+patches:
+  - target: { kind: ConfigMap, name: helios-config }
+    patch: |-
+      - op: replace
+        path: /data/AUTH_URL
+        value: https://soc.change-me.example
+      - op: add
+        path: /data/HELIOS_ARCHIVE_S3_BUCKET
+        value: change-me-helios-archive
+      - op: add
+        path: /data/HELIOS_ARCHIVE_S3_REGION
+        value: ap-south-1
+      - op: add
+        path: /data/HELIOS_KMS_REGION
+        value: ap-south-1
+  # The pods' AWS identity (IRSA): kms:Decrypt on the master key, and the
+  # archive bucket. Nothing else.
+  - target: { kind: ServiceAccount, name: helios }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          eks.amazonaws.com/role-arn: arn:aws:iam::change-me-ACCOUNT:role/helios-app
+  # The ALB sends traffic straight to the pods from inside the VPC.
+  - target: { kind: NetworkPolicy, name: web-from-ingress }
+    patch: |-
+      - op: replace
+        path: /spec/ingress/0/from
+        value:
+          - ipBlock: { cidr: 10.0.0.0/16 } # change-me: the VPC's CIDR
+  # The ALB terminates TLS with an ACM certificate and filters with WAF.
+  - target: { kind: Ingress, name: helios }
+    patch: |-
+      - op: replace
+        path: /metadata/annotations
+        value:
+          alb.ingress.kubernetes.io/scheme: internet-facing
+          alb.ingress.kubernetes.io/target-type: ip
+          alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+          alb.ingress.kubernetes.io/ssl-redirect: "443"
+          alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+          alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:change-me-ACCOUNT:certificate/change-me
+          alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:ap-south-1:change-me-ACCOUNT:regional/webacl/helios/change-me
+          alb.ingress.kubernetes.io/healthcheck-path: /api/health/live
+          alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300,routing.http.drop_invalid_header_fields.enabled=true,routing.http.desync_mitigation_mode=strictest,deletion_protection.enabled=true
+      - op: replace
+        path: /spec/ingressClassName
+        value: alb
+      - op: replace
+        path: /spec/tls
+        value: [{ hosts: [soc.change-me.example] }]
+      - op: replace
+        path: /spec/rules/0/host
+        value: soc.change-me.example

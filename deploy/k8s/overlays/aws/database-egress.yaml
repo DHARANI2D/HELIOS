@@ -1,0 +1,15 @@
+# The database: RDS for PostgreSQL in the VPC's private subnets.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: database-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [helios-web, helios-worker, helios-migrate] }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/16 } # change-me: the database subnets' CIDR
+      ports:
+        - { protocol: TCP, port: 5432 }

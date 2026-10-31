@@ -1,0 +1,15 @@
+# Settings that aren't secret. Secrets (database URLs, AUTH_SECRET, the
+# encryption key, API keys) come from the helios-secrets Secret, which the
+# overlay creates from a file you keep out of Git or from a secrets manager.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: helios-config
+data:
+  NODE_ENV: production
+  NEXT_TELEMETRY_DISABLED: "1"
+  # The address people use; patched by each overlay.
+  AUTH_URL: https://helios.example.com
+  # One ingress controller (or load balancer) appends to X-Forwarded-For.
+  HELIOS_TRUSTED_PROXIES: "1"
+  HELIOS_DATA_REGION: ap-south-1

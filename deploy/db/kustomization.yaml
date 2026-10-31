@@ -1,0 +1,9 @@
+# The database role scripts as a ConfigMap, for an in-cluster Postgres
+# (deploy/k8s/overlays/local). A managed database runs roles.sql once instead.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: postgres-init
+    files: [roles.sql, docker-init.sh]
+    options:
+      disableNameSuffixHash: true

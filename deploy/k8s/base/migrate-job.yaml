@@ -1,0 +1,56 @@
+# Applies migrations as the schema owner and narrows the app role
+# (deploy/db/grants.sql). Run it before rolling out a new version:
+#   kubectl -n helios delete job helios-migrate --ignore-not-found
+#   kubectl apply -k deploy/k8s/overlays/<env>
+#   kubectl -n helios wait --for=condition=complete job/helios-migrate --timeout=10m
+# Prisma takes an advisory lock, so a second run at the same time waits.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: helios-migrate
+  labels:
+    app.kubernetes.io/name: helios-migrate
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: helios-migrate
+    spec:
+      serviceAccountName: helios
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          # Entrypoint deploy/db/migrate.sh: migrations, grants, seed.
+          image: helios-tools
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: helios-secrets, key: OWNER_DATABASE_URL }
+            - name: SEED_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef: { name: helios-secrets, key: SEED_ADMIN_EMAIL, optional: true }
+            - name: SEED_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: helios-secrets, key: SEED_ADMIN_PASSWORD, optional: true }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }

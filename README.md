@@ -80,8 +80,23 @@ See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit togeth
 
 ## Getting started
 
+**Run it in containers** (on your Mac or a server): Postgres, migrations, the web server and the worker, hardened and ready.
+
 ```bash
-docker compose up -d              # or any Postgres 16; point DATABASE_URL at it
+./deploy/compose/setup.sh         # fresh secrets in .env.db and .env.docker; prints the first admin's password
+docker compose up -d --build      # http://localhost:3000
+```
+
+[`docs/deployment.md`](docs/deployment.md) covers:
+- that setup in detail, and Kubernetes (`deploy/k8s`) on your Mac;
+- local and cloud AI models;
+- the recommended cloud environment (AWS Mumbai: EKS, RDS, WAF, KMS) step by step;
+- the security model and operations.
+
+**Develop:**
+
+```bash
+docker compose -f docker-compose.dev.yml up -d   # Postgres only (or any Postgres 16; point DATABASE_URL at it)
 cp .env.example .env              # set AUTH_SECRET (and HELIOS_ENCRYPTION_KEY in production)
 npm install
 npm run db:migrate                # applies prisma/migrations

@@ -18,6 +18,10 @@ void (async () => {
   process.exit(1);
 });
 
+// A job that starts work without waiting for it (an AI first response, an
+// enrichment) must not take every other job down with it: log and go on.
+process.on("unhandledRejection", (err) => console.error("A background task failed", err));
+
 const stop = () => process.exit(0);
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);

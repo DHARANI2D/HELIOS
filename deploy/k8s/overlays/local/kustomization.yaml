@@ -1,0 +1,86 @@
+# HELIOS on the Kubernetes in Docker Desktop (Settings → Kubernetes → Enable)
+# or kind, on your Mac, for testing. Postgres runs in the cluster here; in the
+# cloud it's a managed database (overlays/aws).
+#   docker build --target runtime -t helios:local . && docker build --target tools -t helios-tools:local .
+#   ./deploy/k8s/overlays/local/secrets.sh        # writes secrets.env and db.env (gitignored)
+#   kubectl apply -k deploy/k8s/overlays/local
+#   kubectl -n helios port-forward svc/helios-web 3000:80
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: helios
+resources:
+  - ../../base
+  - ../../../db
+  - postgres.yaml
+# Written by secrets.sh, kept out of Git.
+secretGenerator:
+  - name: helios-secrets
+    envs: [secrets.env]
+    options:
+      disableNameSuffixHash: true
+  - name: helios-db-init
+    envs: [db.env]
+    options:
+      disableNameSuffixHash: true
+patches:
+  - target: { kind: ConfigMap, name: helios-config }
+    patch: |-
+      - op: replace
+        path: /data/AUTH_URL
+        value: http://localhost:3000
+      - op: replace
+        path: /data/HELIOS_TRUSTED_PROXIES
+        value: "0"
+  # One replica each on a laptop.
+  - target: { kind: Deployment, name: helios-web }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target: { kind: HorizontalPodAutoscaler, name: helios-web }
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target: { kind: PodDisruptionBudget, name: helios-web }
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 0
+  - target: { kind: Deployment, name: helios-worker }
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  # Retries while the in-cluster database starts.
+  - target: { kind: Job, name: helios-migrate }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+      - op: replace
+        path: /spec/backoffLimit
+        value: 6
+  # No ingress controller needed on a laptop: port-forward instead.
+  - target: { kind: Ingress, name: helios }
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: helios
+  # Port-forwarding reaches the pod from the node, not from an ingress namespace.
+  - target: { kind: NetworkPolicy, name: web-from-ingress }
+    patch: |-
+      - op: replace
+        path: /spec/ingress/0/from
+        value: []

@@ -1,0 +1,26 @@
+# HELIOS on Kubernetes: the parts every install shares. Apply an overlay,
+# not this directly: overlays/local (Docker Desktop / kind on a Mac) or
+# overlays/aws (EKS in ap-south-1). docs/deployment.md walks through both.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: helios
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: helios
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - configmap.yaml
+  - migrate-job.yaml
+  - web.yaml
+  - worker.yaml
+  - networkpolicy.yaml
+  - ingress.yaml
+images:
+  - name: helios
+    newName: helios
+    newTag: local
+  - name: helios-tools
+    newName: helios-tools
+    newTag: local

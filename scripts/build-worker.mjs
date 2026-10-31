@@ -1,13 +1,15 @@
 // Bundles the background worker (src/worker.ts) into one file,
 // dist/worker.mjs, that runs with plain `node` from the standalone server's
-// directory (the container image). Two packages stay out of the bundle and
-// load from the standalone server's node_modules, as they do for the web
-// server: Prisma (its query engine) and Tesseract (its worker and language
-// files load by path). Next.js is bundled: the worker uses only after(),
-// which outside a request throws and the caller runs the job itself.
+// directory (the container image). Packages that load files by path at run
+// time stay out of the bundle and load from the standalone server's
+// node_modules, as they do for the web server: Prisma (its query engine),
+// Tesseract (its worker and language data) and pdfkit (its standard fonts,
+// required through its package import map).
+// Next.js is bundled: the worker uses only after(), which outside a request
+// throws and the caller runs the job itself.
 import { build } from "esbuild";
 
-const external = ["@prisma/client", ".prisma/client", "tesseract.js", "@tesseract.js-data/eng"];
+const external = ["@prisma/client", ".prisma/client", "tesseract.js", "@tesseract.js-data/eng", "pdfkit"];
 
 const result = await build({
   entryPoints: ["src/worker.ts"],

@@ -1,0 +1,11 @@
+# Pod Security Admission "restricted": pods must run as non-root, drop every
+# capability, use the runtime's seccomp profile and never escalate.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: helios
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
