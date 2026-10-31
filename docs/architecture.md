@@ -205,6 +205,12 @@ Each client signs a versioned rulebook (`org_policies`, one ACTIVE version, hash
   - versions show diffs;
   - the client admin signs, or staff activate on the client's recorded instruction;
   - YAML import and export.
+- **Kept in Git** (`git-sync.ts`): a client can keep the rulebook as YAML in its own repository (GitHub's contents API, GitLab's repository files API on gitlab.com or a self-managed host, or any https URL that returns the file), with an optional read-only token sealed with the client's key.
+  - **Hourly:** the job reads the file. A changed file becomes a draft that names its source and file hash. A file that's already in force, or already the open draft, creates nothing.
+  - **Signing:** a draft from Git applies only once it's signed in HELIOS, so a commit alone never changes what HELIOS may do.
+  - **Errors:** bad YAML, an invalid rulebook, a missing file or a refused token is recorded on the page and notified once per distinct problem.
+  - **Outbound address check** (`lib/net/public-fetch.ts`): client admins enter the address, so only https to hosts that resolve to public addresses is fetched, and redirects aren't followed. That keeps out the cloud metadata endpoint and internal services.
+- **Reviews** (`reminders.ts`, every 6 hours): client admins and SOC managers hear two weeks before a signed rulebook's review date (every 90 days unless the client sets otherwise) and again once it's overdue. Allowlist entries are flagged a week before they lapse. Each reminder goes once.
 
 ### AI per client (`lib/ai/gateway.ts`)
 
@@ -249,6 +255,8 @@ Timers in the server process:
 | On-call paging (severe cases, escalation, handoffs) | Minute |
 | QA sampling (last week's, once) | Hour |
 | Daily digest (once the set hour has passed) | 10 minutes |
+| Rulebook Git sync | Hour |
+| Rulebook reviews and lapsing allowlist entries | 6 hours |
 | Commercial clocks (draft invoices, overdue reminders, renewals, pilots ending) | Hour |
 | Ingest queue (backstop for the kick after each enqueue) | 2 seconds |
 | Pull collectors (each stream on its own interval) | 30 seconds |

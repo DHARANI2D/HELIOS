@@ -14,6 +14,7 @@ import { approverSchema, rulebookSchema } from "@/lib/rulebook/schema";
 import { dryRunRulebook } from "@/lib/rulebook/dry-run";
 import { addAllowlistEntry, discardDraft, removeAllowlistEntry, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
 import { action } from "@/lib/action";
+import { removeGitSync, saveGitSync, syncRulebook, type GitSyncInput } from "@/lib/rulebook/git-sync";
 
 // Client users work on their own rulebook only; staff on any client's.
 async function actorFor(tenantId: string, permission: "rulebook.view" | "rulebook.edit" | "rulebook.sign"): Promise<SessionUser> {
@@ -147,4 +148,28 @@ export const testApproverAction = action(async function testApproverAction(tenan
     return { ok: r.ok, message: r.ok ? `Sent to ${approver.name} by ${approver.channel === "email" ? "email" : approver.channel === "sms" ? "SMS" : "WhatsApp"}` : r.error ?? "Not sent" };
   }
   return { ok: false, message: `HELIOS doesn't place calls itself: the SOC is asked to ring ${approver.name} on ${approver.contact} when an approval is due. Check the number by hand.` };
+});
+
+// Git sync: keep the rulebook as YAML in the client's repository.
+export const saveGitSyncAction = action(async function saveGitSyncAction(tenantId: string, input: GitSyncInput) {
+  const user = await actorFor(tenantId, "rulebook.edit");
+  try {
+    await saveGitSync(tenantId, input, user.id);
+  } catch (err) {
+    explain(err);
+  }
+  done(tenantId);
+});
+
+export const removeGitSyncAction = action(async function removeGitSyncAction(tenantId: string) {
+  const user = await actorFor(tenantId, "rulebook.edit");
+  await removeGitSync(tenantId, user.id);
+  done(tenantId);
+});
+
+export const syncRulebookNowAction = action(async function syncRulebookNowAction(tenantId: string) {
+  const user = await actorFor(tenantId, "rulebook.edit");
+  const r = await syncRulebook(tenantId, { actor: author(user) });
+  done(tenantId);
+  return r;
 });

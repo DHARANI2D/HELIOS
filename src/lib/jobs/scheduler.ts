@@ -45,6 +45,10 @@ const JOBS: Job[] = [
   { name: "QA sampling", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/operations/qa")).runQaSampling() },
   // The daily digest, once the set hour has passed.
   { name: "daily digest", group: "core", everyMs: 10 * 60_000, run: async () => (await import("@/lib/operations/digest")).sendDigests() },
+  // Pulls rulebooks kept in Git into drafts when the file changes.
+  { name: "rulebook git sync", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/rulebook/git-sync")).syncAllRulebooks() },
+  // Rulebook review dates and lapsing allowlist entries.
+  { name: "rulebook reviews", group: "core", everyMs: 6 * 3_600_000, run: async () => (await import("@/lib/rulebook/reminders")).remindRulebookReviews() },
   // Drafts invoices for billing periods that started, chases overdue ones, renews or ends contracts.
   { name: "commercial clocks", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/billing/service")).commercialClocks() },
 ];

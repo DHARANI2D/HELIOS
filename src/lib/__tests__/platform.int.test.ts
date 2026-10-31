@@ -80,6 +80,8 @@ import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNotice
 import { evidenceMap } from "@/lib/compliance/iso27001";
 import type { SessionUser } from "@/lib/session";
 import { purgeTargetOfCase } from "@/lib/response/targets";
+import { saveGitSync, syncRulebook } from "@/lib/rulebook/git-sync";
+import { remindRulebookReviews } from "@/lib/rulebook/reminders";
 import { quoteConfigSchema } from "@/lib/pricing/calculator";
 import { commercialClocks, contractFromQuote, convertPilot, generateInvoices, issueInvoice, markPaid, pilotReport, saveBillingProfile, saveContract, sendContract, signContract, voidInvoice } from "@/lib/billing/service";
 import { acknowledgePage, addOverride, generateShifts, onCallNow, pageOnCall, runPaging } from "@/lib/operations/paging";
@@ -1646,6 +1648,62 @@ tags: [attack.execution, attack.t1059.001]`;
     await signRulebook(tenant.id, { ...author, isClient: false }, "Client approved by email today");
     const reset = await requestAnalystAction({ caseId: kase.id, actionType: "RESET_PASSWORD", target: "break-glass-01@corp.example", actor: author, canApprove: true });
     expect(reset.status).toBe("BLOCKED");
+  });
+
+  it("pulls a rulebook kept in Git into a draft, and reminds people of reviews and lapsing allowlist entries", async () => {
+    const DAY = 86_400_000;
+    const tenant = await db.tenant.create({ data: { name: "Test · Git rulebook", slug: "test-git-rulebook" } });
+    const clientAdmin = await db.user.create({ data: { email: "git.client@test.local", name: "Git Client", role: "CLIENT_ADMIN", tenantId: tenant.id } });
+    let served: { status: number; body: string } = { status: 200, body: "identities:\n  breakGlass: [\"bg-*\"]\nreviewEveryDays: 30\n" };
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    const fakeFetch = (async (url: URL, init?: RequestInit) => {
+      seen.push({ url: String(url), headers: init?.headers as Record<string, string> });
+      return new Response(served.body, { status: served.status });
+    }) as unknown as typeof fetch;
+
+    await expect(saveGitSync(tenant.id, { provider: "url", repo: "http://203.0.113.10/helios.yaml" }, adminId)).rejects.toThrow();
+    await saveGitSync(tenant.id, { provider: "url", repo: "https://203.0.113.10/helios.yaml", token: "read-token" }, adminId);
+    const first = await syncRulebook(tenant.id, { fetchImpl: fakeFetch });
+    expect(first).toMatchObject({ status: "imported", version: 1 });
+    expect(seen[0].headers).toMatchObject({ authorization: "Bearer read-token" });
+    const draft = await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id } });
+    expect(draft).toMatchObject({ status: "DRAFT", template: "git" });
+    expect(draft.reason).toContain("From Git: https://203.0.113.10/helios.yaml");
+    expect(await db.notification.count({ where: { userId: clientAdmin.id, kind: "rulebook", title: { contains: "came from Git" } } })).toBe(1);
+    // Nothing applies until it's signed.
+    expect(await db.orgPolicy.count({ where: { tenantId: tenant.id, status: "ACTIVE" } })).toBe(0);
+    expect((await syncRulebook(tenant.id, { fetchImpl: fakeFetch })).status).toBe("unchanged");
+
+    // Bad YAML or a missing file: recorded, and said once.
+    served = { status: 200, body: "identities: [unclosed" };
+    expect(await syncRulebook(tenant.id, { fetchImpl: fakeFetch })).toMatchObject({ status: "error", message: expect.stringMatching(/not valid YAML/) });
+    await syncRulebook(tenant.id, { fetchImpl: fakeFetch });
+    expect(await db.notification.count({ where: { userId: clientAdmin.id, title: "Rulebook sync from Git failed" } })).toBe(1);
+    served = { status: 200, body: "reviewEveryDays: 3" };
+    expect(await syncRulebook(tenant.id, { fetchImpl: fakeFetch })).toMatchObject({ status: "error", message: expect.stringMatching(/reviewEveryDays/) });
+    served = { status: 404, body: "" };
+    expect((await syncRulebook(tenant.id, { fetchImpl: fakeFetch })).message).toMatch(/isn't there/);
+    // A private address is refused before anything is fetched.
+    await saveGitSync(tenant.id, { provider: "url", repo: "https://10.0.0.8/helios.yaml" }, adminId);
+    const fetched = seen.length;
+    expect((await syncRulebook(tenant.id, { fetchImpl: fakeFetch })).message).toMatch(/private or internal/);
+    expect(seen.length).toBe(fetched);
+
+    // Review reminders: two weeks ahead, then overdue, once each.
+    await signRulebook(tenant.id, { id: adminId, name: "Test Admin", isClient: false }, "Client approved the Git version by email");
+    const active = await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } });
+    await db.orgPolicy.update({ where: { id: active.id }, data: { signedAt: new Date(Date.now() - 20 * DAY) } });
+    await remindRulebookReviews(new Date());
+    await remindRulebookReviews(new Date());
+    const titles = async () => (await db.notification.findMany({ where: { userId: clientAdmin.id, title: { contains: "review" } }, select: { title: true } })).map((n) => n.title);
+    expect(await titles()).toEqual([expect.stringMatching(/due for review on/)]);
+    await remindRulebookReviews(new Date(Date.now() + 11 * DAY));
+    expect(await titles()).toHaveLength(2);
+    expect((await titles()).some((t) => /overdue/.test(t))).toBe(true);
+    await db.policyAllowlistEntry.create({ data: { tenantId: tenant.id, kind: "ip", value: "10.0.5.20", reason: "Scanner", owner: "IT", expiresAt: new Date(Date.now() + 3 * DAY), createdById: adminId } });
+    await remindRulebookReviews(new Date());
+    await remindRulebookReviews(new Date());
+    expect(await db.notification.count({ where: { userId: clientAdmin.id, title: { contains: "Allowlist entry 10.0.5.20 lapses" } } })).toBe(1);
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

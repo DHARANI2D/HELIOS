@@ -205,6 +205,7 @@ model Tenant {
   archives     EventArchive[]
   legalHolds   LegalHold[]
   contracts    Contract[]
+  rulebookGit  RulebookGitSync?
 
   @@map("tenants")
 }
@@ -1869,4 +1870,31 @@ model Invoice {
   @@index([tenantId])
   @@index([status, dueAt])
   @@map("invoices")
+}
+
+// A client's rulebook kept in Git: the YAML file is pulled into a draft
+// when it changes. Signing still happens in HELIOS.
+model RulebookGitSync {
+  tenantId      String    @id
+  // github | gitlab | url
+  provider      String
+  // owner/repo (GitHub), group/project (GitLab), or the file's https URL.
+  repo          String
+  // GitLab host for self-managed GitLab; empty for gitlab.com.
+  host          String?
+  branch        String    @default("main")
+  path          String    @default("helios/rulebook.yaml")
+  tokenSealed   String?
+  enabled       Boolean   @default(true)
+  // SHA-256 of the file as last read, and the draft it became.
+  lastHash      String?
+  lastVersion   Int?
+  lastCheckedAt DateTime?
+  lastError     String?
+  createdById   String?
+  updatedAt     DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("rulebook_git_sync")
 }

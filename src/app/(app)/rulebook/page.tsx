@@ -27,6 +27,7 @@ import { RulebookSummary } from "@/components/rulebook/rulebook-summary";
 import { ClientAiPanel } from "@/components/rulebook/client-ai-panel";
 import { LadderPanel, ResumeAutomationButton } from "@/components/rulebook/ladder-panel";
 import { AllowlistPanel, CodePanel, DraftControls, DryRunPanel, SignPanel } from "@/components/rulebook/rulebook-panels";
+import { GitSyncPanel } from "@/components/rulebook/git-sync-panel";
 
 const STATUS_LABEL = { DRAFT: "Draft", AWAITING_SIGNATURE: "Awaiting signature", ACTIVE: "In force", SUPERSEDED: "Superseded" } as const;
 const STATUS_VARIANT = { DRAFT: "outline", AWAITING_SIGNATURE: "warning", ACTIVE: "success", SUPERSEDED: "secondary" } as const;
@@ -86,7 +87,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
   if (!tenant) notFound();
 
   const since = daysAgo(30);
-  const [state, allowlist, endpoints, accounts, providers, reminders, aiPreview, aiPolicy, aiSpend, aiProviders, me, ladderRows, monthStats, weekStats] = await Promise.all([
+  const [state, allowlist, endpoints, accounts, providers, reminders, aiPreview, aiPolicy, aiSpend, aiProviders, me, ladderRows, monthStats, weekStats, gitSync] = await Promise.all([
     rulebookState(tenant.id),
     db.policyAllowlistEntry.findMany({ where: { tenantId: tenant.id }, orderBy: { createdAt: "desc" } }),
     db.endpoint.findMany({ where: { tenantId: tenant.id }, orderBy: { hostname: "asc" }, select: { hostname: true, os: true, assetClass: true, assetType: true, criticality: true }, take: 1000 }),
@@ -101,6 +102,7 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
     db.autonomyLevel.findMany({ where: { tenantId: tenant.id } }),
     ladderStats(tenant.id, daysAgo(PROMOTION.windowDays)),
     ladderStats(tenant.id, daysAgo(DEMOTION.windowDays)),
+    db.rulebookGitSync.findUnique({ where: { tenantId: tenant.id } }),
   ]);
 
   const canEdit = can(user, "rulebook.edit");
@@ -311,7 +313,14 @@ export default async function RulebookPage({ searchParams }: PageProps<"/ruleboo
           />
         </TabsContent>
         <TabsContent value="code">
-          <CodePanel tenantId={tenant.id} book={draft ?? active ?? editing} canEdit={canEdit} />
+          <div className="flex flex-col gap-4">
+            <CodePanel tenantId={tenant.id} book={draft ?? active ?? editing} canEdit={canEdit} />
+            <GitSyncPanel
+              tenantId={tenant.id}
+              canEdit={canEdit}
+              value={gitSync ? { provider: gitSync.provider, repo: gitSync.repo, host: gitSync.host, branch: gitSync.branch, path: gitSync.path, enabled: gitSync.enabled, tokenSet: !!gitSync.tokenSealed, lastCheckedAt: gitSync.lastCheckedAt?.toISOString() ?? null, lastVersion: gitSync.lastVersion, lastError: gitSync.lastError } : null}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>
