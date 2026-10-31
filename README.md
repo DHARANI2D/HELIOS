@@ -44,6 +44,17 @@ HELIOS ships no sample clients, no invented prices and no fake intelligence.
 
 See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit together, and [`docs/porting-notes.md`](docs/porting-notes.md) for the history of the original modules.
 
+## User guides
+
+`docs/guides/` has a PDF guide for each of the eleven roles. Each covers:
+- the role and its responsibilities;
+- its exact permissions and pages, taken from the code;
+- how to sign in and find your way;
+- every screen the role can open, with screenshots and how to use it;
+- step-by-step procedures, guidelines and a glossary.
+
+`HELIOS-guide-00-overview.pdf` compares the roles side by side. The screenshots were taken in the test environment with test data.
+
 ## Stack
 
 - **Framework:** Next.js 16 (App Router, Server Actions, `after()` for background work), React 19, TypeScript.
