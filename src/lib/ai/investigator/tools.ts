@@ -171,8 +171,10 @@ async function eventSummary(ctx: InvestigationContext, input: z.infer<typeof TOO
     ...(input.user ? { userName: { equals: input.user.trim(), mode: "insensitive" } } : {}),
     ...(input.ip ? { OR: [{ sourceIp: input.ip.trim() }, { destIp: input.ip.trim() }] } : {}),
   };
+  // eventType is never null; the others may be (and a null filter on a
+  // required column is an error).
   const by = async (column: "eventType" | "hostName" | "userName" | "destIp" | "sourceIp") =>
-    (await db.securityEvent.groupBy({ by: [column], where: { ...where, NOT: { [column]: null } }, _count: true, orderBy: { _count: { [column]: "desc" } }, take: 10 })).map((r) => ({ value: String((r as Record<string, unknown>)[column]), n: r._count }));
+    (await db.securityEvent.groupBy({ by: [column], where: column === "eventType" ? where : { ...where, NOT: { [column]: null } }, _count: true, orderBy: { _count: { [column]: "desc" } }, take: 10 })).map((r) => ({ value: String((r as Record<string, unknown>)[column]), n: r._count }));
   const total = await db.securityEvent.count({ where });
   const [types, a, b] = await Promise.all([by("eventType"), by(input.host ? "userName" : "hostName"), by(input.ip ? "userName" : "destIp")]);
   const who = input.host ? `host ${field(ctx, "host", input.host, 120)}` : input.user ? `account ${field(ctx, "user", input.user, 120)}` : `IP ${input.ip}`;

@@ -24,10 +24,11 @@ import { ProvidersPanel } from "@/components/ai/providers-panel";
 import { AgentProfileCard } from "@/components/ai/agent-profiles";
 import { EvaluationsPanel, type CaseResultView, type EvalTargetView, type ScorecardView } from "@/components/ai/evaluations-panel";
 import { GOLDEN } from "@/lib/ai/evals/golden";
+import { INVESTIGATION_PASS, INVESTIGATION_SCENARIOS } from "@/lib/ai/evals/investigation";
 import { PASS } from "@/lib/ai/evals/run";
 import { runningEvaluations } from "@/lib/ai/evals/service";
 
-const EVAL_AGENTS = ["triage", "phishing", "threat_intel"] as const;
+const EVAL_AGENTS = ["triage", "phishing", "threat_intel", "investigator"] as const;
 type EvalAgent = (typeof EVAL_AGENTS)[number];
 
 // Scorecards, what can be evaluated, and which models clients or users
@@ -109,7 +110,7 @@ export default async function AiPage() {
     return { key, label: `${labelOf.get(value) ?? value} · ${AGENT_TYPES[agent as EvalAgent]?.name ?? agent}`, startedAt: startedAt.toISOString() };
   });
   const scorecards: ScorecardView[] = evals.capabilities.map((c) => {
-    const d = (c.details ?? {}) as Partial<{ verdictAccuracy: number; actionRecall: number; falseContainments: number; injectionFailures: number; reasons: string[]; results: CaseResultView[] }>;
+    const d = (c.details ?? {}) as Partial<{ verdictAccuracy: number; actionRecall: number; falseContainments: number; injectionFailures: number; discovery: number; grounding: number; reasons: string[]; results: CaseResultView[] }>;
     return {
       model: c.model,
       agentKey: c.agentKey as EvalAgent,
@@ -121,6 +122,7 @@ export default async function AiPage() {
       actionRecall: d.actionRecall ?? null,
       falseContainments: d.falseContainments ?? null,
       injectionFailures: d.injectionFailures ?? null,
+      discovery: d.discovery ?? null,
       reasons: d.reasons ?? [],
       results: d.results ?? [],
       inUse: [...(evals.picks.get(`${c.model}:${c.agentKey}`) ?? [])],
@@ -235,7 +237,12 @@ export default async function AiPage() {
             targets={evalTargets}
             scorecards={scorecards}
             running={running}
-            golden={{ total: GOLDEN.length, byKind, why: Object.fromEntries(GOLDEN.map((g) => [g.id, g.why])) }}
+            golden={{
+              total: GOLDEN.length,
+              byKind,
+              why: Object.fromEntries([...GOLDEN.map((g) => [g.id, g.why]), ...INVESTIGATION_SCENARIOS.map((s) => [s.id, s.case.why])]),
+              investigation: { total: INVESTIGATION_SCENARIOS.length, discovery: INVESTIGATION_PASS.discovery, grounding: INVESTIGATION_PASS.grounding },
+            }}
             pass={{ verdictAccuracy: PASS.verdictAccuracy, actionRecall: PASS.actionRecall }}
             unevaluated={unevaluated}
             now={now.toISOString()}

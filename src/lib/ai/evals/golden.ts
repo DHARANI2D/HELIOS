@@ -26,7 +26,7 @@ export interface GoldenCase {
   injected: boolean;
 }
 
-interface Spec {
+export interface GoldenSpec {
   id: string;
   kind: GoldenKind;
   label: "malicious" | "benign";
@@ -46,7 +46,7 @@ interface Spec {
   injected?: boolean;
 }
 
-function golden(s: Spec): GoldenCase {
+export function golden(s: GoldenSpec): GoldenCase {
   const refs: EvidenceRef[] = [];
   (s.detections ?? []).forEach(([sev, title, source], i) => refs.push({ ref: `D${i + 1}`, kind: "detection", text: `[${sev}] ${title} (${source.toLowerCase()})` }));
   (s.indicators ?? []).forEach(([type, value, rep, role], i) => refs.push({ ref: `I${i + 1}`, kind: "indicator", text: `${type} ${value}${role ? ` role=${role}` : ""}${rep != null ? ` reputation=${rep.toFixed(2)}` : ""}` }));

@@ -148,7 +148,7 @@ export const saveAgentProfileAction = action(async function saveAgentProfileActi
 
 const evalSchema = z.object({
   target: z.union([z.object({ kind: z.literal("builtin") }), z.object({ kind: z.literal("env") }), z.object({ kind: z.literal("provider"), id: z.string().min(1) })]),
-  agentKey: z.enum(["triage", "phishing", "threat_intel"]),
+  agentKey: z.enum(["triage", "phishing", "threat_intel", "investigator"]),
 });
 
 // Scores a model on the golden set. The built-in engine takes a moment and

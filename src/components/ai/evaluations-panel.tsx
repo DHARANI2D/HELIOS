@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { unwrap } from "@/lib/action-result";
 
 type Target = { kind: "builtin" } | { kind: "env" } | { kind: "provider"; id: string };
-type EvalAgent = "triage" | "phishing" | "threat_intel";
+type EvalAgent = "triage" | "phishing" | "threat_intel" | "investigator";
 
 export interface EvalTargetView {
   value: string; // "builtin" | "env" | provider id
@@ -36,6 +36,10 @@ export interface CaseResultView {
   injectionResisted: boolean | null;
   engine: string;
   error?: string;
+  // Investigation scenarios: the facts it found and missed.
+  discovered?: string[];
+  missed?: string[];
+  lookups?: number;
 }
 
 export interface ScorecardView {
@@ -49,6 +53,7 @@ export interface ScorecardView {
   actionRecall: number | null;
   falseContainments: number | null;
   injectionFailures: number | null;
+  discovery: number | null;
   reasons: string[];
   results: CaseResultView[];
   inUse: string[];
@@ -58,7 +63,7 @@ interface Props {
   targets: EvalTargetView[];
   scorecards: ScorecardView[];
   running: Array<{ key: string; label: string; startedAt: string }>;
-  golden: { total: number; byKind: Record<string, number>; why: Record<string, string> };
+  golden: { total: number; byKind: Record<string, number>; why: Record<string, string>; investigation: { total: number; discovery: number; grounding: number } };
   pass: { verdictAccuracy: number; actionRecall: number };
   // Model choices by clients or users with no passing scorecard.
   unevaluated: string[];
@@ -66,7 +71,7 @@ interface Props {
   canConfigure: boolean;
 }
 
-const AGENT_LABEL: Record<EvalAgent, string> = { triage: "Triage", phishing: "Phishing analyst", threat_intel: "Threat-intel enricher" };
+const AGENT_LABEL: Record<EvalAgent, string> = { triage: "Triage", phishing: "Phishing analyst", threat_intel: "Threat-intel enricher", investigator: "Investigation agent" };
 const KIND_LABEL: Record<string, string> = { attack: "attacks", benign: "benign", lookalike: "look-alikes", adversarial: "with planted instructions" };
 const pct = (n: number | null) => (n == null ? "—" : `${Math.round(n * 100)}%`);
 
@@ -100,6 +105,12 @@ export function EvaluationsPanel({ targets, scorecards, running, golden, pass, u
         {golden.total} labelled cases ({Object.entries(golden.byKind).map(([k, n]) => `${n} ${KIND_LABEL[k] ?? k}`).join(", ")}), run through the same pipeline as first response. To pass, a model needs
         verdicts right in at least {pass.verdictAccuracy * 100}% of cases, at least {pass.actionRecall * 100}% of the containment an analyst would take, no containment an analyst
         wouldn&apos;t take, and it must never be fooled by planted instructions. A model a client or user picks only suggests until it passes for that agent.
+      </p>
+      <p className="text-sm text-muted-foreground">
+        The investigation agent is scored on {golden.investigation.total} scenarios of its own. Each seeds a short-lived test client with the telemetry and inventory its
+        tools will search, then removes it. On top of the bars above, it must find at least {golden.investigation.discovery * 100}% of what the alerts didn&apos;t show (the
+        second host, the sign-in that followed, the jump server behind the &quot;lateral movement&quot;), and at least {golden.investigation.grounding * 100}% of its findings
+        must cite real evidence.
       </p>
 
       {unevaluated.length > 0 && (
@@ -157,6 +168,7 @@ export function EvaluationsPanel({ targets, scorecards, running, golden, pass, u
                 <TableHead className="text-right">Containment recall</TableHead>
                 <TableHead className="text-right">Wrong containment</TableHead>
                 <TableHead className="text-right">Fooled</TableHead>
+                <TableHead className="text-right">Found</TableHead>
                 <TableHead>Result</TableHead>
                 <TableHead className="text-right">Evaluated</TableHead>
               </TableRow>
@@ -183,6 +195,7 @@ export function EvaluationsPanel({ targets, scorecards, running, golden, pass, u
                       <TableCell className="text-right tabular-nums">{pct(c.actionRecall)}</TableCell>
                       <TableCell className="text-right tabular-nums">{c.falseContainments ?? "—"}</TableCell>
                       <TableCell className="text-right tabular-nums">{c.injectionFailures ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{pct(c.discovery)}</TableCell>
                       <TableCell className="max-w-72">
                         <Badge variant={c.passed ? "success" : "destructive"}>{c.passed ? "Passed" : "Below the bar"}</Badge>
                         {c.reasons.map((r) => (
@@ -193,7 +206,7 @@ export function EvaluationsPanel({ targets, scorecards, running, golden, pass, u
                     </TableRow>
                     {expanded && (
                       <TableRow>
-                        <TableCell colSpan={10} className="bg-muted/30">
+                        <TableCell colSpan={11} className="bg-muted/30">
                           <ul className="flex flex-col gap-1.5 py-1 text-xs">
                             {c.results.map((r) => {
                               const wrong = r.falseContainment.length > 0 || r.injectionResisted === false || r.verdictScore === 0 || !!r.error;
@@ -205,6 +218,13 @@ export function EvaluationsPanel({ targets, scorecards, running, golden, pass, u
                                   {r.expected > 0 && <span className="text-muted-foreground">· containment {r.matched ? "matched" : "missed"}</span>}
                                   {r.falseContainment.length > 0 && <span className="text-destructive">· proposed {r.falseContainment.join(", ")}</span>}
                                   {r.injectionResisted === false && <span className="text-destructive">· followed planted instructions</span>}
+                                  {r.discovered && r.missed && (r.discovered.length > 0 || r.missed.length > 0) && (
+                                    <span className={r.missed.length ? "text-warning" : "text-muted-foreground"}>
+                                      · found {r.discovered.length} of {r.discovered.length + r.missed.length}
+                                      {r.missed.length ? ` (missed: ${r.missed.join("; ")})` : ""}
+                                      {r.lookups != null ? ` in ${r.lookups} lookup${r.lookups === 1 ? "" : "s"}` : ""}
+                                    </span>
+                                  )}
                                   {r.engine === "built-in" && c.model !== "built-in" && <span className="text-muted-foreground">· fell back to the built-in engine</span>}
                                   {r.error && <span className="text-destructive">· {r.error}</span>}
                                   {golden.why[r.id] && <span className="basis-full pl-1 text-[11px] text-muted-foreground">{golden.why[r.id]}</span>}

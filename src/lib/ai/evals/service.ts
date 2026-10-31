@@ -6,12 +6,13 @@ import { anthropicProvider } from "@/lib/ai/anthropic";
 import { envClaudeAvailable, providerFromRow } from "@/lib/ai/resolve";
 import type { LlmProvider } from "@/lib/ai/provider";
 import { evaluateTriage, type Scorecard } from "@/lib/ai/evals/run";
+import { evaluateInvestigator } from "@/lib/ai/evals/investigation";
 
 // Running an evaluation and keeping its scorecard: one model_capabilities
 // row per model and agent, replaced on every run, with each case's result.
 
 export type EvalTarget = { kind: "builtin" } | { kind: "env" } | { kind: "provider"; id: string };
-export type EvalAgent = "triage" | "phishing" | "threat_intel";
+export type EvalAgent = "triage" | "phishing" | "threat_intel" | "investigator";
 
 // Model runs take a minute or two, so they run after the response; the AI
 // page shows what's still running (one server process, as deployed).
@@ -35,7 +36,8 @@ async function providerFor(target: EvalTarget): Promise<LlmProvider | null> {
 }
 
 export async function saveScorecard(card: Scorecard) {
-  const details = JSON.parse(JSON.stringify({ verdictAccuracy: card.verdictAccuracy, actionRecall: card.actionRecall, falseContainments: card.falseContainments, injectionFailures: card.injectionFailures, fallbacks: card.fallbacks, reasons: card.reasons, results: card.results })) as Prisma.InputJsonValue;
+  const extra = card as Scorecard & { discovery?: number; grounding?: number };
+  const details = JSON.parse(JSON.stringify({ verdictAccuracy: card.verdictAccuracy, actionRecall: card.actionRecall, falseContainments: card.falseContainments, injectionFailures: card.injectionFailures, fallbacks: card.fallbacks, discovery: extra.discovery, grounding: extra.grounding, reasons: card.reasons, results: card.results })) as Prisma.InputJsonValue;
   return db.modelCapability.upsert({
     where: { model_agentKey: { model: card.model, agentKey: card.agentKey } },
     update: { score: card.score, passed: card.passed, cases: card.cases, details, evaluatedAt: new Date() },
@@ -59,7 +61,8 @@ export async function startEvaluation(target: EvalTarget, agentKey: EvalAgent, a
   }
   const done = (async () => {
     try {
-      const card = await evaluateTriage(provider, agentKey);
+      // The investigation agent is scored on worlds its tools search.
+      const card = agentKey === "investigator" ? await evaluateInvestigator(provider) : await evaluateTriage(provider, agentKey);
       await saveScorecard(card);
       await logAction({ actorId, action: "ai.evaluated", detail: { model: card.model, agentKey, score: card.score, passed: card.passed, reasons: card.reasons } });
       return card;

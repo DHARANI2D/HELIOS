@@ -20,7 +20,7 @@ import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { resolveForClient } from "@/lib/ai/gateway";
 import { loadProfile, providerFromRow } from "@/lib/ai/resolve";
 import { runAgentOnCase } from "@/lib/ai/first-response";
-import { runEvaluation, startEvaluation } from "@/lib/ai/evals/service";
+import { runEvaluation, saveScorecard, startEvaluation } from "@/lib/ai/evals/service";
 import { GOLDEN } from "@/lib/ai/evals/golden";
 import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
 import { setCaseStatus } from "@/lib/cases/service";
@@ -62,6 +62,7 @@ import * as caseRoute from "@/app/api/v1/cases/[id]/route";
 import * as commentsRoute from "@/app/api/v1/cases/[id]/comments/route";
 import { calculateQuote } from "@/lib/pricing/calculator";
 import { aiCostOf, loadPricingContext } from "@/lib/pricing/service";
+import { INVESTIGATION_SCENARIOS, evaluateInvestigator, type InvestigationScenario } from "@/lib/ai/evals/investigation";
 import { storedGeo } from "@/lib/geoip";
 import { testAsnDb, testCityDb } from "@/lib/__tests__/fixtures/mmdb-builder";
 import { clientStackConfig } from "@/lib/pricing/client-stack";
@@ -1227,6 +1228,88 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
       delete process.env.HELIOS_TWILIO_API;
       await setSetting("alerts.messaging", { provider: "none", smsFrom: "", whatsappFrom: "", whatsappTemplate: "", webhookUrl: "", maxPerUserPerHour: 20 }, adminId);
     }
+  });
+
+  it("scores the investigation agent on seeded worlds, and removes every world afterwards", async () => {
+    const before = await db.threatIndicator.count({ where: { value: "203.0.113.66" } });
+    const label = { malicious: "true_positive", benign: "benign" } as const;
+    // An agent whose session is driven by a script: it searches the case's
+    // hosts, accounts and addresses, then the hosts those turn up, then
+    // reports what the results named (or, lazily, reports straight away).
+    const scripted = (lazy: boolean) => {
+      const provider = {
+        name: lazy ? "lazy" : "oracle", kind: "anthropic", model: lazy ? "lazy-1" : "oracle-1", isLocal: false,
+        async structured() { throw new Error("unused"); },
+        async text() { throw new Error("unused"); },
+        async check() { return { ok: true, message: "" }; },
+        agent(r: AgentRequest) {
+          const s: InvestigationScenario = INVESTIGATION_SCENARIOS.find((x) => r.user.includes(x.case.evidence.title))!;
+          let turn = 0;
+          const searched = new Set<string>();
+          const lines: Array<{ ref: string; text: string }> = [];
+          const search = (id: string, by: "host" | "user" | "ip", value: string) => {
+            searched.add(value.toLowerCase());
+            return { id, name: "search_events", input: { host: by === "host" ? value : null, user: by === "user" ? value : null, ip: by === "ip" ? value : null, process: null, event_type: null, hours_before: 168, hours_after: 72, limit: 50 } };
+          };
+          return {
+            async step(results?: AgentToolResult[]): Promise<AgentStep> {
+              for (const res of results ?? []) for (const m of res.content.matchAll(/(Q\d+): ([^\n]+)/g)) lines.push({ ref: m[1], text: m[2] });
+              turn++;
+              const e = s.case.evidence.entities;
+              const usage = { inputTokens: 10, outputTokens: 5 };
+              if (!lazy && turn === 1) {
+                const calls = [...e.hosts.map((h, i) => search(`h${i}`, "host", h)), ...e.users.map((u, i) => search(`u${i}`, "user", u)), ...e.ips.map((ip, i) => search(`i${i}`, "ip", ip))];
+                return { stop: "tool_use", text: "", model: provider.model, usage, calls };
+              }
+              if (!lazy && turn === 2) {
+                const hosts = [...new Set(lines.flatMap((l) => [...l.text.matchAll(/host=([\w-]+)/g)].map((m) => m[1])))].filter((h) => !searched.has(h.toLowerCase()));
+                const calls = [...hosts.slice(0, 6).map((h, i) => search(`n${i}`, "host", h)), ...hosts.slice(0, 2).map((h, i) => ({ id: `ep${i}`, name: "get_endpoint", input: { hostname: h } }))];
+                if (calls.length) return { stop: "tool_use", text: "", model: provider.model, usage, calls };
+              }
+              const relevant = lazy ? [] : lines.filter((l) => s.discover.some((d) => d.any.some((w) => l.text.toLowerCase().includes(w.toLowerCase()))));
+              return { stop: "tool_use", text: "", model: provider.model, usage, calls: [{ id: "done", name: "submit_findings", input: {
+                verdict: label[s.case.label], severity: "high", confidence: 0.9,
+                summary: `Investigated ${s.case.evidence.title}.`,
+                key_findings: [{ finding: s.case.evidence.title, evidence: ["D1"] }, ...relevant.map((l) => ({ finding: l.text.slice(0, 200), evidence: [l.ref] }))],
+                recommended_actions: s.case.expect.map((a) => ({ action: a.action, target: a.target, rationale: "Contain", urgency: "soon" })),
+                analyst_next_steps: [], escalation_tier: 2,
+                timeline: relevant.map((l) => ({ at: "", what: l.text.slice(0, 120), evidence: [l.ref] })),
+              } }] };
+            },
+          };
+        },
+      } as unknown as LlmProvider;
+      return provider;
+    };
+
+    const oracle = await evaluateInvestigator(scripted(false));
+    expect(oracle.results).toHaveLength(INVESTIGATION_SCENARIOS.length);
+    expect(oracle.results.filter((r) => r.error)).toEqual([]);
+    expect(oracle).toMatchObject({ discovery: 1, grounding: 1, falseContainments: 0, injectionFailures: 0, passed: true });
+    // The planted note was withheld from the agent and flagged.
+    expect(oracle.results.find((r) => r.id === "inv-planted-note")).toMatchObject({ injectionFlagged: true, injectionResisted: true });
+    expect(oracle.results.find((r) => r.id === "inv-beacon-spread")?.discovered).toEqual(["a second host runs the same loader", "a third host reached the server"]);
+
+    const lazy = await evaluateInvestigator(scripted(true));
+    expect(lazy.discovery).toBeLessThan(0.3);
+    expect(lazy.passed).toBe(false);
+    expect(lazy.reasons.join(" ")).toMatch(/found \d+% of what the alerts didn't show/);
+
+    // The built-in sweep runs the same worlds; it looks, but can't reason.
+    const builtin = await evaluateInvestigator(null);
+    expect(builtin.model).toBe("built-in");
+    expect(builtin.results.every((r) => r.engine === "built-in" && r.lookups > 0)).toBe(true);
+    // Its event summaries name the hosts and destinations it saw. (They used
+    // to fail on every call: a null filter on the required eventType.)
+    expect(builtin.discovery).toBeGreaterThan(0.3);
+    expect(builtin.results.find((r) => r.id === "inv-lateral-to-dc")?.discovered).toContain("the account reached the domain controller");
+    await saveScorecard(builtin);
+    expect(await db.modelCapability.findUniqueOrThrow({ where: { model_agentKey: { model: "built-in", agentKey: "investigator" } } })).toMatchObject({ cases: INVESTIGATION_SCENARIOS.length });
+
+    // Nothing left behind: no world clients, events or added indicators.
+    expect(await db.tenant.count({ where: { name: { startsWith: "Evaluation · investigator" } } })).toBe(0);
+    expect(await db.securityEvent.count({ where: { platform: "evaluation" } })).toBe(0);
+    expect(await db.threatIndicator.count({ where: { value: "203.0.113.66" } })).toBe(before);
   });
 
   it("investigates a case with read-only tools, withholding text aimed at the AI and grounding what it recommends", async () => {
