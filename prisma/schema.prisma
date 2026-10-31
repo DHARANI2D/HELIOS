@@ -177,6 +177,9 @@ model Tenant {
   automationPausedAt    DateTime?
   automationPauseReason String?
   notes                 String?      @db.Text
+  // Who invoices go to (lib/billing): { legalName, gstin, address, state,
+  // country, email, poNumber }.
+  billingProfile        Json?
   // Test clients hold test data only: badged everywhere, kept out of
   // commercial figures, and never a real organization.
   isTest                Boolean      @default(false)
@@ -201,6 +204,7 @@ model Tenant {
   tunings      DetectionTuning[]
   archives     EventArchive[]
   legalHolds   LegalHold[]
+  contracts    Contract[]
 
   @@map("tenants")
 }
@@ -1742,4 +1746,123 @@ model DigestRun {
 
   @@index([tenantId, day])
   @@map("digest_runs")
+}
+
+// ---------------------------------------------------------------- business
+
+enum ContractKind {
+  PILOT
+  SUBSCRIPTION
+}
+
+enum ContractStatus {
+  DRAFT
+  SENT
+  ACTIVE
+  ENDED
+  TERMINATED
+}
+
+// A client's contract: a pilot or a subscription. Fees in minor units of
+// its currency. Signing records who signed and snapshots what automated
+// containment was agreed: the autonomy the client consented to, the
+// rulebook version in force, and the liability cap.
+model Contract {
+  id                 String         @id @default(cuid())
+  // C-2026-0001 (subscription) or P-2026-0001 (pilot).
+  reference          String         @unique
+  tenantId           String
+  kind               ContractKind
+  status             ContractStatus @default(DRAFT)
+  quoteId            String?
+  planName           String?
+  currency           String
+  monthlyFee         Int            @default(0)
+  endpointsCommitted Int            @default(0)
+  overagePerEndpoint Int            @default(0)
+  oneTimeFee         Int            @default(0)
+  // monthly | quarterly | annual
+  billingCycle       String         @default("monthly")
+  paymentTermsDays   Int            @default(30)
+  startsAt           DateTime
+  endsAt             DateTime
+  // The term's length; a renewal adds another.
+  termMonths         Int            @default(12)
+  autoRenew          Boolean        @default(false)
+  noticeDays         Int            @default(30)
+  // Liability for automated containment, capped at this many months of fees.
+  liabilityCapMonths Int            @default(12)
+  // Snapshots taken when sent or signed.
+  autonomyCap        AiAutonomy?
+  rulebookVersion    Int?
+  dpaReference       String?
+  terms              String?        @db.Text
+  // Pilots: [{ metric, target }] and the result.
+  successCriteria    Json?
+  pilotOutcome       String?
+  convertedToId      String?
+  // Invoices exist for periods up to here.
+  billedThrough      DateTime?
+  sentAt             DateTime?
+  signedAt           DateTime?
+  signedByName       String?
+  signedByTitle      String?
+  // in_app | paper | e_sign
+  signedVia          String?
+  signedRecordedById String?
+  endedAt            DateTime?
+  endReason          String?
+  remindedAt         DateTime?
+  createdById        String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  invoices Invoice[]
+
+  @@index([tenantId])
+  @@index([status, endsAt])
+  @@map("contracts")
+}
+
+// An invoice for one billing period of a contract. Drafted by the job,
+// numbered and frozen when issued; never deleted (voided with a reason).
+model Invoice {
+  id         String    @id @default(cuid())
+  // <prefix>/<financial year>/<serial>, assigned when issued.
+  number     String?   @unique
+  tenantId   String
+  contractId String?
+  // DRAFT | ISSUED | PAID | VOID
+  status     String    @default("DRAFT")
+  currency   String
+  periodFrom DateTime
+  periodTo   DateTime
+  // [{ description, quantity, unitPrice, amount }], minor units.
+  lines      Json
+  subtotal   Int
+  // intra | inter | export | none
+  taxMode    String?
+  taxLines   Json?
+  total      Int
+  // Supplier and recipient as they were when issued.
+  supplier   Json?
+  recipient  Json?
+  sac        String?
+  issuedAt   DateTime?
+  dueAt      DateTime?
+  paidAt     DateTime?
+  paymentRef String?
+  voidedAt   DateTime?
+  voidReason String?
+  remindedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
+
+  @@unique([contractId, periodFrom])
+  @@index([tenantId])
+  @@index([status, dueAt])
+  @@map("invoices")
 }

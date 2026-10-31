@@ -54,6 +54,8 @@ export const PERMISSIONS = {
   "operations.view": "See the on-call rota, pages, runbooks, QA results and digests",
   "operations.manage": "Edit the on-call rota, runbooks and operations settings",
   "qa.review": "Review the weekly sample of what the AI did on its own",
+  "billing.view": "See contracts, pilots and invoices (clients: their own)",
+  "billing.manage": "Draft and record contracts, issue invoices and record payments",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -100,7 +102,7 @@ const SOC_BASE: Permission[] = ["dashboard.view", "cases.view", "cases.comment",
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ADMIN: ALL,
-  SOC_MANAGER: ALL.filter((p) => !["users.manage", "pricing.manage", "pricing.margin"].includes(p)),
+  SOC_MANAGER: ALL.filter((p) => !["users.manage", "pricing.manage", "pricing.margin", "billing.manage"].includes(p)),
   TRIAGE_ANALYST: [...SOC_BASE, "cases.triage", "cases.escalate", "containment.request", "ai.dispatch", "ai.feedback", "compliance.view"],
   ANALYST: [
     ...SOC_BASE,
@@ -148,8 +150,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback", "api.tokens"],
   DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune", "api.tokens", "rulebook.edit"],
   AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view", "compliance.view", "operations.view"],
-  SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view", "rulebook.view", "rulebook.edit"],
-  CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign", "compliance.view", "compliance.approve"],
+  SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view", "rulebook.view", "rulebook.edit", "billing.view", "billing.manage"],
+  CLIENT_ADMIN: ["billing.view", "dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign", "compliance.view", "compliance.approve"],
   CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view", "rulebook.view", "compliance.view"],
 };
 

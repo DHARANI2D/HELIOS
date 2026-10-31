@@ -9,7 +9,7 @@ import { queueForUsers } from "@/lib/alerts/outbox";
 // the top bar polls for them. People who chose to also get some kinds by
 // email, SMS or WhatsApp have those queued in the alert outbox (lib/alerts).
 
-export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla" | "lead" | "rulebook" | "ingest" | "compliance" | "oncall" | "qa" | "digest";
+export type NotificationKind = "mention" | "assigned" | "escalated" | "shared" | "watching" | "approval" | "ai" | "sla" | "lead" | "rulebook" | "ingest" | "compliance" | "oncall" | "qa" | "digest" | "billing";
 
 export interface NotifyInput {
   kind: NotificationKind;

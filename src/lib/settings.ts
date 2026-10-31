@@ -91,6 +91,26 @@ export const operationsSchema = z.object({
 export type OperationsSettings = z.infer<typeof operationsSchema>;
 export const OPERATIONS_DEFAULTS: OperationsSettings = { pageSeverity: "CRITICAL", ackMinutes: 15, qaSharePct: 10, qaMinPerClient: 2, digestHour: 9, timeZone: "Asia/Kolkata" };
 
+// Invoicing and contracts (lib/billing). Your company's GSTIN is the tax id
+// in the company profile; its first two digits are your state.
+export const billingSchema = z.object({
+  // The start of every invoice number: <prefix>/<financial year>/<serial>.
+  invoicePrefix: z.string().trim().regex(/^[A-Za-z0-9]{1,5}$/, "1 to 5 letters or digits"),
+  // GST on your services; 0 when you don't charge GST.
+  gstRatePct: z.number().min(0).max(40),
+  // The SAC code printed on invoices for your services.
+  sac: z.string().trim().regex(/^(\d{6})?$/, "A SAC code is 6 digits"),
+  paymentTermsDays: z.number().int().min(0).max(120),
+  // Printed at the foot of invoices: bank account, UPI id, payment notes.
+  paymentDetails: text(1000),
+  // The terms of service printed on contracts (your counsel's text), and
+  // the reference of the data processing agreement under the DPDP Act.
+  contractTerms: text(20000),
+  dpaReference: text(120),
+});
+export type BillingSettings = z.infer<typeof billingSchema>;
+export const BILLING_DEFAULTS: BillingSettings = { invoicePrefix: "INV", gstRatePct: 18, sac: "", paymentTermsDays: 30, paymentDetails: "", contractTerms: "", dpaReference: "" };
+
 // A credential sealed with lib/secrets; only the last 4 characters are kept
 // in clear, to show which key is stored.
 const sealedSecret = z.object({ sealed: z.string(), last4: z.string() }).nullable().default(null);
@@ -128,6 +148,7 @@ const SETTINGS = {
   "secret.alertWebhook": sealedSecret,
   "alerts.messaging": messagingSchema.default(MESSAGING_DEFAULTS),
   "operations": operationsSchema.default(OPERATIONS_DEFAULTS),
+  "billing": billingSchema.default(BILLING_DEFAULTS),
 } as const;
 
 export type SettingKey = keyof typeof SETTINGS;

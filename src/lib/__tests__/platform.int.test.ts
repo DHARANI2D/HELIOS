@@ -79,11 +79,14 @@ import { notify } from "@/lib/notifications";
 import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNoticePdf, requestApproval, saveNotice, setClockStart, submitNotice } from "@/lib/compliance/service";
 import { evidenceMap } from "@/lib/compliance/iso27001";
 import type { SessionUser } from "@/lib/session";
+import { commercialClocks, contractFromQuote, convertPilot, generateInvoices, issueInvoice, markPaid, pilotReport, saveBillingProfile, saveContract, sendContract, signContract, voidInvoice } from "@/lib/billing/service";
 import { acknowledgePage, addOverride, generateShifts, onCallNow, pageOnCall, runPaging } from "@/lib/operations/paging";
 import { runQaSampling, sampleWeek, submitQaReview } from "@/lib/operations/qa";
 import { buildDigest, sendDigests } from "@/lib/operations/digest";
 import { weekStart } from "@/lib/operations/qa-sample";
 import { attachRunbooks, installTemplates, openRequiredSteps, setStep } from "@/lib/runbooks/service";
+
+const invoiceLinesCount = (v: unknown) => (Array.isArray(v) ? v.length : 0);
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -1536,6 +1539,88 @@ tags: [attack.execution, attack.t1059.001]`;
     await sendDigests(new Date(at.getTime() + 60_000));
     expect(await db.digestRun.count({ where: { tenantId: tenant.id } })).toBe(1);
     expect(await db.notification.count({ where: { userId: admin.id, kind: "digest" } })).toBe(1);
+  });
+
+  it("runs a pilot against measured criteria, signs a contract from a quote, and invoices it with GST", async () => {
+    const DAY = 86_400_000;
+    const now = new Date();
+    const tenant = await db.tenant.create({ data: { name: "Test · Billing", slug: "test-billing", aiAutonomyCap: "CONTAIN_WITH_APPROVAL" } });
+    const clientAdmin = await db.user.create({ data: { email: "billing.client@test.local", name: "Client CFO", role: "CLIENT_ADMIN", tenantId: tenant.id } });
+    const sales = await db.user.create({ data: { email: "billing.sales@test.local", name: "Account Manager", role: "SALES" } });
+    const client = { id: clientAdmin.id, isClient: true, tenantId: tenant.id };
+    const staff = { id: sales.id, isClient: false, tenantId: null };
+
+    // A pilot: no fees, measured criteria.
+    const pilot = await saveContract(null, tenant.id, { kind: "PILOT", currency: "INR", planName: "Advanced", monthlyFee: 0, endpointsCommitted: 50, overagePerEndpoint: 0, oneTimeFee: 0, billingCycle: "monthly", paymentTermsDays: 30, startsAt: new Date(now.getTime() - 10 * DAY), months: 1, autoRenew: false, noticeDays: 0, liabilityCapMonths: 12, successCriteria: [{ metric: "mtta_minutes", target: 30 }, { metric: "cases_handled", target: 1 }, { metric: "critical_false_containments", target: 0 }] }, sales.id);
+    expect(pilot.reference).toMatch(/^P-\d{4}-0001$/);
+    await expect(sendContract(pilot.id, sales.id)).rejects.toThrow(/terms of service/);
+    await setSetting("billing", { invoicePrefix: "HEL", gstRatePct: 18, sac: "998313", paymentTermsDays: 30, paymentDetails: "Bank: test", contractTerms: "Test terms of service.", dpaReference: "DPA-v1" });
+    await sendContract(pilot.id, sales.id);
+    expect(await db.notification.count({ where: { userId: clientAdmin.id, kind: "billing" } })).toBe(1);
+    // Signing covers what was sent: a changed consent means sending again.
+    await db.tenant.update({ where: { id: tenant.id }, data: { aiAutonomyCap: "AUTO_CONTAIN" } });
+    await expect(signContract(pilot.id, { name: "Client CFO", title: "CFO", via: "in_app" }, client)).rejects.toThrow(/changed after this was sent/);
+    await db.tenant.update({ where: { id: tenant.id }, data: { aiAutonomyCap: "CONTAIN_WITH_APPROVAL" } });
+    await expect(signContract(pilot.id, { name: "Someone", title: "", via: "in_app" }, staff)).rejects.toThrow(/paper or by e-signature/);
+    const signed = await signContract(pilot.id, { name: "Client CFO", title: "CFO", via: "in_app" }, client);
+    expect(signed).toMatchObject({ status: "ACTIVE", autonomyCap: "CONTAIN_WITH_APPROVAL", dpaReference: "DPA-v1", terms: "Test terms of service." });
+
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Pilot case", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    await db.case.update({ where: { id: kase.id }, data: { createdAt: new Date(now.getTime() - 5 * DAY), acknowledgedAt: new Date(now.getTime() - 5 * DAY + 12 * 60_000) } });
+    await setCaseStatus(kase.id, "RESOLVED", adminId, undefined, { disposition: "BENIGN_TRUE_POSITIVE", reason: "Admin activity" });
+    const report = await pilotReport(signed, new Date(Date.now() + 1000));
+    // No AI decisions yet: the containment record is "no data", not a pass.
+    expect(report.values).toMatchObject({ mtta_minutes: 12, cases_handled: 1, critical_false_containments: null });
+    expect(report.criteria.map((c) => c.met)).toEqual([true, true, null]);
+    // A free pilot drafts no invoice.
+    expect(await generateInvoices(now)).toBe(0);
+    const sub = await convertPilot(pilot.id, sales.id);
+    expect(sub).toMatchObject({ kind: "SUBSCRIPTION", status: "DRAFT", startsAt: signed.endsAt });
+    await expect(convertPilot(pilot.id, sales.id)).rejects.toThrow(/already/);
+
+    // A contract from an accepted quote, billed quarterly with GST.
+    const quote = await db.quote.create({ data: { reference: "Q-TEST-BILL", clientName: tenant.name, currency: "INR", config: { pricing: { term: "annual" } }, totals: { monthlyNet: 100000, oneTime: 50000, endpoints: 100, perEndpointMonthly: 1000, plan: { name: "Advanced" } } } });
+    const contract = await contractFromQuote(quote.id, tenant.id, new Date(now.getTime() - 2 * DAY), sales.id);
+    expect(contract).toMatchObject({ monthlyFee: 10_000_000, oneTimeFee: 5_000_000, endpointsCommitted: 100, billingCycle: "quarterly", termMonths: 12 });
+    expect((await db.quote.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("ACCEPTED");
+    await sendContract(contract.id, sales.id);
+    await signContract(contract.id, { name: "Client CFO", title: "CFO", via: "e_sign" }, staff);
+    for (let i = 0; i < 120; i++) await db.endpoint.create({ data: { tenantId: tenant.id, hostname: `BILL-${i}` } });
+
+    expect(await generateInvoices(now)).toBe(1);
+    expect(await generateInvoices(now)).toBe(0);
+    const draft = await db.invoice.findFirstOrThrow({ where: { contractId: contract.id } });
+    // Three months of the fee, 20 endpoints over for three months, onboarding.
+    expect(draft.subtotal).toBe(30_000_000 + 6_000_000 + 5_000_000);
+    await expect(issueInvoice(draft.id, sales.id, now)).rejects.toThrow(/billing name and address/);
+    await expect(saveBillingProfile(tenant.id, { legalName: "Test Billing Pvt Ltd", gstin: "27AAPFU0939F1ZW", address: "Pune" }, sales.id)).rejects.toThrow(/check character/);
+    await saveBillingProfile(tenant.id, { legalName: "Test Billing Pvt Ltd", gstin: "29AAGCB7383J1Z4", address: "Bengaluru" }, sales.id);
+    await expect(issueInvoice(draft.id, sales.id, now)).rejects.toThrow(/company's GSTIN/);
+    await setSetting("company.profile", { name: "Test MSSP", legalName: "Test MSSP Pvt Ltd", address: "Mumbai", email: "billing@mssp.test", phone: "", website: "", taxId: "27AAPFU0939F1ZV", quoteTerms: "", reportFooter: "" });
+    const number = await issueInvoice(draft.id, sales.id, now);
+    expect(number).toMatch(/^HEL\/\d{2}-\d{2}\/0001$/);
+    const issued = await db.invoice.findUniqueOrThrow({ where: { id: draft.id } });
+    // Maharashtra to Karnataka: IGST at 18%.
+    expect(issued).toMatchObject({ status: "ISSUED", taxMode: "inter", total: 41_000_000 + 7_380_000, sac: "998313" });
+    await expect(issueInvoice(draft.id, sales.id, now)).rejects.toThrow(/Only a draft/);
+
+    // Overdue, chased once a week; then paid.
+    const later = new Date(now.getTime() + 40 * DAY);
+    const before = await db.notification.count({ where: { userId: sales.id, title: { contains: "overdue" } } });
+    await commercialClocks(later);
+    await commercialClocks(new Date(later.getTime() + DAY));
+    expect(await db.notification.count({ where: { userId: sales.id, title: { contains: "overdue" } } })).toBe(before + 1);
+    await markPaid(draft.id, { reference: "NEFT-123", paidAt: later }, sales.id);
+    await expect(voidInvoice(draft.id, "mistake", sales.id)).rejects.toThrow(/issued invoice/);
+
+    // The next quarter's draft can be discarded; the term ending ends the contract.
+    const next = await generateInvoices(new Date(now.getTime() + 95 * DAY));
+    expect(next).toBe(1);
+    const q2 = await db.invoice.findFirstOrThrow({ where: { contractId: contract.id, status: "DRAFT" } });
+    expect(invoiceLinesCount(q2.lines)).toBe(2);
+    expect(await voidInvoice(q2.id, "", sales.id)).toBe("discarded");
+    await commercialClocks(new Date(now.getTime() + 400 * DAY));
+    expect((await db.contract.findUniqueOrThrow({ where: { id: contract.id } })).status).toBe("ENDED");
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

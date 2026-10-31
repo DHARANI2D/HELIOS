@@ -9,6 +9,7 @@ import {
   CheckSquare,
   KeyRound,
   Crosshair,
+  FileSignature,
   Landmark,
   Globe2,
   LayoutDashboard,
@@ -73,6 +74,7 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "API Tokens", href: "/api-tokens", icon: KeyRound, group: "Platform", permission: "api.tokens", description: "Personal tokens and the REST API reference" },
   { title: "Settings", href: "/settings", icon: Settings, group: "Platform", permission: "settings.manage", description: "Environment, company profile, provider keys and forensics" },
   { title: "Build & Price", href: "/pricing", icon: Calculator, group: "Commercial", permission: "pricing.view", description: "Configure a protection stack and estimate costs" },
+  { title: "Contracts & Billing", clientTitle: "Contracts & invoices", href: "/billing", icon: FileSignature, group: "Commercial", permission: "billing.view", description: "Pilots with measured success criteria, contracts, and GST invoices" },
 ];
 
 export function navFor(role: UserRole): NavItem[] {

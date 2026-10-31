@@ -45,6 +45,8 @@ const JOBS: Job[] = [
   { name: "QA sampling", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/operations/qa")).runQaSampling() },
   // The daily digest, once the set hour has passed.
   { name: "daily digest", group: "core", everyMs: 10 * 60_000, run: async () => (await import("@/lib/operations/digest")).sendDigests() },
+  // Drafts invoices for billing periods that started, chases overdue ones, renews or ends contracts.
+  { name: "commercial clocks", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/billing/service")).commercialClocks() },
 ];
 
 const STARTED = Symbol.for("helios.jobs.started");

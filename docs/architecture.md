@@ -249,6 +249,7 @@ Timers in the server process:
 | On-call paging (severe cases, escalation, handoffs) | Minute |
 | QA sampling (last week's, once) | Hour |
 | Daily digest (once the set hour has passed) | 10 minutes |
+| Commercial clocks (draft invoices, overdue reminders, renewals, pilots ending) | Hour |
 | Ingest queue (backstop for the kick after each enqueue) | 2 seconds |
 | Pull collectors (each stream on its own interval) | 30 seconds |
 | Source health | 5 minutes |
@@ -371,6 +372,23 @@ Logs arrive three ways, all into one durable queue:
   - **Delivery:** it goes in the app (`/digest/<id>`) and by email for those who chose it under My alerts. A day with nothing to say is recorded and not sent. Each run covers the time since the previous one.
 - **Permissions:** `operations.view` (all SOC staff and auditors) to see the rota, pages, runbooks and QA; `operations.manage` (SOC managers, incident responders, admins) to edit the rota, runbooks and settings; `qa.review` (SOC managers, incident responders, admins) to review. Ticking runbook steps needs `cases.triage`; paging needs `cases.escalate`. Clients read their own digests.
 - **Isolation:** `oncall_pages`, `runbooks`, `case_runbooks`, `qa_reviews` and `digest_runs` carry a `tenantId` (null for the SOC's own) and have the same row-level policy as the other client tables.
+
+### Contracts, pilots and billing (`lib/billing`, `/billing`)
+
+- **Contracts** (`contracts`) are pilots or subscriptions, with fees in minor units of their currency: a monthly fee for the committed endpoints, a price per endpoint above, a one-time fee, a billing cycle (monthly, quarterly, annual), payment days, a term with optional renewal, a notice period, and a liability cap for automated containment in months of fees. A draft can start from a sent or accepted quote (its monthly and one-time fees, endpoints, plan and term).
+- **Sending** needs the MSSP's terms of service (Settings on the billing page: your counsel's text; HELIOS writes none). It snapshots the terms, the DPA reference, the AI autonomy the client consented to and the rulebook version in force. **Signing** is done in the app by the client's admin, or recorded by staff from paper or an e-signature. It's refused if the rulebook or autonomy consent changed since sending, so a signature always covers what's in force. Each contract has an order-form PDF.
+- **Pilots** carry success criteria measured from HELIOS's records over the term: median time to acknowledge and to contain, SLA, AI agreement, wrong containments (all and critical assets), log sources live, QA agreement, cases handled. A measure with nothing behind it yet reads "no data", not a pass. A week before the end the account managers get the criteria status; the pilot is converted into a subscription draft starting when it ends, or recorded as not continuing.
+- **Invoices** (`invoices`). The job drafts one per billing period of a signed contract once the period has started (one per contract and period).
+  - **Lines:** the fee for the period (a short last period prorated), endpoints in the inventory above the commitment, and the one-time fee on the first invoice.
+  - **Issuing** is a person's step. It numbers the invoice `<prefix>/<financial year>/<serial>` (unique per Indian financial year, at most 16 characters, as the CGST rules ask), freezes the supplier and recipient details, and works out GST from the place of supply:
+    - **Same state:** CGST and SGST at half the rate each (UTGST in a Union Territory without a legislature).
+    - **Another state:** IGST.
+    - **Outside India:** an export of services, without GST.
+    - **Checks:** GSTINs are checked, check character included. A GST invoice to a client in India must be in rupees. The supplier's GSTIN is the company profile's tax id.
+  - **After issue:** an issued invoice is marked paid or voided with a reason (its number kept); a draft can be discarded. Overdue invoices are chased once a week; renewals are flagged two weeks before the notice deadline; a term that runs out renews or ends the contract.
+  - **PDF:** the invoice PDF carries the fields a tax invoice needs (both GSTINs, SAC, taxable value, each tax with its rate, place of supply, reverse charge). HELIOS doesn't sign it or file it with the e-invoicing system; where e-invoicing applies to you, issue it through that.
+- **Who:** account managers and admins manage (`billing.manage`); SOC managers can read; a client's admin and viewers see their own contracts and issued invoices, and the admin signs.
+- **Isolation:** `contracts` and `invoices` carry a `tenantId` and have the same row-level policy as the other client tables.
 
 ### Server Actions (`lib/action.ts`)
 
