@@ -149,3 +149,13 @@ describe("evaluations", () => {
     expect(PASS.falseContainments).toBe(0);
   });
 });
+
+describe("stored AI output read back", () => {
+  it("fills in the lists older output lacks, and ignores output without a verdict", async () => {
+    const { storedTriage } = await import("@/lib/ai/triage");
+    expect(storedTriage({ verdict: "benign" })).toMatchObject({ verdict: "benign", summary: "", confidence: 0, key_findings: [], analyst_next_steps: [], recommended_actions: [] });
+    expect(storedTriage({ verdict: "true_positive", key_findings: [{ finding: "x" }] })?.key_findings[0].evidence).toEqual([]);
+    expect(storedTriage({ summary: "no verdict" })).toBeNull();
+    expect(storedTriage(null)).toBeNull();
+  });
+});

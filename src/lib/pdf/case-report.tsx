@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { CASE_SOURCE_LABEL, CASE_STATUS_LABEL } from "@/lib/cases/labels";
 import { DOMAIN_LABEL } from "@/lib/rbac";
 import { ACTION_LABEL } from "@/lib/response/executor";
-import type { TriageOutput } from "@/lib/ai/triage";
+import { storedTriage } from "@/lib/ai/triage";
 import type { InvestigationMetadata } from "@/lib/investigations/service";
 import type { ForensicsMetadata } from "@/lib/forensics/service";
 import type { CompanyProfile } from "@/lib/settings";
@@ -109,7 +109,7 @@ export function CaseReportPdf({ report, company }: { report: CaseReport; company
   const staff = audience === "staff";
   const meta = (kase.metadata ?? {}) as Record<string, unknown>;
   const run = staff && Array.isArray(kase.aiRuns) ? kase.aiRuns[0] : undefined;
-  const triage = run?.output as TriageOutput | undefined;
+  const triage = storedTriage(run?.output);
   return (
     <PdfDocument
       title={kase.title}

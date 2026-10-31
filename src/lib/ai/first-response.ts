@@ -13,7 +13,7 @@ import { investigate } from "@/lib/ai/investigator/run";
 import { loadProfile, resolveAgent } from "@/lib/ai/resolve";
 import { withRedaction } from "@/lib/ai/gateway";
 import { analyzeCase, runReportAgent, type CaseAnalysis } from "@/lib/ai/agents";
-import { SEVERITY_FROM_AI, type TriageOutput } from "@/lib/ai/triage";
+import { SEVERITY_FROM_AI, storedTriage, type TriageOutput } from "@/lib/ai/triage";
 import { decideResponse } from "@/lib/response/policy";
 import { rulebookVerdict } from "@/lib/rulebook/service";
 import { ladderFor, observing } from "@/lib/shadow/service";
@@ -105,7 +105,7 @@ export async function runAgentOnCase(caseId: string, key: AgentKey, opts: Dispat
       const outcome = await runReportAgent(
         evidence,
         {
-          triage: (latest?.output as TriageOutput | null) ?? null,
+          triage: storedTriage(latest?.output),
           actions: actions.map((a) => ({ label: ACTION_LABEL[a.actionType], target: a.target, status: a.status, manual: !!(a.result as { manual?: unknown } | null)?.manual })),
         },
         profile,

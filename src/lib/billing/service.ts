@@ -7,6 +7,7 @@ import { getSetting } from "@/lib/settings";
 import { notify, staffFor } from "@/lib/notifications";
 import { activeRulebook } from "@/lib/rulebook/service";
 import { DATA_CATEGORIES } from "@/lib/ingest/health";
+import { quoteConfigSchema } from "@/lib/pricing/calculator";
 import { CLOSED_STATUSES } from "@/lib/cases/labels";
 import { financialYear, gstFor, gstinProblem, invoiceNumber, stateOfGstin, type TaxLine } from "@/lib/billing/gst";
 import { CYCLE_MONTHS, PILOT_METRICS, evaluate, formatMoney, invoiceLines, median, periods, termEnd, toMinor, type BillingCycle, type Criterion, type InvoiceLine, type PilotMetric } from "@/lib/billing/terms";
@@ -141,9 +142,13 @@ export async function contractFromQuote(quoteId: string, tenantId: string | null
   const quote = await db.quote.findUniqueOrThrow({ where: { id: quoteId } });
   const target = tenantId ?? quote.tenantId;
   if (!target) throw new Error("Choose the client the contract is for");
-  const totals = quote.totals as { monthlyNet?: number; oneTime?: number; endpoints?: number; perEndpointMonthly?: number; plan?: { name?: string } | null };
-  const term = ((quote.config as { pricing?: { term?: keyof typeof TERM_MONTHS } } | null)?.pricing?.term ?? "annual") as keyof typeof TERM_MONTHS;
-  const months = TERM_MONTHS[term] ?? 12;
+  const totals = quote.totals as { monthlyNet?: number; oneTime?: number; endpoints?: number; perEndpointMonthly?: number; fxRate?: number; plan?: { name?: string } | null };
+  const cfg = quoteConfigSchema.safeParse(quote.config);
+  if (!cfg.success) throw new Error("That quote can't be read; open it in Build & Price and save it again");
+  const months = TERM_MONTHS[cfg.data.commercial.term] ?? 12;
+  // A quote's totals are in USD, shown in its currency at its exchange rate.
+  const fx = typeof totals.fxRate === "number" && totals.fxRate > 0 ? totals.fxRate : 1;
+  const inQuoteCurrency = (usd: number | undefined) => Math.round((usd ?? 0) * fx * 100) / 100;
   const contract = await saveContract(
     null,
     target,
@@ -151,10 +156,10 @@ export async function contractFromQuote(quoteId: string, tenantId: string | null
       kind: "SUBSCRIPTION",
       currency: quote.currency,
       planName: totals.plan?.name ?? "",
-      monthlyFee: totals.monthlyNet ?? 0,
+      monthlyFee: inQuoteCurrency(totals.monthlyNet),
       endpointsCommitted: totals.endpoints ?? 0,
-      overagePerEndpoint: totals.perEndpointMonthly ?? 0,
-      oneTimeFee: totals.oneTime ?? 0,
+      overagePerEndpoint: inQuoteCurrency(totals.perEndpointMonthly),
+      oneTimeFee: inQuoteCurrency(totals.oneTime),
       billingCycle: months >= 12 ? "quarterly" : "monthly",
       paymentTermsDays: (await getSetting("billing")).paymentTermsDays,
       startsAt,

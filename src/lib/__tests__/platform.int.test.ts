@@ -80,6 +80,7 @@ import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNotice
 import { evidenceMap } from "@/lib/compliance/iso27001";
 import type { SessionUser } from "@/lib/session";
 import { purgeTargetOfCase } from "@/lib/response/targets";
+import { quoteConfigSchema } from "@/lib/pricing/calculator";
 import { commercialClocks, contractFromQuote, convertPilot, generateInvoices, issueInvoice, markPaid, pilotReport, saveBillingProfile, saveContract, sendContract, signContract, voidInvoice } from "@/lib/billing/service";
 import { acknowledgePage, addOverride, generateShifts, onCallNow, pageOnCall, runPaging } from "@/lib/operations/paging";
 import { runQaSampling, sampleWeek, submitQaReview } from "@/lib/operations/qa";
@@ -1580,7 +1581,13 @@ tags: [attack.execution, attack.t1059.001]`;
     await expect(convertPilot(pilot.id, sales.id)).rejects.toThrow(/already/);
 
     // A contract from an accepted quote, billed quarterly with GST.
-    const quote = await db.quote.create({ data: { reference: "Q-TEST-BILL", clientName: tenant.name, currency: "INR", config: { pricing: { term: "annual" } }, totals: { monthlyNet: 100000, oneTime: 50000, endpoints: 100, perEndpointMonthly: 1000, plan: { name: "Advanced" } } } });
+    // Totals are kept in USD and shown at the quote's exchange rate.
+    const quoteConfig = (term: "monthly" | "annual") => quoteConfigSchema.parse({ profile: { workstations: 100 }, ai: {}, services: {}, commercial: { term, currency: "INR", fxRate: 100 } });
+    // Priced by the real calculator, with the fee fields pinned for exact sums below.
+    const totals = JSON.parse(JSON.stringify({ ...calculateQuote(quoteConfig("annual"), await loadPricingContext()), monthlyNet: 1000, oneTime: 500, endpoints: 100, perEndpointMonthly: 10, fxRate: 100 }));
+    const monthly = await db.quote.create({ data: { reference: "Q-TEST-MONTHLY", clientName: tenant.name, currency: "INR", config: quoteConfig("monthly"), totals } });
+    expect(await contractFromQuote(monthly.id, tenant.id, now, sales.id)).toMatchObject({ termMonths: 1, autoRenew: true, billingCycle: "monthly" });
+    const quote = await db.quote.create({ data: { reference: "Q-TEST-BILL", clientName: tenant.name, currency: "INR", config: quoteConfig("annual"), totals } });
     const contract = await contractFromQuote(quote.id, tenant.id, new Date(now.getTime() - 2 * DAY), sales.id);
     expect(contract).toMatchObject({ monthlyFee: 10_000_000, oneTimeFee: 5_000_000, endpointsCommitted: 100, billingCycle: "quarterly", termMonths: 12 });
     expect((await db.quote.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("ACCEPTED");

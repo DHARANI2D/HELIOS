@@ -19,7 +19,7 @@ import { indicatorVerdict } from "@/lib/threat-intel/service";
 import { AGENT_TYPES, DISPATCHABLE_AGENTS } from "@/lib/ai/catalog";
 import { resolveAgent } from "@/lib/ai/resolve";
 import { gatherEvidence } from "@/lib/ai/evidence";
-import { PROPOSABLE_ACTIONS, matchTarget, type GroundingReport, type TriageOutput } from "@/lib/ai/triage";
+import { PROPOSABLE_ACTIONS, matchTarget, storedTriage, type GroundingReport } from "@/lib/ai/triage";
 import { ACTION_LABEL, ROLLBACK_OF } from "@/lib/response/executor";
 import { approvalsOf } from "@/lib/response/service";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -141,9 +141,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   const isShadow = (r: { resolution: unknown }) => !!(r.resolution as { shadow?: boolean } | null)?.shadow;
   const shadowHidden = !closed && kase.aiRuns.some(isShadow);
   const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel", "investigator"].includes(r.agentKey) && r.status !== "failed" && (closed || !isShadow(r)));
-  // Stored output can predate fields the page reads; fill the lists in.
-  const stored = latestTriage?.output as Partial<TriageOutput> | null | undefined;
-  const triage = stored?.verdict ? ({ ...stored, summary: stored.summary ?? "", confidence: stored.confidence ?? 0, key_findings: stored.key_findings ?? [], analyst_next_steps: stored.analyst_next_steps ?? [], recommended_actions: stored.recommended_actions ?? [] } as TriageOutput) : undefined;
+  const triage = storedTriage(latestTriage?.output) ?? undefined;
   const grounding = latestTriage?.grounding as (GroundingReport & { injection?: InjectionFinding[] }) | undefined;
   const lastFailure = kase.aiRuns[0]?.status === "failed" ? kase.aiRuns[0] : null;
 

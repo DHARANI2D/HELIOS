@@ -276,3 +276,18 @@ export function builtinTriage(ev: CaseEvidence): TriageOutput {
     escalation_tier: tier,
   };
 }
+
+// Stored output read back for display: it can predate fields the pages and
+// reports read, so the lists are filled in. null without a verdict.
+export function storedTriage(output: unknown): TriageOutput | null {
+  const t = output as Partial<TriageOutput> | null | undefined;
+  if (!t || typeof t !== "object" || !t.verdict) return null;
+  return {
+    ...t,
+    summary: t.summary ?? "",
+    confidence: typeof t.confidence === "number" ? t.confidence : 0,
+    key_findings: (t.key_findings ?? []).map((f) => ({ ...f, evidence: f.evidence ?? [] })),
+    analyst_next_steps: t.analyst_next_steps ?? [],
+    recommended_actions: t.recommended_actions ?? [],
+  } as TriageOutput;
+}
