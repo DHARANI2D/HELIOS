@@ -159,3 +159,11 @@ describe("stored AI output read back", () => {
     expect(storedTriage(null)).toBeNull();
   });
 });
+
+describe("stored AI output with repeated findings", () => {
+  it("reads the same finding once, citing all its evidence", async () => {
+    const { storedTriage } = await import("@/lib/ai/triage");
+    const t = storedTriage({ verdict: "true_positive", key_findings: [{ finding: "Known bad ip", evidence: ["D2"] }, { finding: "Known bad ip", evidence: ["D3"] }, { finding: "PsExec", evidence: ["D6"] }] });
+    expect(t?.key_findings).toEqual([{ finding: "Known bad ip", evidence: ["D2", "D3"] }, { finding: "PsExec", evidence: ["D6"] }]);
+  });
+});

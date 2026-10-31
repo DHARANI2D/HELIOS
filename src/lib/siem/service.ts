@@ -248,7 +248,9 @@ export async function ingestTelemetry(items: IngestItem[], options: IngestOption
       const kase = await createCase({
         sourceType: "SIEM_ALERT",
         title: titleFor(group, riskObject, riskObjectType),
-        summary: group.map((d) => d.reasoning.join(" · ")).join("\n"),
+        // One line per distinct finding: a detector that fired on many
+        // events with the same reason says it once.
+        summary: [...new Set(group.map((d) => [...new Set(d.reasoning)].join(" · ")))].join("\n"),
         severity,
         riskScore,
         confidence: Math.max(...group.map((d) => d.confidence)),

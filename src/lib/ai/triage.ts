@@ -240,8 +240,13 @@ export function builtinTriage(ev: CaseEvidence): TriageOutput {
     if (severe) for (const host of ev.entities.hosts.slice(0, 1)) add("COLLECT_LOGS", host, "Preserve surrounding telemetry before it ages out", "soon");
   }
 
-  const topDetections = (highDetections.length ? highDetections : detections).slice(0, 4);
-  const findings = topDetections.map((d) => ({ finding: d.text.replace(/^\[\w+\]\s*/, "").slice(0, 200), evidence: [d.ref] }));
+  // Detections saying the same thing make one finding that cites them all.
+  const byText = new Map<string, string[]>();
+  for (const d of highDetections.length ? highDetections : detections) {
+    const text = d.text.replace(/^\[\w+\]\s*/, "").slice(0, 200);
+    byText.set(text, [...(byText.get(text) ?? []), d.ref]);
+  }
+  const findings = [...byText].slice(0, 4).map(([finding, evidence]) => ({ finding, evidence }));
   if (findings.length === 0) {
     const firstIndicator = ev.refs.find((r) => r.kind === "indicator");
     const firstEvent = ev.refs.find((r) => r.kind === "event" || r.kind === "timeline" || r.kind === "context");
@@ -277,6 +282,17 @@ export function builtinTriage(ev: CaseEvidence): TriageOutput {
   };
 }
 
+// The same finding said more than once (older built-in runs did) reads as
+// one, citing every piece of evidence it came from.
+function mergeFindings(findings: TriageOutput["key_findings"]) {
+  const out = new Map<string, TriageOutput["key_findings"][number]>();
+  for (const f of findings) {
+    const seen = out.get(f.finding);
+    out.set(f.finding, seen ? { ...seen, evidence: [...new Set([...seen.evidence, ...f.evidence])] } : f);
+  }
+  return [...out.values()];
+}
+
 // Stored output read back for display: it can predate fields the pages and
 // reports read, so the lists are filled in. null without a verdict.
 export function storedTriage(output: unknown): TriageOutput | null {
@@ -286,7 +302,7 @@ export function storedTriage(output: unknown): TriageOutput | null {
     ...t,
     summary: t.summary ?? "",
     confidence: typeof t.confidence === "number" ? t.confidence : 0,
-    key_findings: (t.key_findings ?? []).map((f) => ({ ...f, evidence: f.evidence ?? [] })),
+    key_findings: mergeFindings((t.key_findings ?? []).map((f) => ({ ...f, evidence: f.evidence ?? [] }))),
     analyst_next_steps: t.analyst_next_steps ?? [],
     recommended_actions: t.recommended_actions ?? [],
   } as TriageOutput;

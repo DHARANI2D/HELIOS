@@ -207,7 +207,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
             {kase.verdict && <Badge variant="outline" className="capitalize">Verdict: {kase.verdict}</Badge>}
           </div>
           <CardTitle className="mt-2 text-xl leading-snug">{kase.title}</CardTitle>
-          {kase.summary && <CardDescription className="whitespace-pre-wrap">{kase.summary}</CardDescription>}
+          {kase.summary && <CardDescription className="whitespace-pre-wrap">{[...new Set(kase.summary.split("\n"))].join("\n")}</CardDescription>}
         </CardHeader>
         <CardContent className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
           <Meta label="Created">{formatDateTime(kase.createdAt)}</Meta>

@@ -88,7 +88,7 @@ export function TriagePanel({ caseId, status, disposition, aiScore, severity, as
       <div className="grid grid-cols-2 gap-3">
         <div className="grid gap-1.5">
           <Label htmlFor="case-status" className="text-xs">Status</Label>
-          <NativeSelect id="case-status" value={closing ?? status} disabled={!canTriage || statusMut.isPending} onChange={(e) => pickStatus(e.target.value as CaseStatus)}>
+          <NativeSelect id="case-status" className="w-full" value={closing ?? status} disabled={!canTriage || statusMut.isPending} onChange={(e) => pickStatus(e.target.value as CaseStatus)}>
             {CASE_STATUSES.map((s) => (
               <option key={s} value={s}>{CASE_STATUS_LABEL[s]}</option>
             ))}
@@ -96,7 +96,7 @@ export function TriagePanel({ caseId, status, disposition, aiScore, severity, as
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="case-severity" className="text-xs">Severity</Label>
-          <NativeSelect id="case-severity" value={severity} disabled={!canTriage || severityMut.isPending} onChange={(e) => severityMut.mutate(e.target.value as CaseSeverity)}>
+          <NativeSelect id="case-severity" className="w-full" value={severity} disabled={!canTriage || severityMut.isPending} onChange={(e) => severityMut.mutate(e.target.value as CaseSeverity)}>
             {SEVERITY_ORDER.map((s) => (
               <option key={s} value={s}>{SEVERITY_LABEL[s]}</option>
             ))}
@@ -144,6 +144,7 @@ export function TriagePanel({ caseId, status, disposition, aiScore, severity, as
         <Label htmlFor="case-assignee" className="text-xs">Assignee</Label>
         <NativeSelect
           id="case-assignee"
+          className="w-full"
           value={assigneeId ?? ""}
           disabled={!canTriage || assignMut.isPending}
           onChange={(e) => assignMut.mutate(e.target.value || null)}

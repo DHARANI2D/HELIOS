@@ -99,7 +99,7 @@ export async function gatherEvidence(caseId: string): Promise<CaseEvidence> {
   const refs: EvidenceRef[] = [];
   kase.detections.forEach((d, i) => {
     const ev = (d.evidence ?? {}) as Record<string, unknown>;
-    const reasoning = Array.isArray(ev.reasoning) ? (ev.reasoning as string[]).slice(0, 3).join(" · ") : "";
+    const reasoning = Array.isArray(ev.reasoning) ? [...new Set(ev.reasoning as string[])].slice(0, 3).join(" · ") : "";
     refs.push({ ref: `D${i + 1}`, kind: "detection", text: `[${d.severity}] ${d.title} (${d.source.toLowerCase()})${reasoning ? ` — ${reasoning}` : ""}` });
   });
   kase.indicators.forEach((ci, i) => {

@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { SeverityBadge, StatusBadge } from "@/components/shared/case-badges";
 import { AiStatusBadge, SlaChip } from "@/components/shared/case-chips";
+import { ACTION_LABEL } from "@/lib/response/labels";
 
 function greeting(now: Date) {
   const h = now.getUTCHours();
@@ -261,6 +262,8 @@ async function SocOverview({ user }: { user: SessionUser }) {
 }
 
 async function ClientOverview({ user }: { user: SessionUser }) {
+  // Stakeholders see what's waiting but can't approve it.
+  const canApprove = can(user, "containment.approve");
   const tenantId = user.tenantId!;
   const [d, tenant, pending] = await Promise.all([
     loadOperationsDashboard(await caseScope(user), await tenantScope(user), user.id),
@@ -285,21 +288,21 @@ async function ClientOverview({ user }: { user: SessionUser }) {
         <StatTile label="SLA met (30d)" value={sla == null ? "—" : `${Math.round(sla * 100)}%`} icon={Target} />
         <StatTile label="Time to acknowledge" value={formatDuration(d.metrics.mttaMinutes)} icon={Clock} hint="average, last 30 days" />
         <StatTile label="Time to contain" value={formatDuration(d.metrics.mttcMinutes)} icon={ShieldCheck} hint="average, last 30 days" />
-        <StatTile label="Endpoints protected" value={d.endpoints.avgScore == null ? "—" : `${d.endpoints.avgScore}`} icon={Laptop} hint={`${d.endpoints.total} endpoints · ${d.endpoints.isolated} isolated`} />
+        <StatTile label="Protection score" value={d.endpoints.avgScore == null ? "—" : `${d.endpoints.avgScore}`} icon={Laptop} hint={`average of ${d.endpoints.total} endpoints · ${d.endpoints.isolated} isolated`} />
       </div>
 
       {pending.length > 0 && (
         <Card className="border-warning/50 bg-warning/5">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base"><Workflow className="size-4" /> Waiting for your approval</CardTitle>
-            <CardDescription>Your SOC has proposed containment on your systems.</CardDescription>
+            <CardTitle className="flex items-center gap-2 text-base"><Workflow className="size-4" /> {canApprove ? "Waiting for your approval" : "Waiting for your organisation's approval"}</CardTitle>
+            <CardDescription>{canApprove ? "Your SOC has proposed containment on your systems." : "Your SOC has proposed containment on your systems; your client admin decides."}</CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="flex flex-col gap-2 text-sm">
               {pending.map((a) => (
                 <li key={a.id} className="flex items-center justify-between gap-2">
-                  <span>{a.actionType.toLowerCase().replaceAll("_", " ")} <code className="text-xs">{a.target}</code></span>
-                  <Button size="sm" variant="outline" asChild><Link href={`/cases/${a.case.id}`}>Review</Link></Button>
+                  <span>{ACTION_LABEL[a.actionType]} <code className="text-xs">{a.target}</code></span>
+                  <Button size="sm" variant="outline" asChild><Link href={`/cases/${a.case.id}`}>{canApprove ? "Review" : "View"}</Link></Button>
                 </li>
               ))}
             </ul>

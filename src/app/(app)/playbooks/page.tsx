@@ -97,13 +97,13 @@ export default async function PlaybooksPage() {
               <TableBody>
                 {pending.map((p) => (
                   <TableRow key={p.id}>
-                    <TableCell className="max-w-md">
+                    <TableCell className="max-w-64">
                       <div className="flex items-center gap-2">
                         <SeverityBadge severity={p.case.severity} />
-                        <Link href={`/cases/${p.case.id}`} className="line-clamp-1 hover:underline">{p.case.title}</Link>
+                        <Link href={`/cases/${p.case.id}`} className="block min-w-0 truncate hover:underline" title={p.case.title}>{p.case.title}</Link>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm">{p.playbook.name}</TableCell>
+                    <TableCell className="min-w-40 whitespace-normal text-sm">{p.playbook.name}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{p.triggeredBy} · {formatRelative(p.startedAt)}</TableCell>
                     <TableCell className="flex justify-end"><ExecutionDecision executionId={p.id} canApprove={canApprove} /></TableCell>
                   </TableRow>
