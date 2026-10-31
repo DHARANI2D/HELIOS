@@ -1,16 +1,20 @@
-// The ingest worker as its own process: `npm run worker`. Runs the
-// log-collection jobs (ingest queue, pull collectors, source health); set
-// HELIOS_INGEST_WORKER=external on the web servers so they leave them to
-// it. Any number of workers can run: batches are claimed with SKIP LOCKED.
+// The background worker as its own process: `npm run worker`, or the
+// worker container (dist/worker.mjs, built by scripts/build-worker.mjs).
+// By default it runs the log-collection jobs (ingest queue, pull
+// collectors, source health, retention); HELIOS_JOBS=core,ingest makes it
+// run every timed job, so the web servers can run none (HELIOS_JOBS=none).
+// Any number of workers can run: batches are claimed with SKIP LOCKED and
+// every job is safe to run on several instances.
 import { initKeyManagement } from "@/lib/keys";
-import { startJobs } from "@/lib/jobs/scheduler";
+import { jobGroups, startJobs } from "@/lib/jobs/scheduler";
 
 void (async () => {
   await initKeyManagement();
-  startJobs(["ingest"]);
-  console.log("HELIOS ingest worker started");
+  const groups = jobGroups(["ingest"]);
+  startJobs(groups);
+  console.log(`HELIOS worker started: ${groups.length ? groups.join(", ") : "no"} jobs`);
 })().catch((err) => {
-  console.error("HELIOS ingest worker couldn't start", err);
+  console.error("HELIOS worker couldn't start", err);
   process.exit(1);
 });
 

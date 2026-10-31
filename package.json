@@ -18,7 +18,8 @@
     "db:studio": "prisma studio",
     "db:seed": "prisma db seed",
     "db:seed:test": "prisma db seed -- --test",
-    "db:test-env": "prisma db seed -- --test --adopt"
+    "db:test-env": "prisma db seed -- --test --adopt",
+    "build:worker": "node scripts/build-worker.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -85,6 +86,7 @@
     "@types/qrcode": "1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "0.28.2",
     "eslint": "^9",
     "eslint-config-next": "^16.4.3",
     "fast-check": "^3.23.2",

@@ -21,8 +21,25 @@ export function rateLimit(key: string, limit: number, windowMs: number, now = Da
   return { ok: true, retryAfterMs: 0 };
 }
 
-// The visitor's address as the reverse proxy in front of the app reports it.
+// The visitor's address. Each proxy in front of the app (load balancer,
+// ingress) appends the address it was reached from to X-Forwarded-For, so
+// only the entries those proxies added can be believed: anything to their
+// left is whatever the visitor chose to send. HELIOS_TRUSTED_PROXIES is how
+// many proxies sit in front of the app (default 1); the visitor is that
+// many entries from the right. With no proxy (0), the server records the
+// connection's own address only when the request didn't bring the header,
+// so the address can't be trusted and every visitor counts as one.
+export function trustedProxies(env: Record<string, string | undefined> = process.env) {
+  const n = Number(env.HELIOS_TRUSTED_PROXIES ?? 1);
+  return Number.isInteger(n) && n >= 0 && n <= 10 ? n : 1;
+}
+
+export function addressFrom(forwardedFor: string | null, hops = trustedProxies()): string {
+  if (hops === 0) return "unknown";
+  const entries = (forwardedFor ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return entries.length >= hops ? entries[entries.length - hops] : (entries[0] ?? "unknown");
+}
+
 export async function clientAddress(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip")?.trim() || "unknown";
+  return addressFrom((await headers()).get("x-forwarded-for"));
 }

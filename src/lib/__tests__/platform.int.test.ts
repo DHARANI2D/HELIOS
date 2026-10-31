@@ -1543,6 +1543,13 @@ tags: [attack.execution, attack.t1059.001]`;
     expect(await where(stray.id)).toBe("security_events_2031_05");
     const [{ rls }] = await db.$queryRaw<Array<{ rls: boolean }>>`SELECT relforcerowsecurity AS rls FROM pg_class WHERE relname = 'security_events_2031_05'`;
     expect(rls).toBe(true);
+    // Partition changes see every client's rows, so they refuse a client-scoped transaction,
+    // and the drop function only takes monthly event partitions.
+    const scope = () => db.$executeRaw`SELECT set_config('helios.tenant_id', ${tenantA.id}, TRUE)`;
+    await expect(db.$transaction([scope(), db.$queryRaw`SELECT helios_drop_event_partition('security_events_2031_05')`])).rejects.toThrow(/scoped to one client/);
+    await expect(db.$transaction([scope(), db.$queryRaw`SELECT helios_ensure_event_partition('2031-07-01'::timestamp)`])).rejects.toThrow(/scoped to one client/);
+    await expect(db.$queryRaw`SELECT helios_drop_event_partition('audit_logs')`).rejects.toThrow(/isn't a monthly event partition/);
+    expect(await where(stray.id)).toBe("security_events_2031_05");
     // A resend of the same source event is still stored once.
     const sourced = { ...event(tenantA.id, "2031-05-11T10:00:00.000Z"), integrationId: "part-int", sourceEventId: "src-1" };
     expect((await db.securityEvent.createMany({ data: [sourced, { ...sourced, id: `${sourced.id}-again` }], skipDuplicates: true })).count).toBe(1);

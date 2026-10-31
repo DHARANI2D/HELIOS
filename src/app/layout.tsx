@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -33,7 +34,10 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // The Content Security Policy's nonce for this response (src/proxy.ts).
+  // Reading it renders every page per request, which they are anyway.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html
       lang="en"
@@ -42,7 +46,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         {/* Applies the saved light/dark preference before first paint. */}
-        <InlineScript html={THEME_SCRIPT} />
+        <InlineScript html={THEME_SCRIPT} nonce={nonce} />
       </head>
       <body className="min-h-full flex flex-col">
         <SessionProvider>

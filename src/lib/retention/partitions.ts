@@ -8,13 +8,14 @@ import { db } from "@/lib/db";
 // client's retention, with no hold and no case evidence in it, is dropped
 // whole instead of deleted row by row (lib/retention/service.ts).
 //
-// Each partition carries the parent's row-level policy too, so a tenant-
-// scoped connection can't read a partition directly to get around it.
+// Creating and dropping partitions is done by two database functions that
+// run as the schema's owner (migration 20261031220000_partition_functions):
+// the role the application signs in with can't create, alter or drop
+// tables. Each new partition carries the parent's row-level policy, so a
+// tenant-scoped connection can't read a partition directly to get around it.
 
 const PARENT = "security_events";
-const DEFAULT = "security_events_default";
 const NAME = /^security_events_\d{4}_\d{2}$/;
-const LOCK = 727_201_031; // advisory lock: one partition change at a time
 
 export interface EventPartition {
   name: string;
@@ -26,13 +27,7 @@ const monthStart = (d: Date) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMo
 const addMonths = (d: Date, n: number) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1));
 export const partitionName = (month: Date) => `${PARENT}_${month.getUTCFullYear()}_${String(month.getUTCMonth() + 1).padStart(2, "0")}`;
 // Prisma stores DateTime as UTC in timestamp(3) columns.
-const literal = (d: Date) => `'${d.toISOString().slice(0, 23).replace("T", " ")}'`;
-
-const policy = (table: string) => [
-  `ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`,
-  `ALTER TABLE "${table}" FORCE ROW LEVEL SECURITY`,
-  `CREATE POLICY tenant_isolation ON "${table}" USING (coalesce(current_setting('helios.tenant_id', true), '') = '' OR "tenantId" = current_setting('helios.tenant_id', true)) WITH CHECK (coalesce(current_setting('helios.tenant_id', true), '') = '' OR "tenantId" = current_setting('helios.tenant_id', true))`,
-];
+const literal = (d: Date) => d.toISOString().slice(0, 23).replace("T", " ");
 
 export async function eventsPartitioned() {
   const rows = await db.$queryRaw<Array<{ kind: string }>>`SELECT c.relkind::text AS kind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = ${PARENT} AND n.nspname = current_schema()`;
@@ -64,26 +59,8 @@ export async function listPartitions(): Promise<EventPartition[]> {
 // Creates the month's partition if it isn't there. Rows for that month
 // already sitting in the default partition move into it.
 export async function ensureMonth(month: Date): Promise<boolean> {
-  const from = monthStart(month);
-  const to = addMonths(from, 1);
-  const name = partitionName(from);
-  return db.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${LOCK})`);
-    const exists = await tx.$queryRaw<Array<{ n: number }>>`SELECT 1 AS n FROM pg_class WHERE relname = ${name}`;
-    if (exists.length) return false;
-    const range = `"timestamp" >= ${literal(from)} AND "timestamp" < ${literal(to)}`;
-    const [{ stray }] = await tx.$queryRawUnsafe<Array<{ stray: boolean }>>(`SELECT EXISTS (SELECT 1 FROM "${DEFAULT}" WHERE ${range}) AS stray`);
-    if (stray) {
-      await tx.$executeRawUnsafe(`CREATE TABLE "${name}" (LIKE "${PARENT}" INCLUDING DEFAULTS)`);
-      await tx.$executeRawUnsafe(`INSERT INTO "${name}" SELECT * FROM "${DEFAULT}" WHERE ${range}`);
-      await tx.$executeRawUnsafe(`DELETE FROM "${DEFAULT}" WHERE ${range}`);
-      await tx.$executeRawUnsafe(`ALTER TABLE "${PARENT}" ATTACH PARTITION "${name}" FOR VALUES FROM (${literal(from)}) TO (${literal(to)})`);
-    } else {
-      await tx.$executeRawUnsafe(`CREATE TABLE "${name}" PARTITION OF "${PARENT}" FOR VALUES FROM (${literal(from)}) TO (${literal(to)})`);
-    }
-    for (const sql of policy(name)) await tx.$executeRawUnsafe(sql);
-    return true;
-  });
+  const [{ created }] = await db.$queryRaw<Array<{ created: boolean }>>`SELECT helios_ensure_event_partition(${literal(monthStart(month))}::timestamp) AS created`;
+  return created;
 }
 
 // This month and the next `ahead`, so live events never land in the default
@@ -108,14 +85,6 @@ export async function partitionTenants(p: EventPartition) {
 // it's checked). Returns how many events went with it, or null if kept.
 export async function dropPartition(p: EventPartition): Promise<number | null> {
   if (!NAME.test(p.name)) throw new Error(`${p.name} isn't a monthly event partition`);
-  return db.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${LOCK})`);
-    await tx.$executeRawUnsafe(`LOCK TABLE "${p.name}" IN ACCESS EXCLUSIVE MODE`);
-    const [{ evidence }] = await tx.$queryRawUnsafe<Array<{ evidence: boolean }>>(`SELECT EXISTS (SELECT 1 FROM "${p.name}" WHERE "caseId" IS NOT NULL) AS evidence`);
-    if (evidence) return null;
-    const [{ n }] = await tx.$queryRawUnsafe<Array<{ n: bigint }>>(`SELECT count(*) AS n FROM "${p.name}"`);
-    await tx.$executeRawUnsafe(`ALTER TABLE "${PARENT}" DETACH PARTITION "${p.name}"`);
-    await tx.$executeRawUnsafe(`DROP TABLE "${p.name}"`);
-    return Number(n);
-  });
+  const [{ dropped }] = await db.$queryRaw<Array<{ dropped: bigint | null }>>`SELECT helios_drop_event_partition(${p.name}) AS dropped`;
+  return dropped === null ? null : Number(dropped);
 }

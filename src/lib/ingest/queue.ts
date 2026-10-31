@@ -1,5 +1,6 @@
 import type { IngestBatch, Integration, Prisma } from "@prisma/client";
 
+import { jobGroups } from "@/lib/jobs/scheduler";
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { parseBody } from "@/lib/integrations/mappers";
@@ -13,8 +14,9 @@ import type { IngestFormat } from "@/lib/integrations/catalog";
 // tenants in turn so one noisy client can't starve the others, map, enrich
 // and detect, retry a failed batch with backoff, and after the last attempt
 // keep its payload in the dead-letter queue.
-// Workers run in the web process unless HELIOS_INGEST_WORKER=external, in
-// which case `npm run worker` (src/worker.ts) runs them on its own.
+// Workers run in the web process unless HELIOS_INGEST_WORKER=external or
+// HELIOS_JOBS leaves out "ingest", in which case the worker process
+// (src/worker.ts) runs them on its own.
 
 export const QUEUE = {
   // Batches waiting per client before the edge answers 429.
@@ -131,7 +133,7 @@ export function drainQueue(opts: { maxMs?: number; maxBatches?: number } = {}): 
   return draining;
 }
 
-export const workerInProcess = () => process.env.HELIOS_INGEST_WORKER !== "external";
+export const workerInProcess = () => jobGroups(process.env.HELIOS_INGEST_WORKER === "external" ? ["core"] : ["core", "ingest"]).includes("ingest");
 
 // Starts working right away after an enqueue, when workers run here.
 export function kick() {

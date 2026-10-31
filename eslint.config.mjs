@@ -19,6 +19,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "legacy/**",
+    // The bundled worker (scripts/build-worker.mjs).
+    "dist/**",
   ]),
 ]);
 

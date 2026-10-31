@@ -3,9 +3,14 @@
 // the autonomy-ladder review, on-call paging, QA sampling, the daily
 // digest, and log collection (the ingest queue, pull
 // collectors, source health). Started once from src/instrumentation.ts in
-// the web process; with HELIOS_INGEST_WORKER=external the log-collection
-// jobs run in `npm run worker` (src/worker.ts) instead. Off with
-// HELIOS_BACKGROUND_JOBS=off.
+// the web process and from src/worker.ts in a worker process.
+//
+// Which groups a process runs:
+// - HELIOS_JOBS: "core", "ingest", "core,ingest" or "none", for this
+//   process. Containers set it: web "none", worker "core,ingest".
+// - Otherwise the web process runs both, or only "core" with
+//   HELIOS_INGEST_WORKER=external, and the worker runs "ingest".
+// HELIOS_BACKGROUND_JOBS=off turns every job off in every process.
 // Each job is safe to repeat and to run on several instances.
 
 interface Job {
@@ -55,9 +60,21 @@ const JOBS: Job[] = [
 
 const STARTED = Symbol.for("helios.jobs.started");
 
-export function startJobs(groups: Array<Job["group"]> = process.env.HELIOS_INGEST_WORKER === "external" ? ["core"] : ["core", "ingest"]) {
+type Group = Job["group"];
+
+// The groups HELIOS_JOBS names, or the fallback when it isn't set.
+export function jobGroups(fallback: Group[], value = process.env.HELIOS_JOBS): Group[] {
+  if (value === undefined || value.trim() === "") return fallback;
+  const names = value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (names.length === 1 && names[0] === "none") return [];
+  const bad = names.filter((n) => n !== "core" && n !== "ingest");
+  if (bad.length) throw new Error(`HELIOS_JOBS: unknown job group ${bad.join(", ")} (use core, ingest or none)`);
+  return [...new Set(names)] as Group[];
+}
+
+export function startJobs(groups: Group[] = jobGroups(process.env.HELIOS_INGEST_WORKER === "external" ? ["core"] : ["core", "ingest"])) {
   const g = globalThis as typeof globalThis & { [STARTED]?: boolean };
-  if (g[STARTED] || process.env.HELIOS_BACKGROUND_JOBS === "off") return;
+  if (g[STARTED] || process.env.HELIOS_BACKGROUND_JOBS === "off" || groups.length === 0) return;
   g[STARTED] = true;
   for (const job of [...JOBS, ...INGEST_JOBS].filter((j) => groups.includes(j.group))) {
     let running = false;
