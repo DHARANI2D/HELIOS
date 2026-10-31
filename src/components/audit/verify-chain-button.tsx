@@ -6,9 +6,10 @@ import { ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
 
 import { verifyAuditChainAction } from "@/app/(app)/audit/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 export function VerifyChainButton() {
-  const verify = useMutation({ mutationFn: () => verifyAuditChainAction() });
+  const verify = useMutation({ mutationFn: () => unwrap(verifyAuditChainAction()) });
   const result = verify.data;
 
   return (

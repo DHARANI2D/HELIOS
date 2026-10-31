@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   killSwitch: boolean;
@@ -31,7 +32,7 @@ export function SafetyControls(props: Props) {
   const [maxAuto, setMaxAuto] = React.useState(props.maxAutoActionsPerHour);
 
   const kill = useMutation({
-    mutationFn: (on: boolean) => setKillSwitchAction(on),
+    mutationFn: (on: boolean) => unwrap(setKillSwitchAction(on)),
     onSuccess: (_, on) => {
       toast[on ? "warning" : "success"](on ? "Kill switch ON — AI agents can only suggest" : "Kill switch off — autonomy restored to profile settings");
       router.refresh();
@@ -39,7 +40,7 @@ export function SafetyControls(props: Props) {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
   const save = useMutation({
-    mutationFn: () => saveAiSettingsAction({ killSwitch: props.killSwitch, firstResponse, minSeverity, maxAutoActionsPerHour: maxAuto }),
+    mutationFn: () => unwrap(saveAiSettingsAction({ killSwitch: props.killSwitch, firstResponse, minSeverity, maxAutoActionsPerHour: maxAuto })),
     onSuccess: () => {
       toast.success("AI settings saved");
       router.refresh();

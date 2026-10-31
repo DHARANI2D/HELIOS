@@ -15,6 +15,7 @@ import { createQuote } from "@/lib/pricing/quotes";
 import { describeMix } from "@/lib/pricing/endpoint-mix";
 import { runAdvisorAgent, type AiAdvice } from "@/lib/pricing/advisor-agent";
 import type { AdvisorGoal } from "@/lib/pricing/advisor";
+import { action } from "@/lib/action";
 
 // The public estimator's two server actions. Anyone can call them, so each
 // checks the site settings, validates everything, and is rate limited per
@@ -29,7 +30,7 @@ async function openSite() {
   return site;
 }
 
-export async function publicAdviceAction(input: QuoteConfig, goalInput: AdvisorGoal): Promise<AiAdvice> {
+export const publicAdviceAction = action(async function publicAdviceAction(input: QuoteConfig, goalInput: AdvisorGoal): Promise<AiAdvice> {
   const site = await openSite();
   if (!site.aiAdvisor) throw new Error("The AI advisor is switched off.");
   const ctx = await publicPricingContext();
@@ -41,7 +42,7 @@ export async function publicAdviceAction(input: QuoteConfig, goalInput: AdvisorG
   const usedToday = await db.aiRun.count({ where: { agentKey: "advisor", trigger: "website", createdAt: { gte: new Date(Date.now() - DAY) } } });
   const rulesOnly = usedToday >= site.aiDailyLimit ? "The AI advisor has answered as many questions as it can today; these are the rules' suggestions." : undefined;
   return runAdvisorAgent(cfg, ctx, goal, { audience: "public", trigger: "website", rulesOnly });
-}
+});
 
 const contactSchema = z.object({
   name: z.string().trim().min(2, "Your name, please").max(120),
@@ -55,7 +56,7 @@ const contactSchema = z.object({
 });
 export type QuoteRequestInput = z.input<typeof contactSchema>;
 
-export async function requestQuoteAction(input: QuoteConfig, contactInput: QuoteRequestInput): Promise<{ reference: string | null }> {
+export const requestQuoteAction = action(async function requestQuoteAction(input: QuoteConfig, contactInput: QuoteRequestInput): Promise<{ reference: string | null }> {
   const site = await openSite();
   if (!site.leads) throw new Error("Quote requests are switched off; please contact us directly.");
   const contact = contactSchema.parse(contactInput);
@@ -92,4 +93,4 @@ export async function requestQuoteAction(input: QuoteConfig, contactInput: Quote
     href: `/pricing/quotes/${quote.id}`,
   });
   return { reference: quote.reference };
-}
+});

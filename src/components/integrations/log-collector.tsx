@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export interface StreamState {
   key: string;
@@ -47,7 +48,7 @@ export function LogCollectorButton(props: Props) {
   const [values, setValues] = React.useState<Record<string, string>>(props.values);
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
   const save = useMutation({
-    mutationFn: () => saveCollectorAction(props.integrationId, { on, streams, values }),
+    mutationFn: () => unwrap(saveCollectorAction(props.integrationId, { on, streams, values })),
     onSuccess: () => {
       toast.success(on ? "Collector saved: it starts pulling within a minute" : "Collector switched off");
       router.refresh();
@@ -55,7 +56,7 @@ export function LogCollectorButton(props: Props) {
     onError,
   });
   const test = useMutation({
-    mutationFn: () => testCollectorAction(props.integrationId),
+    mutationFn: () => unwrap(testCollectorAction(props.integrationId)),
     onSuccess: (results) => {
       for (const r of results) (r.ok ? toast.success : toast.error)(r.message);
     },

@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CopyField } from "@/components/integrations/onboard-wizard";
+import { unwrap } from "@/lib/action-result";
 
 export function AgentTokenDialog({ issued, origin, onClose }: { issued: { name: string; token: string } | null; origin: string; onClose: () => void }) {
   return (
@@ -49,7 +50,7 @@ export function IdentityForm({ origin }: { origin: string }) {
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: (agentName: string) => issueIdentityAction(agentName),
+    mutationFn: (agentName: string) => unwrap(issueIdentityAction(agentName)),
     onSuccess: (agent) => {
       setIssued({ name: agent.name, token: agent.token });
       setName("");

@@ -9,8 +9,9 @@ import { assertCaseAccess } from "@/lib/access";
 import { resolveTenantInput } from "@/lib/tenants";
 import { logAction } from "@/lib/audit";
 import { resetPipeline, runInvestigationPipeline, startInvestigation } from "@/lib/investigations/service";
+import { action } from "@/lib/action";
 
-export async function startInvestigationAction(formData: FormData) {
+export const startInvestigationAction = action(async function startInvestigationAction(formData: FormData) {
   const user = await requirePermission("investigations.run");
   const title = String(formData.get("title") ?? "").trim();
   if (title.length < 3) throw new Error("Give the investigation a title (3+ characters)");
@@ -38,9 +39,9 @@ export async function startInvestigationAction(formData: FormData) {
 
   revalidatePath("/investigations");
   return result;
-}
+});
 
-export async function rerunInvestigationAction(caseId: string) {
+export const rerunInvestigationAction = action(async function rerunInvestigationAction(caseId: string) {
   const user = await requirePermission("investigations.run");
   await assertCaseAccess(user, caseId);
   const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { sourceType: true } });
@@ -49,4 +50,4 @@ export async function rerunInvestigationAction(caseId: string) {
   await logAction({ actorId: user.id, caseId, action: "investigation.rerun_requested" });
   after(() => runInvestigationPipeline(caseId));
   revalidatePath(`/cases/${caseId}`);
-}
+});

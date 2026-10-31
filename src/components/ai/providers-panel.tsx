@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 export interface ProviderView {
   id: string;
@@ -64,7 +65,7 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
   };
 
   const save = useMutation({
-    mutationFn: (d: Draft) => saveProviderAction({ id: d.id, name: d.name, kind: d.kind, baseUrl: d.baseUrl, model: d.model, apiKey: d.apiKey || undefined, isLocal: d.isLocal, isDefault: d.isDefault }),
+    mutationFn: (d: Draft) => unwrap(saveProviderAction({ id: d.id, name: d.name, kind: d.kind, baseUrl: d.baseUrl, model: d.model, apiKey: d.apiKey || undefined, isLocal: d.isLocal, isDefault: d.isDefault })),
     onSuccess: () => {
       setDraft(null);
       refresh("Provider saved");
@@ -72,7 +73,7 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
     onError,
   });
   const test = useMutation({
-    mutationFn: (id: string) => testProviderAction(id),
+    mutationFn: (id: string) => unwrap(testProviderAction(id)),
     onSuccess: (r) => {
       if (r.ok) toast.success(r.message);
       else toast.error(r.message);
@@ -80,9 +81,9 @@ export function ProvidersPanel({ providers, envClaude, canConfigure }: Props) {
     },
     onError,
   });
-  const enable = useMutation({ mutationFn: ({ id, on }: { id: string; on: boolean }) => setProviderEnabledAction(id, on), onSuccess: () => refresh("Updated"), onError });
-  const makeDefault = useMutation({ mutationFn: (id: string | null) => setDefaultProviderAction(id), onSuccess: () => refresh("Default provider updated"), onError });
-  const remove = useMutation({ mutationFn: (id: string) => deleteProviderAction(id), onSuccess: () => refresh("Provider removed"), onError });
+  const enable = useMutation({ mutationFn: ({ id, on }: { id: string; on: boolean }) => unwrap(setProviderEnabledAction(id, on)), onSuccess: () => refresh("Updated"), onError });
+  const makeDefault = useMutation({ mutationFn: (id: string | null) => unwrap(setDefaultProviderAction(id)), onSuccess: () => refresh("Default provider updated"), onError });
+  const remove = useMutation({ mutationFn: (id: string) => unwrap(deleteProviderAction(id)), onSuccess: () => refresh("Provider removed"), onError });
 
   const preset = draft ? PROVIDER_PRESETS.find((p) => p.id === draft.preset) : undefined;
   const hasDefault = providers.some((p) => p.isDefault && p.enabled);

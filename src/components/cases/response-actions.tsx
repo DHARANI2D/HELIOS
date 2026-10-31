@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { unwrap } from "@/lib/action-result";
 
 export interface ResponseActionView {
   id: string;
@@ -102,7 +103,7 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
   };
 
   const decide = useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: "approved" | "rejected" }) => decideResponseActionAction(id, decision),
+    mutationFn: ({ id, decision }: { id: string; decision: "approved" | "rejected" }) => unwrap(decideResponseActionAction(id, decision)),
     onSuccess: (r) =>
       refresh(
         r.status === "REJECTED" ? "Rejected" : r.status === "EXECUTED" ? "Approved and executed" : r.status === "PENDING_APPROVAL" ? "Approved — it needs a second person" : r.status === "BLOCKED" ? "Blocked by the client's rulebook" : `Status: ${r.status.toLowerCase()}`,
@@ -110,19 +111,19 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
     onError,
   });
   const extend = useMutation({
-    mutationFn: ({ id, hours }: { id: string; hours: number }) => extendResponseActionAction(id, hours),
+    mutationFn: ({ id, hours }: { id: string; hours: number }) => unwrap(extendResponseActionAction(id, hours)),
     onSuccess: (r) => refresh(r.expiresAt ? `Kept until ${new Date(r.expiresAt).toLocaleString()}` : "Kept until someone lifts it"),
     onError,
   });
   const rollback = useMutation({
-    mutationFn: (id: string) => rollbackResponseActionAction(id),
+    mutationFn: (id: string) => unwrap(rollbackResponseActionAction(id)),
     onSuccess: (r) => refresh(r.status === "MANUAL_REQUIRED" ? "Rollback recorded — carry it out by hand, then mark it done" : "Rolled back"),
     onError,
   });
   const [confirming, setConfirming] = React.useState<string | null>(null);
   const [doneNote, setDoneNote] = React.useState("");
   const markDone = useMutation({
-    mutationFn: (id: string) => completeManualActionAction(id, doneNote),
+    mutationFn: (id: string) => unwrap(completeManualActionAction(id, doneNote)),
     onSuccess: () => {
       setConfirming(null);
       setDoneNote("");
@@ -131,7 +132,7 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
     onError,
   });
   const request = useMutation({
-    mutationFn: () => requestResponseAction(caseId, { actionType: type, target: target || options[0] || "", rationale }),
+    mutationFn: () => unwrap(requestResponseAction(caseId, { actionType: type, target: target || options[0] || "", rationale })),
     onSuccess: (r) => {
       setTarget("");
       setRationale("");

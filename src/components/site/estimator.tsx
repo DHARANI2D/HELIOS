@@ -27,6 +27,7 @@ import { SolutionDesign } from "@/components/pricing/solution-design";
 import { SurfaceCoverageCard } from "@/components/pricing/surface-coverage";
 import { surfaceCoverage } from "@/lib/assets/coverage";
 import type { PlatformFacts } from "@/lib/assets/designer";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   ctx: PricingContext;
@@ -392,7 +393,7 @@ function RequestQuote({ cfg, brand, sized }: { cfg: QuoteConfig; brand: string; 
   const [form, setForm] = React.useState({ name: "", email: "", company: "", phone: "", message: "", consent: false, website: "" });
   const [sent, setSent] = React.useState<string | null>(null);
   const send = useMutation({
-    mutationFn: () => requestQuoteAction(cfg, { ...form, consent: form.consent as true }),
+    mutationFn: () => unwrap(requestQuoteAction(cfg, { ...form, consent: form.consent as true })),
     onSuccess: (r) => setSent(r.reference ?? "received"),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Couldn't send your request"),
   });

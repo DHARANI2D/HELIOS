@@ -9,13 +9,14 @@ import { toast } from "sonner";
 import { destroyTenantKeysAction, rotateTenantKeyAction } from "@/app/(app)/tenants/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { unwrap } from "@/lib/action-result";
 
 export function TenantKeys({ tenantId, name, version, createdAt, destroyed, suspended }: { tenantId: string; name: string; version: number | null; createdAt: string | null; destroyed: boolean; suspended: boolean }) {
   const router = useRouter();
   const [confirm, setConfirm] = React.useState("");
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
-  const rotate = useMutation({ mutationFn: () => rotateTenantKeyAction(tenantId), onSuccess: (r) => { toast.success(`New key; ${r.resealed} credential${r.resealed === 1 ? "" : "s"} re-sealed`); router.refresh(); }, onError });
-  const destroy = useMutation({ mutationFn: () => destroyTenantKeysAction(tenantId, confirm), onSuccess: () => { toast.success("Keys destroyed: the client's stored credentials can't be read"); router.refresh(); }, onError });
+  const rotate = useMutation({ mutationFn: () => unwrap(rotateTenantKeyAction(tenantId)), onSuccess: (r) => { toast.success(`New key; ${r.resealed} credential${r.resealed === 1 ? "" : "s"} re-sealed`); router.refresh(); }, onError });
+  const destroy = useMutation({ mutationFn: () => unwrap(destroyTenantKeysAction(tenantId, confirm)), onSuccess: () => { toast.success("Keys destroyed: the client's stored credentials can't be read"); router.refresh(); }, onError });
   if (destroyed) return <p className="text-sm text-muted-foreground">Destroyed: this client&apos;s stored credentials can no longer be decrypted.</p>;
   return (
     <div className="grid gap-3 text-sm">

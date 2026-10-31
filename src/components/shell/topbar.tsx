@@ -22,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { unwrap } from "@/lib/action-result";
 
 export interface ShellViewer {
   name: string | null;
@@ -57,7 +58,7 @@ export function AppTopbar({ viewer, tenants, selectedTenantId, notifications }: 
 
   function onTenantChange(value: string) {
     startTransition(async () => {
-      await setTenantFilterAction(value);
+      await unwrap(setTenantFilterAction(value));
       router.refresh();
     });
   }

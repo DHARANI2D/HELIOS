@@ -342,6 +342,14 @@ Logs arrive three ways, all into one durable queue:
 - **Not built:** the events table isn't partitioned by time; archiving and deletion work through it in bounded batches instead. Partitioning is worth adding once a deployment holds hundreds of millions of events.
 - **Isolation:** `event_archives` and `legal_holds` carry a `tenantId` and have the same row-level policy as the other client tables.
 
+### Server Actions (`lib/action.ts`)
+
+Every Server Action is wrapped in `action()`, which returns `{ ok, value }` or `{ ok: false, error }` rather than throwing. A production build replaces a thrown error's message with a generic one, so a refusal like "keep logs for at least 180 days" would never reach the person.
+- **Shown:** messages HELIOS writes for people, the first problem a zod schema finds, and "not found" or "already exists" from the database.
+- **Hidden:** other database errors, Node system errors (they name paths and hosts) and programming errors are logged and reported as "something went wrong".
+- **Next's own flow:** `redirect()` and `notFound()` pass through.
+- **Client side:** components call `unwrap(someAction(...))`, which returns the value or throws an `Error` with the message, so a mutation's `onError` shows it.
+
 ## One write path
 
 Every module files its findings through `src/lib/cases/writer.ts`:

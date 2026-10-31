@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { deletePlaybookAction, runRetroactiveAction, togglePlaybookAction } from "@/app/(app)/playbooks/actions";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Action failed");
 
@@ -15,12 +16,12 @@ export function PlaybookControls({ playbookId, enabled }: { playbookId: string; 
   const router = useRouter();
 
   const toggle = useMutation({
-    mutationFn: (next: boolean) => togglePlaybookAction(playbookId, next),
+    mutationFn: (next: boolean) => unwrap(togglePlaybookAction(playbookId, next)),
     onSuccess: () => router.refresh(),
     onError,
   });
   const retro = useMutation({
-    mutationFn: () => runRetroactiveAction(playbookId),
+    mutationFn: () => unwrap(runRetroactiveAction(playbookId)),
     onSuccess: (r) => {
       toast.success(`Checked ${r.analyzed} open cases: ${r.matched} matched${r.queuedForApproval ? `, ${r.queuedForApproval} queued for approval` : ""}`);
       router.refresh();
@@ -28,7 +29,7 @@ export function PlaybookControls({ playbookId, enabled }: { playbookId: string; 
     onError,
   });
   const remove = useMutation({
-    mutationFn: () => deletePlaybookAction(playbookId),
+    mutationFn: () => unwrap(deletePlaybookAction(playbookId)),
     onSuccess: (r) => {
       toast.success(r.deleted ? "Playbook deleted" : "Playbook has execution history — disabled instead of deleted");
       router.refresh();

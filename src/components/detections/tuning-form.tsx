@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   tenants: Array<{ id: string; name: string }>;
@@ -30,7 +31,7 @@ export function TuningForm({ tenants, targets }: Props) {
   const [reason, setReason] = React.useState("");
   const [expires, setExpires] = React.useState("");
   const add = useMutation({
-    mutationFn: () => addTuningAction({ tenantId, target, kind, field: kind === "exclude" ? field : null, op: kind === "exclude" ? op : null, value: kind === "exclude" ? value : null, severity: kind === "severity" ? (severity as "LOW") : null, reason, expiresAt: expires || null }),
+    mutationFn: () => unwrap(addTuningAction({ tenantId, target, kind, field: kind === "exclude" ? field : null, op: kind === "exclude" ? op : null, value: kind === "exclude" ? value : null, severity: kind === "severity" ? (severity as "LOW") : null, reason, expiresAt: expires || null })),
     onSuccess: () => { toast.success("Tuning added"); setValue(""); setReason(""); setExpires(""); router.refresh(); },
     onError: (e: Error) => toast.error(e.message),
   });

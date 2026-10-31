@@ -14,6 +14,7 @@ import { getCatalogTool } from "@/lib/integrations/tools";
 import { pingConnector } from "@/lib/integrations/dispatch";
 import { readSecrets, type IntegrationConfig } from "@/lib/integrations/dispatch";
 import { onboardIntegration, rotateIngestToken } from "@/lib/integrations/service";
+import { action } from "@/lib/action";
 
 function revalidate() {
   revalidatePath("/integrations");
@@ -40,7 +41,7 @@ async function integrationInScope(user: SessionUser, id: string) {
   return integration;
 }
 
-export async function onboardIntegrationAction(input: z.input<typeof onboardSchema>) {
+export const onboardIntegrationAction = action(async function onboardIntegrationAction(input: z.input<typeof onboardSchema>) {
   const user = await requirePermission("integrations.manage");
   const data = onboardSchema.parse(input);
   const tool = await getCatalogTool(data.vendor);
@@ -64,23 +65,23 @@ export async function onboardIntegrationAction(input: z.input<typeof onboardSche
   );
   revalidate();
   return { id: integration.id, token, ingestPath: `/api/ingest/${integration.id}` };
-}
+});
 
-export async function rotateTokenAction(id: string) {
+export const rotateTokenAction = action(async function rotateTokenAction(id: string) {
   const user = await requirePermission("integrations.manage");
   await integrationInScope(user, id);
   const token = await rotateIngestToken(id, user.id);
   revalidate();
   return { token, ingestPath: `/api/ingest/${id}` };
-}
+});
 
-export async function setIntegrationEnabledAction(id: string, enabled: boolean) {
+export const setIntegrationEnabledAction = action(async function setIntegrationEnabledAction(id: string, enabled: boolean) {
   const user = await requirePermission("integrations.manage");
   await integrationInScope(user, id);
   await db.integration.update({ where: { id }, data: { enabled, status: enabled ? "PENDING" : "DISCONNECTED" } });
   await logAction({ actorId: user.id, action: enabled ? "integration.enabled" : "integration.disabled", detail: { integrationId: id } });
   revalidate();
-}
+});
 
 const accessSchema = z.object({
   allowedRoles: z.array(z.enum(ROLES)).max(20),
@@ -90,7 +91,7 @@ const accessSchema = z.object({
   chatWebhookUrl: z.string().trim().url().optional().or(z.literal("")),
 });
 
-export async function updateIntegrationAction(id: string, input: z.input<typeof accessSchema>) {
+export const updateIntegrationAction = action(async function updateIntegrationAction(id: string, input: z.input<typeof accessSchema>) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const data = accessSchema.parse(input);
@@ -112,10 +113,10 @@ export async function updateIntegrationAction(id: string, input: z.input<typeof 
   ]);
   await logAction({ actorId: user.id, action: "integration.updated", detail: { integrationId: id, roles: data.allowedRoles, users: data.assignedUserIds.length, connector: !!data.responseWebhookUrl } });
   revalidate();
-}
+});
 
 // Sends a signed PING to the response connector; nothing is created.
-export async function testConnectorAction(id: string) {
+export const testConnectorAction = action(async function testConnectorAction(id: string) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const result = await pingConnector(integration);
@@ -124,7 +125,7 @@ export async function testConnectorAction(id: string) {
   if (!result.dispatched) throw new Error(result.message);
   if (!result.ok) throw new Error(result.message);
   return result;
-}
+});
 
 // ---------------------------------------------------------------- native connectors
 
@@ -137,7 +138,7 @@ const nativeSchema = z.object({
 
 // Set up (or switch off) the native connector for an onboarded tool. Secret
 // fields left blank keep what's stored; secrets are sealed and never logged.
-export async function saveNativeConnectorAction(id: string, input: z.input<typeof nativeSchema>) {
+export const saveNativeConnectorAction = action(async function saveNativeConnectorAction(id: string, input: z.input<typeof nativeSchema>) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const data = nativeSchema.parse(input);
@@ -173,10 +174,10 @@ export async function saveNativeConnectorAction(id: string, input: z.input<typeo
   forgetToken(id);
   await logAction({ actorId: user.id, action: "integration.native_connector_saved", detail: { integrationId: id, connector: connector.key, on: data.on, mode: data.mode, fields: Object.keys(plain), secretsSet: Object.keys(hidden) } });
   revalidate();
-}
+});
 
 // Signs in with the connector's credentials and reads something harmless.
-export async function testNativeConnectorAction(id: string) {
+export const testNativeConnectorAction = action(async function testNativeConnectorAction(id: string) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const { checkNative } = await import("@/lib/connectors/run");
@@ -184,7 +185,7 @@ export async function testNativeConnectorAction(id: string) {
   await logAction({ actorId: user.id, action: "integration.native_connector_tested", detail: { integrationId: id, ok: result.ok, message: result.message.slice(0, 300) } });
   revalidate();
   return result;
-}
+});
 
 // ---------------------------------------------------------------- log collection
 
@@ -197,7 +198,7 @@ const collectorSchema = z.object({
 // Pull collector setup. A field the tool's response connector also has (the
 // same app registration) is stored once, with the connector's; secret fields
 // left blank keep what's stored.
-export async function saveCollectorAction(id: string, input: z.input<typeof collectorSchema>) {
+export const saveCollectorAction = action(async function saveCollectorAction(id: string, input: z.input<typeof collectorSchema>) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const data = collectorSchema.parse(input);
@@ -242,16 +243,16 @@ export async function saveCollectorAction(id: string, input: z.input<typeof coll
   forgetToken(`${id}:collector`);
   await logAction({ actorId: user.id, action: "collector.saved", detail: { integrationId: id, collector: collector.key, on: data.on, streams, secretsSet: [...Object.keys(connectorHidden), ...Object.keys(ownHidden)] } });
   revalidate();
-}
+});
 
-export async function testCollectorAction(id: string) {
+export const testCollectorAction = action(async function testCollectorAction(id: string) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const { collectorSetup, testCollector } = await import("@/lib/collectors/run");
   const setup = collectorSetup(integration);
   if (!setup?.streams.length) throw new Error("Save the collector with at least one log first");
   return testCollector(integration, setup, user.id);
-}
+});
 
 const forwarderSchema = z.object({
   os: z.enum(["linux", "windows"]),
@@ -262,7 +263,7 @@ const forwarderSchema = z.object({
 });
 
 // A signed forwarder configuration for this integration's ingest URL.
-export async function issueForwarderConfigAction(id: string, input: z.input<typeof forwarderSchema>) {
+export const issueForwarderConfigAction = action(async function issueForwarderConfigAction(id: string, input: z.input<typeof forwarderSchema>) {
   const user = await requirePermission("integrations.manage");
   const integration = await integrationInScope(user, id);
   const tool = await getCatalogTool(integration.vendor);
@@ -275,25 +276,25 @@ export async function issueForwarderConfigAction(id: string, input: z.input<type
   const issued = await issueForwarderConfig(id, options, user, process.env.AUTH_URL);
   revalidate();
   return { text: issued.text, hash: issued.hash };
-}
+});
 
-export async function verifyForwarderConfigAction(text: string) {
+export const verifyForwarderConfigAction = action(async function verifyForwarderConfigAction(text: string) {
   await requirePermission("integrations.view");
   const { checkForwarderConfig } = await import("@/lib/forwarder/service");
   return checkForwarderConfig(z.string().max(200_000).parse(text));
-}
+});
 
 // Minutes of silence before a source opens a case; null = the default for its kind, 0 = never.
-export async function setQuietLimitAction(id: string, minutes: number | null) {
+export const setQuietLimitAction = action(async function setQuietLimitAction(id: string, minutes: number | null) {
   const user = await requirePermission("integrations.manage");
   await integrationInScope(user, id);
   const value = minutes === null ? null : z.number().int().min(0).max(7 * 24 * 60).parse(minutes);
   await db.integration.update({ where: { id }, data: { quietAfterMinutes: value } });
   await logAction({ actorId: user.id, action: "source.quiet_limit_set", detail: { integrationId: id, minutes: value } });
   revalidate();
-}
+});
 
-export async function replayDeadLettersAction(ids: string[]) {
+export const replayDeadLettersAction = action(async function replayDeadLettersAction(ids: string[]) {
   const user = await requirePermission("integrations.manage");
   const letters = await db.ingestDeadLetter.findMany({ where: { id: { in: z.array(z.string()).max(500).parse(ids) } }, select: { id: true, integrationId: true } });
   for (const l of letters) await integrationInScope(user, l.integrationId);
@@ -301,4 +302,4 @@ export async function replayDeadLettersAction(ids: string[]) {
   const count = await replayDeadLetters(letters.map((l) => l.id), user.id);
   revalidate();
   return { count };
-}
+});

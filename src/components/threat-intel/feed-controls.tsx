@@ -8,13 +8,14 @@ import { toast } from "sonner";
 import { importFeedAction, setFeedEnabledAction } from "@/app/(app)/threat-intel/actions";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 export function FeedControls({ id, name, enabled, canManage }: { id: string; name: string; enabled: boolean; canManage: boolean }) {
   const router = useRouter();
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
-  const toggle = useMutation({ mutationFn: (on: boolean) => setFeedEnabledAction(id, on), onSuccess: () => router.refresh(), onError });
+  const toggle = useMutation({ mutationFn: (on: boolean) => unwrap(setFeedEnabledAction(id, on)), onSuccess: () => router.refresh(), onError });
   const run = useMutation({
-    mutationFn: () => importFeedAction(id),
+    mutationFn: () => unwrap(importFeedAction(id)),
     onSuccess: (r) => {
       toast.success(`${r.name}: ${r.count.toLocaleString()} entries imported`);
       router.refresh();

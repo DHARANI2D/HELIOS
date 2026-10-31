@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export interface ProfileView {
   key: AgentKey;
@@ -54,7 +55,7 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
 
   const save = useMutation({
     mutationFn: () =>
-      saveAgentProfileAction({
+      unwrap(saveAgentProfileAction({
         key: p.key,
         enabled: p.enabled,
         providerId: p.providerId,
@@ -64,7 +65,7 @@ export function AgentProfileCard({ profile, providers, actions, canConfigure }: 
         minConfidence: p.minConfidence,
         allowedActions: p.allowedActions as never,
         instructions: p.instructions,
-      }),
+      })),
     onSuccess: () => {
       toast.success(`${p.name} saved`);
       router.refresh();

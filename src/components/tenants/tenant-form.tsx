@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export interface TenantDraft {
   name: string;
@@ -43,7 +44,7 @@ export function TenantFormButton({ tenantId, initial, plans }: { tenantId?: stri
   const [open, setOpen] = React.useState(false);
   const [d, setD] = React.useState<TenantDraft>(initial ?? EMPTY);
   const save = useMutation({
-    mutationFn: () => saveTenantAction(d, tenantId),
+    mutationFn: () => unwrap(saveTenantAction(d, tenantId)),
     onSuccess: (r) => {
       toast.success(tenantId ? "Client updated" : "Client created");
       setOpen(false);
@@ -136,7 +137,7 @@ export function TenantFormButton({ tenantId, initial, plans }: { tenantId?: stri
 export function AiConsentSelect({ tenantId, value, canEdit }: { tenantId: string; value: AiAutonomy; canEdit: boolean }) {
   const router = useRouter();
   const mut = useMutation({
-    mutationFn: (cap: string) => setAiCapAction(tenantId, cap),
+    mutationFn: (cap: string) => unwrap(setAiCapAction(tenantId, cap)),
     onSuccess: () => {
       toast.success("AI consent updated");
       router.refresh();

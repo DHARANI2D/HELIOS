@@ -7,10 +7,11 @@ import { requireUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
 import { TENANT_COOKIE, caseScope, tenantScope } from "@/lib/access";
 import { listNotifications, markNotificationsRead } from "@/lib/notifications";
+import { action } from "@/lib/action";
 
 // Staff-only "focus on one client" switch. A preference, not a permission:
 // queries still apply the viewer's own visibility rules on top of it.
-export async function setTenantFilterAction(tenantId: string) {
+export const setTenantFilterAction = action(async function setTenantFilterAction(tenantId: string) {
   const user = await requireUser();
   if (user.isClient) return;
   const store = await cookies();
@@ -21,21 +22,21 @@ export async function setTenantFilterAction(tenantId: string) {
   const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { id: true } });
   if (!tenant) throw new Error("Unknown client");
   store.set(TENANT_COOKIE, tenant.id, { path: "/", sameSite: "lax", httpOnly: true, maxAge: 60 * 60 * 24 * 30 });
-}
+});
 
-export async function getNotificationsAction() {
+export const getNotificationsAction = action(async function getNotificationsAction() {
   const user = await requireUser();
   const { items, unread } = await listNotifications(user.id, 25);
   return {
     unread,
     items: items.map((n) => ({ id: n.id, kind: n.kind, title: n.title, body: n.body, href: n.href, actorName: n.actorName, read: !!n.readAt, createdAt: n.createdAt.toISOString() })),
   };
-}
+});
 
-export async function markNotificationsReadAction(ids?: string[]) {
+export const markNotificationsReadAction = action(async function markNotificationsReadAction(ids?: string[]) {
   const user = await requireUser();
   await markNotificationsRead(user.id, ids?.slice(0, 100));
-}
+});
 
 export interface SearchHit {
   kind: "case" | "endpoint" | "indicator" | "tenant";
@@ -47,7 +48,7 @@ export interface SearchHit {
 
 // Command palette search: cases within the viewer's scope, plus endpoints,
 // indicators and clients where their role can see them.
-export async function globalSearchAction(query: string): Promise<SearchHit[]> {
+export const globalSearchAction = action(async function globalSearchAction(query: string): Promise<SearchHit[]> {
   const user = await requireUser();
   const q = query.trim().slice(0, 100);
   if (q.length < 2) return [];
@@ -76,4 +77,4 @@ export async function globalSearchAction(query: string): Promise<SearchHit[]> {
     ...indicators.map((i) => ({ kind: "indicator" as const, id: i.id, title: i.value, subtitle: `${i.type.toLowerCase().replace("_", " ")}${i.maliciousScore !== null ? ` · score ${i.maliciousScore.toFixed(2)}` : ""}`, href: `/threat-intel?q=${encodeURIComponent(i.value)}` })),
     ...tenants.map((t) => ({ kind: "tenant" as const, id: t.id, title: t.name, subtitle: t.plan?.name ?? "no plan", href: `/tenants/${t.id}` })),
   ];
-}
+});

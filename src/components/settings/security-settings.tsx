@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   mfa: "optional" | "staff" | "everyone";
@@ -34,8 +35,8 @@ export function SecuritySettings(props: Props) {
   const [mfa, setMfa] = React.useState(props.mfa);
   const [ssoOnly, setSsoOnly] = React.useState(props.ssoOnlyForStaff);
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
-  const save = useMutation({ mutationFn: () => saveSecuritySettingsAction({ mfa, ssoOnlyForStaff: ssoOnly }), onSuccess: () => { toast.success("Sign-in rules saved"); router.refresh(); }, onError });
-  const adopt = useMutation({ mutationFn: () => adoptClientKeysAction(), onSuccess: (r) => { toast.success(`${r.moved} client credential${r.moved === 1 ? "" : "s"} moved onto their client's own key`); router.refresh(); }, onError });
+  const save = useMutation({ mutationFn: () => unwrap(saveSecuritySettingsAction({ mfa, ssoOnlyForStaff: ssoOnly })), onSuccess: () => { toast.success("Sign-in rules saved"); router.refresh(); }, onError });
+  const adopt = useMutation({ mutationFn: () => unwrap(adoptClientKeysAction()), onSuccess: (r) => { toast.success(`${r.moved} client credential${r.moved === 1 ? "" : "s"} moved onto their client's own key`); router.refresh(); }, onError });
 
   return (
     <div className="grid gap-5">

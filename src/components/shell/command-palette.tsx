@@ -10,6 +10,7 @@ import { useUIStore } from "@/lib/stores/ui-store";
 import { globalSearchAction, type SearchHit } from "@/app/(app)/shell-actions";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { unwrap } from "@/lib/action-result";
 
 const HIT_ICON: Record<SearchHit["kind"], typeof Search> = {
   case: ShieldAlert,
@@ -53,7 +54,7 @@ export function CommandPalette({ role }: { role: UserRole }) {
     if (q.length < 2) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
-      const result = await globalSearchAction(q).catch(() => []);
+      const result = await unwrap(globalSearchAction(q)).catch(() => []);
       if (!cancelled) {
         setHits(result);
         setCursor(0);

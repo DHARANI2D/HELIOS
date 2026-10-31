@@ -11,6 +11,7 @@ import { ALERT_CHANNELS, ALERT_GROUPS, CHANNEL_KEYS, type AlertChannel, type Ale
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   email: string;
@@ -24,9 +25,9 @@ export function AlertPrefsForm(props: Props) {
   const [phone, setPhone] = React.useState(props.phone);
   const [groups, setGroups] = React.useState(props.groups);
   const onError = (e: Error) => toast.error(e.message);
-  const save = useMutation({ mutationFn: () => saveAlertPrefsAction({ phone, groups }), onSuccess: () => { toast.success("Alert channels saved"); router.refresh(); }, onError });
+  const save = useMutation({ mutationFn: () => unwrap(saveAlertPrefsAction({ phone, groups })), onSuccess: () => { toast.success("Alert channels saved"); router.refresh(); }, onError });
   const test = useMutation({
-    mutationFn: () => testAlertsAction(),
+    mutationFn: () => unwrap(testAlertsAction()),
     onSuccess: (results) => {
       for (const r of results) (r.ok ? toast.success : toast.error)(`${ALERT_CHANNELS[r.channel]}: ${r.message}`);
       router.refresh();

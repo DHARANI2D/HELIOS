@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 function useSave<T>(fn: (v: T) => Promise<unknown>, done: string) {
   const router = useRouter();
@@ -43,7 +44,7 @@ const COMPANY_FIELDS: Array<{ key: keyof CompanyProfile; label: string; hint?: s
 
 export function CompanyForm({ initial, canEdit }: { initial: CompanyProfile; canEdit: boolean }) {
   const [d, setD] = React.useState(initial);
-  const save = useSave(() => saveCompanyAction(d), "Company profile saved");
+  const save = useSave(() => unwrap(saveCompanyAction(d)), "Company profile saved");
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -80,7 +81,7 @@ const SITE_SWITCHES: Array<{ key: "enabled" | "estimator" | "aiAdvisor" | "leads
 
 export function SiteForm({ initial, canEdit }: { initial: SiteSettings; canEdit: boolean }) {
   const [d, setD] = React.useState(initial);
-  const save = useSave(() => saveSiteAction(d), "Website settings saved");
+  const save = useSave(() => unwrap(saveSiteAction(d)), "Website settings saved");
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2">
@@ -125,7 +126,7 @@ export function SiteForm({ initial, canEdit }: { initial: SiteSettings; canEdit:
 }
 
 export function EnvironmentControl({ environment, testClients, canChange }: { environment: "production" | "test"; testClients: number; canChange: boolean }) {
-  const save = useSave((to: "production" | "test") => setEnvironmentAction(to), "Environment changed");
+  const save = useSave((to: "production" | "test") => unwrap(setEnvironmentAction(to)), "Environment changed");
   const test = environment === "test";
   return (
     <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4", test ? "border-warning/50 bg-warning/10" : "border-success/40 bg-success/5")}>
@@ -162,7 +163,7 @@ export interface SecretRow {
 
 function SecretField({ row, canEdit }: { row: SecretRow; canEdit: boolean }) {
   const [value, setValue] = React.useState("");
-  const save = useSave((v: string | null) => savePlatformSecretAction(row.name, v), "Saved");
+  const save = useSave((v: string | null) => unwrap(savePlatformSecretAction(row.name, v)), "Saved");
   const { source, last4 } = row.status;
   return (
     <div className="grid gap-2 rounded-lg border p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:items-center">
@@ -219,7 +220,7 @@ export function ForensicsSettingsForm({ thresholds, allowDomains, builtIn, canEd
   const [suspicious, setSuspicious] = React.useState(thresholds.suspicious);
   const [domains, setDomains] = React.useState(allowDomains.join("\n"));
   const save = useSave(
-    () => saveForensicsSettingsAction({ thresholds: { malicious, suspicious }, allowDomains: domains.split(/[\s,]+/).filter(Boolean) }),
+    () => unwrap(saveForensicsSettingsAction({ thresholds: { malicious, suspicious }, allowDomains: domains.split(/[\s,]+/).filter(Boolean) })),
     "Forensics settings saved",
   );
   return (

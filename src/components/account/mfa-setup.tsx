@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   enabled: boolean;
@@ -42,9 +43,9 @@ export function MfaSetup({ enabled, enabledAt, recoveryLeft, required, ssoName }
   const [code, setCode] = React.useState("");
   const [codes, setCodes] = React.useState<string[] | null>(null);
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
-  const start = useMutation({ mutationFn: () => startMfaSetupAction(), onSuccess: (r) => setSetup({ secret: r.secret, qr: r.qr }), onError });
+  const start = useMutation({ mutationFn: () => unwrap(startMfaSetupAction()), onSuccess: (r) => setSetup({ secret: r.secret, qr: r.qr }), onError });
   const confirm = useMutation({
-    mutationFn: () => confirmMfaAction(code),
+    mutationFn: () => unwrap(confirmMfaAction(code)),
     onSuccess: (r) => {
       setCodes(r.recoveryCodes);
       setSetup(null);
@@ -53,9 +54,9 @@ export function MfaSetup({ enabled, enabledAt, recoveryLeft, required, ssoName }
     },
     onError,
   });
-  const renew = useMutation({ mutationFn: () => newRecoveryCodesAction(code), onSuccess: (r) => { setCodes(r.recoveryCodes); setCode(""); }, onError });
+  const renew = useMutation({ mutationFn: () => unwrap(newRecoveryCodesAction(code)), onSuccess: (r) => { setCodes(r.recoveryCodes); setCode(""); }, onError });
   const disable = useMutation({
-    mutationFn: () => disableMfaAction(code),
+    mutationFn: () => unwrap(disableMfaAction(code)),
     onSuccess: () => {
       toast.success("Two-step sign-in is off");
       setCode("");

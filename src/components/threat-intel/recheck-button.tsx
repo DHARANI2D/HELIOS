@@ -7,11 +7,12 @@ import { toast } from "sonner";
 
 import { recheckIndicatorAction } from "@/app/(app)/threat-intel/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 export function RecheckButton({ indicatorId }: { indicatorId: string }) {
   const router = useRouter();
   const recheck = useMutation({
-    mutationFn: () => recheckIndicatorAction(indicatorId),
+    mutationFn: () => unwrap(recheckIndicatorAction(indicatorId)),
     onSuccess: (r) => {
       if (r.providersConfigured.length === 0) {
         toast.info("No threat-intel providers configured — showing built-in intel only. Add a VirusTotal or AbuseIPDB key under Settings.");

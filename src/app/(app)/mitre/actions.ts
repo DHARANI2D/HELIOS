@@ -7,8 +7,9 @@ import { logAction } from "@/lib/audit";
 import { requirePermission } from "@/lib/session";
 import { getSetting, setSetting } from "@/lib/settings";
 import { DETECTORS } from "@/lib/siem/engine";
+import { action } from "@/lib/action";
 
-export async function setDetectorEnabledAction(name: string, enabled: boolean) {
+export const setDetectorEnabledAction = action(async function setDetectorEnabledAction(name: string, enabled: boolean) {
   const user = await requirePermission("detections.tune");
   const detector = z.enum(DETECTORS.map((d) => d.name) as [string, ...string[]]).parse(name);
   const disabled = new Set(await getSetting("detection.disabledDetectors"));
@@ -18,4 +19,4 @@ export async function setDetectorEnabledAction(name: string, enabled: boolean) {
   await logAction({ actorId: user.id, action: enabled ? "detection.detector_enabled" : "detection.detector_disabled", detail: { detector } });
   revalidatePath("/mitre");
   revalidatePath("/detections");
-}
+});

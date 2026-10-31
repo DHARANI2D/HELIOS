@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { unwrap } from "@/lib/action-result";
 
 type State = "live" | "quiet" | "never" | "unwatched" | "stale";
 
@@ -79,12 +80,12 @@ export function LogSources({ sources, deadLetters, queue, canManage, now }: { so
   const nowDate = new Date(now);
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
   const limit = useMutation({
-    mutationFn: ({ id, value }: { id: string; value: string }) => setQuietLimitAction(id, value === "" ? null : Number(value)),
+    mutationFn: ({ id, value }: { id: string; value: string }) => unwrap(setQuietLimitAction(id, value === "" ? null : Number(value))),
     onSuccess: () => router.refresh(),
     onError,
   });
   const replay = useMutation({
-    mutationFn: (ids: string[]) => replayDeadLettersAction(ids),
+    mutationFn: (ids: string[]) => unwrap(replayDeadLettersAction(ids)),
     onSuccess: (r) => {
       toast.success(`${r.count} record${r.count === 1 ? "" : "s"} back on the queue`);
       router.refresh();

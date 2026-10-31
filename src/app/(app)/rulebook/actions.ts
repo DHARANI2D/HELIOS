@@ -13,6 +13,7 @@ import { logAction } from "@/lib/audit";
 import { approverSchema, rulebookSchema } from "@/lib/rulebook/schema";
 import { dryRunRulebook } from "@/lib/rulebook/dry-run";
 import { addAllowlistEntry, discardDraft, removeAllowlistEntry, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
+import { action } from "@/lib/action";
 
 // Client users work on their own rulebook only; staff on any client's.
 async function actorFor(tenantId: string, permission: "rulebook.view" | "rulebook.edit" | "rulebook.sign"): Promise<SessionUser> {
@@ -35,7 +36,7 @@ function explain(err: unknown): never {
   throw err;
 }
 
-export async function saveRulebookDraftAction(tenantId: string, input: { body: unknown; reason: string; template?: string | null }) {
+export const saveRulebookDraftAction = action(async function saveRulebookDraftAction(tenantId: string, input: { body: unknown; reason: string; template?: string | null }) {
   const user = await actorFor(tenantId, "rulebook.edit");
   try {
     const saved = await saveDraft(tenantId, { body: input.body, reason: String(input.reason ?? "").slice(0, 1000), template: input.template ?? null }, author(user));
@@ -44,45 +45,45 @@ export async function saveRulebookDraftAction(tenantId: string, input: { body: u
   } catch (err) {
     explain(err);
   }
-}
+});
 
-export async function discardRulebookDraftAction(tenantId: string) {
+export const discardRulebookDraftAction = action(async function discardRulebookDraftAction(tenantId: string) {
   const user = await actorFor(tenantId, "rulebook.edit");
   await discardDraft(tenantId, author(user));
   done(tenantId);
-}
+});
 
-export async function submitRulebookAction(tenantId: string) {
+export const submitRulebookAction = action(async function submitRulebookAction(tenantId: string) {
   const user = await actorFor(tenantId, "rulebook.edit");
   const result = await submitForSignature(tenantId, author(user));
   done(tenantId);
   return result;
-}
+});
 
-export async function signRulebookAction(tenantId: string, input: { note: string; acknowledged: boolean }) {
+export const signRulebookAction = action(async function signRulebookAction(tenantId: string, input: { note: string; acknowledged: boolean }) {
   const user = await actorFor(tenantId, "rulebook.sign");
   if (!input.acknowledged) throw new Error("Confirm you've read the rulebook and authorise HELIOS to act under it");
   const activated = await signRulebook(tenantId, { ...author(user), isClient: user.isClient }, String(input.note ?? "").slice(0, 1000));
   done(tenantId);
   return { version: activated.version };
-}
+});
 
-export async function dryRunRulebookAction(tenantId: string, body: unknown) {
+export const dryRunRulebookAction = action(async function dryRunRulebookAction(tenantId: string, body: unknown) {
   await actorFor(tenantId, "rulebook.view");
   try {
     return await dryRunRulebook(tenantId, rulebookSchema.parse(body));
   } catch (err) {
     explain(err);
   }
-}
+});
 
 // Policy as code: the same schema, written as YAML.
-export async function exportRulebookYamlAction(tenantId: string, body: unknown) {
+export const exportRulebookYamlAction = action(async function exportRulebookYamlAction(tenantId: string, body: unknown) {
   await actorFor(tenantId, "rulebook.view");
   return dump(rulebookSchema.parse(body), { lineWidth: 120, noRefs: true, sortKeys: false });
-}
+});
 
-export async function importRulebookYamlAction(tenantId: string, input: { yaml: string; reason: string }) {
+export const importRulebookYamlAction = action(async function importRulebookYamlAction(tenantId: string, input: { yaml: string; reason: string }) {
   const user = await actorFor(tenantId, "rulebook.edit");
   if (input.yaml.length > 200_000) throw new Error("That file is too large for a rulebook");
   let parsed: unknown;
@@ -99,7 +100,7 @@ export async function importRulebookYamlAction(tenantId: string, input: { yaml: 
   } catch (err) {
     explain(err);
   }
-}
+});
 
 const allowlistInput = z.object({
   kind: z.enum(["ip", "host", "user", "domain", "hash", "process", "sender"]),
@@ -109,23 +110,23 @@ const allowlistInput = z.object({
   expiresAt: z.string().trim().max(40).optional().nullable(),
 });
 
-export async function addAllowlistEntryAction(tenantId: string, input: z.input<typeof allowlistInput>) {
+export const addAllowlistEntryAction = action(async function addAllowlistEntryAction(tenantId: string, input: z.input<typeof allowlistInput>) {
   const user = await actorFor(tenantId, "rulebook.edit");
   const data = allowlistInput.parse(input);
   const expiresAt = data.expiresAt ? new Date(data.expiresAt) : null;
   if (expiresAt && (Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date())) throw new Error("Expiry must be a future date");
   await addAllowlistEntry(tenantId, { kind: data.kind, value: data.value, reason: data.reason, owner: data.owner, expiresAt }, author(user));
   done(tenantId);
-}
+});
 
-export async function removeAllowlistEntryAction(tenantId: string, entryId: string) {
+export const removeAllowlistEntryAction = action(async function removeAllowlistEntryAction(tenantId: string, entryId: string) {
   const user = await actorFor(tenantId, "rulebook.edit");
   await removeAllowlistEntry(tenantId, entryId, author(user));
   done(tenantId);
-}
+});
 
 // A live ping to one approver, so a dead channel shows up before it matters.
-export async function testApproverAction(tenantId: string, input: unknown) {
+export const testApproverAction = action(async function testApproverAction(tenantId: string, input: unknown) {
   const user = await actorFor(tenantId, "rulebook.edit");
   const approver = approverSchema.parse(input);
   const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } });
@@ -146,4 +147,4 @@ export async function testApproverAction(tenantId: string, input: unknown) {
     return { ok: r.ok, message: r.ok ? `Sent to ${approver.name} by ${approver.channel === "email" ? "email" : approver.channel === "sms" ? "SMS" : "WhatsApp"}` : r.error ?? "Not sent" };
   }
   return { ok: false, message: `HELIOS doesn't place calls itself: the SOC is asked to ring ${approver.name} on ${approver.contact} when an approval is due. Check the number by hand.` };
-}
+});

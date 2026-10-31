@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { CopyField } from "@/components/integrations/onboard-wizard";
+import { unwrap } from "@/lib/action-result";
 
 const STAFF_ROLES: UserRole[] = ["SOC_MANAGER", "TRIAGE_ANALYST", "ANALYST", "INCIDENT_RESPONDER", "THREAT_HUNTER", "DETECTION_ENGINEER", "AUDITOR"];
 
@@ -43,18 +44,18 @@ export function IntegrationControls(props: Props) {
   const [secret, setSecret] = React.useState("");
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
 
-  const rotate = useMutation({ mutationFn: () => rotateTokenAction(props.id), onSuccess: (r) => { setToken(r); router.refresh(); }, onError });
+  const rotate = useMutation({ mutationFn: () => unwrap(rotateTokenAction(props.id)), onSuccess: (r) => { setToken(r); router.refresh(); }, onError });
   const test = useMutation({
-    mutationFn: () => testConnectorAction(props.id),
+    mutationFn: () => unwrap(testConnectorAction(props.id)),
     onSuccess: (r) => {
       toast.success(`Connector answered: ${r.message}`);
       router.refresh();
     },
     onError,
   });
-  const toggle = useMutation({ mutationFn: (on: boolean) => setIntegrationEnabledAction(props.id, on), onSuccess: () => router.refresh(), onError });
+  const toggle = useMutation({ mutationFn: (on: boolean) => unwrap(setIntegrationEnabledAction(props.id, on)), onSuccess: () => router.refresh(), onError });
   const save = useMutation({
-    mutationFn: () => updateIntegrationAction(props.id, { allowedRoles: roles, assignedUserIds: users, responseWebhookUrl: responseUrl, webhookSecret: secret || undefined }),
+    mutationFn: () => unwrap(updateIntegrationAction(props.id, { allowedRoles: roles, assignedUserIds: users, responseWebhookUrl: responseUrl, webhookSecret: secret || undefined })),
     onSuccess: () => {
       toast.success("Access updated");
       setEditing(false);

@@ -17,6 +17,7 @@ import { invalidateCatalog } from "@/lib/integrations/tools";
 import { CATEGORIES, UNIT_LABEL, type PriceUnit } from "@/lib/integrations/catalog";
 import { CAPABILITY_KEYS } from "@/lib/assets/capabilities";
 import { PLAN_FEATURES, SEVERITIES } from "@/lib/plans";
+import { action } from "@/lib/action";
 
 function done(path = "/pricing") {
   revalidatePath(path);
@@ -25,7 +26,7 @@ function done(path = "/pricing") {
 // Totals are recomputed on the server from the config and the database, so
 // a tampered client can't save a quote with made-up numbers — and a quote
 // with prices nobody has set can't be saved at all.
-export async function saveQuoteAction(config: QuoteConfig, options: { quoteId?: string; tenantId?: string | null; notes?: string } = {}) {
+export const saveQuoteAction = action(async function saveQuoteAction(config: QuoteConfig, options: { quoteId?: string; tenantId?: string | null; notes?: string } = {}) {
   const user = await requirePermission("pricing.view");
   const cfg = quoteConfigSchema.parse(config);
   if (!cfg.clientName.trim()) throw new Error("Give the quote a client name");
@@ -45,31 +46,31 @@ export async function saveQuoteAction(config: QuoteConfig, options: { quoteId?: 
   await logAction({ actorId: user.id, action: options.quoteId ? "quote.updated" : "quote.created", detail: { quoteId: quote.id, reference: quote.reference, monthlyNet: totals.monthlyNet, year1Total: totals.year1Total } });
   done();
   return { id: quote.id, reference: quote.reference };
-}
+});
 
 // The stack advisor for a quote being built: the model picks among the
 // candidates the rules priced; prices are recalculated in the browser.
-export async function adviseStackAction(config: QuoteConfig, goal: AdvisorGoal): Promise<AiAdvice> {
+export const adviseStackAction = action(async function adviseStackAction(config: QuoteConfig, goal: AdvisorGoal): Promise<AiAdvice> {
   const user = await requirePermission("pricing.view");
   const cfg = quoteConfigSchema.parse(config);
   const g = z.enum(["balanced", "budget", "protection"]).parse(goal);
   if (!rateLimit(`advice:user:${user.id}`, 20, 10 * 60 * 1000).ok) throw new Error("The advisor has been asked many times in a row; try again in a few minutes");
   return runAdvisorAgent(cfg, await loadPricingContext(), g, { audience: "staff", trigger: "manual", requestedById: user.id });
-}
+});
 
-export async function setQuoteStatusAction(quoteId: string, status: string) {
+export const setQuoteStatusAction = action(async function setQuoteStatusAction(quoteId: string, status: string) {
   const user = await requirePermission("pricing.view");
   const value = z.enum(["DRAFT", "SENT", "ACCEPTED", "LOST"]).parse(status);
   await db.quote.update({ where: { id: quoteId }, data: { status: value } });
   await logAction({ actorId: user.id, action: "quote.status_changed", detail: { quoteId, status: value } });
   done();
-}
+});
 
 // --- price book
 
 const money = z.number().min(0).max(10_000_000).nullable();
 
-export async function savePriceAction(itemKey: string, price: number | null, cost: number | null) {
+export const savePriceAction = action(async function savePriceAction(itemKey: string, price: number | null, cost: number | null) {
   const user = await requirePermission("pricing.manage");
   const def = PRICE_ITEM_INDEX.get(itemKey);
   if (!def) throw new Error("Unknown price item");
@@ -84,7 +85,7 @@ export async function savePriceAction(itemKey: string, price: number | null, cos
   });
   await logAction({ actorId: user.id, action: "pricing.price_changed", detail: { itemKey, price: p, cost: c } });
   done();
-}
+});
 
 // --- service plans
 
@@ -107,7 +108,7 @@ const planSchema = z.object({
 });
 export type PlanInput = z.infer<typeof planSchema>;
 
-export async function savePlanAction(input: PlanInput, planId?: string) {
+export const savePlanAction = action(async function savePlanAction(input: PlanInput, planId?: string) {
   const user = await requirePermission("pricing.manage");
   const data = planSchema.parse(input);
   const clash = await db.servicePlan.findFirst({ where: { key: data.key, ...(planId ? { id: { not: planId } } : {}) } });
@@ -117,11 +118,11 @@ export async function savePlanAction(input: PlanInput, planId?: string) {
   done();
   revalidatePath("/tenants");
   return { id: saved.id };
-}
+});
 
 // Plans with clients are retired (inactive), not deleted, so the clients keep
 // their SLA.
-export async function deletePlanAction(planId: string) {
+export const deletePlanAction = action(async function deletePlanAction(planId: string) {
   const user = await requirePermission("pricing.manage");
   const plan = await db.servicePlan.findUniqueOrThrow({ where: { id: planId }, include: { _count: { select: { tenants: true } } } });
   if (plan._count.tenants > 0) {
@@ -133,11 +134,11 @@ export async function deletePlanAction(planId: string) {
   }
   done();
   return { retired: plan._count.tenants > 0 };
-}
+});
 
 // --- tool catalog
 
-export async function saveToolPriceAction(toolKey: string, customPrice: number | null, active: boolean) {
+export const saveToolPriceAction = action(async function saveToolPriceAction(toolKey: string, customPrice: number | null, active: boolean) {
   const user = await requirePermission("pricing.manage");
   const price = money.parse(customPrice);
   await db.catalogTool.update({ where: { key: toolKey }, data: { customPrice: price, active: z.boolean().parse(active) } });
@@ -145,7 +146,7 @@ export async function saveToolPriceAction(toolKey: string, customPrice: number |
   await logAction({ actorId: user.id, action: "catalog.tool_price_changed", detail: { toolKey, customPrice: price, active } });
   done();
   revalidatePath("/integrations");
-}
+});
 
 const ACTION_TYPES = ["ISOLATE_HOST", "RELEASE_HOST", "BLOCK_IP", "UNBLOCK_IP", "DISABLE_USER", "ENABLE_USER", "KILL_PROCESS", "QUARANTINE_FILE", "BLOCK_SENDER", "CREATE_TICKET", "NOTIFY_SLACK"] as const;
 const toolSchema = z.object({
@@ -166,7 +167,7 @@ const toolSchema = z.object({
 export type CustomToolInput = z.infer<typeof toolSchema>;
 
 // Tools not in the seeded catalog — a regional vendor, your own service.
-export async function addCatalogToolAction(input: CustomToolInput) {
+export const addCatalogToolAction = action(async function addCatalogToolAction(input: CustomToolInput) {
   const user = await requirePermission("pricing.manage");
   const data = toolSchema.parse(input);
   if (await db.catalogTool.findUnique({ where: { key: data.key } })) throw new Error(`A tool with key "${data.key}" already exists`);
@@ -175,27 +176,27 @@ export async function addCatalogToolAction(input: CustomToolInput) {
   await logAction({ actorId: user.id, action: "catalog.tool_added", detail: { toolKey: data.key, name: data.name, vendor: data.vendor } });
   done();
   revalidatePath("/integrations");
-}
+});
 
 // --- volume discounts, currencies, model prices
 
-export async function saveVolumeTierAction(minEndpoints: number, discountPct: number) {
+export const saveVolumeTierAction = action(async function saveVolumeTierAction(minEndpoints: number, discountPct: number) {
   const user = await requirePermission("pricing.manage");
   const min = z.number().int().min(1).max(10_000_000).parse(minEndpoints);
   const pct = z.number().min(0).max(90).parse(discountPct);
   await db.volumeDiscount.upsert({ where: { minEndpoints: min }, update: { discountPct: pct }, create: { minEndpoints: min, discountPct: pct } });
   await logAction({ actorId: user.id, action: "pricing.volume_tier_saved", detail: { minEndpoints: min, discountPct: pct } });
   done();
-}
+});
 
-export async function deleteVolumeTierAction(minEndpoints: number) {
+export const deleteVolumeTierAction = action(async function deleteVolumeTierAction(minEndpoints: number) {
   const user = await requirePermission("pricing.manage");
   await db.volumeDiscount.deleteMany({ where: { minEndpoints } });
   await logAction({ actorId: user.id, action: "pricing.volume_tier_deleted", detail: { minEndpoints } });
   done();
-}
+});
 
-export async function saveCurrencyAction(code: string, symbol: string, rate: number) {
+export const saveCurrencyAction = action(async function saveCurrencyAction(code: string, symbol: string, rate: number) {
   const user = await requirePermission("pricing.manage");
   const c = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, "Use the ISO 4217 code").parse(code);
   if (c === "USD") throw new Error("USD is the base currency; its rate is always 1");
@@ -209,17 +210,17 @@ export async function saveCurrencyAction(code: string, symbol: string, rate: num
   await db.currency.upsert({ where: { code: c }, update: { symbol: s, rate: r, updatedById: user.id }, create: { code: c, symbol: s, rate: r, updatedById: user.id } });
   await logAction({ actorId: user.id, action: "pricing.currency_saved", detail: { code: c, rate: r } });
   done();
-}
+});
 
-export async function deleteCurrencyAction(code: string) {
+export const deleteCurrencyAction = action(async function deleteCurrencyAction(code: string) {
   const user = await requirePermission("pricing.manage");
   if (code === "USD") throw new Error("USD is the base currency");
   await db.currency.deleteMany({ where: { code } });
   await logAction({ actorId: user.id, action: "pricing.currency_deleted", detail: { code } });
   done();
-}
+});
 
-export async function saveModelPriceAction(input: { model: string; provider: string; inputPer: number; outputPer: number; source: string | null }) {
+export const saveModelPriceAction = action(async function saveModelPriceAction(input: { model: string; provider: string; inputPer: number; outputPer: number; source: string | null }) {
   const user = await requirePermission("pricing.manage");
   const data = z
     .object({
@@ -234,11 +235,11 @@ export async function saveModelPriceAction(input: { model: string; provider: str
   await logAction({ actorId: user.id, action: "pricing.model_price_saved", detail: data });
   done();
   revalidatePath("/ai");
-}
+});
 
-export async function deleteModelPriceAction(model: string) {
+export const deleteModelPriceAction = action(async function deleteModelPriceAction(model: string) {
   const user = await requirePermission("pricing.manage");
   await db.aiModelPrice.deleteMany({ where: { model } });
   await logAction({ actorId: user.id, action: "pricing.model_price_deleted", detail: { model } });
   done();
-}
+});

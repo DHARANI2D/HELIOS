@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export function IngestPanel({ tenantId, tenantName }: { tenantId: string | null; tenantName: string | null }) {
   const router = useRouter();
@@ -18,7 +19,7 @@ export function IngestPanel({ tenantId, tenantName }: { tenantId: string | null;
   const [text, setText] = React.useState("");
 
   const ingest = useMutation({
-    mutationFn: () => ingestLogsAction(source, text, tenantId ?? undefined),
+    mutationFn: () => unwrap(ingestLogsAction(source, text, tenantId ?? undefined)),
     onSuccess: (s) => {
       toast.success(`Ingested ${s.eventsIngested} events → ${s.newDetections} new detections, ${s.casesCreated} new / ${s.casesUpdated} updated cases`);
       setText("");

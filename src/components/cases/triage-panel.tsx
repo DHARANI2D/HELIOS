@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { CASE_STATUSES, CASE_STATUS_LABEL } from "@/lib/cases/labels";
 import { SEVERITY_LABEL, SEVERITY_ORDER } from "@/lib/severity";
+import { unwrap } from "@/lib/action-result";
 
 export interface TeamMember {
   id: string;
@@ -56,7 +57,7 @@ export function TriagePanel({ caseId, status, disposition, aiScore, severity, as
   const [disp, setDisp] = React.useState<CaseDisposition>("TRUE_POSITIVE");
   const [reason, setReason] = React.useState("");
   const statusMut = useMutation({
-    mutationFn: (s: CaseStatus) => setCaseStatusAction(caseId, s, undefined, CLOSING.includes(s) ? { disposition: s === "FALSE_POSITIVE" ? "FALSE_POSITIVE" : disp, reason } : undefined),
+    mutationFn: (s: CaseStatus) => unwrap(setCaseStatusAction(caseId, s, undefined, CLOSING.includes(s) ? { disposition: s === "FALSE_POSITIVE" ? "FALSE_POSITIVE" : disp, reason } : undefined)),
     onSuccess: () => {
       setClosing(null);
       setReason("");
@@ -69,10 +70,10 @@ export function TriagePanel({ caseId, status, disposition, aiScore, severity, as
     setDisp(s === "FALSE_POSITIVE" ? "FALSE_POSITIVE" : "TRUE_POSITIVE");
     setClosing(s);
   };
-  const severityMut = useMutation({ mutationFn: (s: CaseSeverity) => setCaseSeverityAction(caseId, s), onSuccess: done("Severity updated"), onError });
-  const assignMut = useMutation({ mutationFn: (id: string | null) => assignCaseAction(caseId, id), onSuccess: done("Assignment updated"), onError });
-  const ackMut = useMutation({ mutationFn: () => acknowledgeCaseAction(caseId), onSuccess: done("Acknowledged — SLA clock stopped"), onError });
-  const watchMut = useMutation({ mutationFn: () => setWatchingAction(caseId, !watching), onSuccess: done(watching ? "Stopped watching" : "Watching — you'll be notified of updates"), onError });
+  const severityMut = useMutation({ mutationFn: (s: CaseSeverity) => unwrap(setCaseSeverityAction(caseId, s)), onSuccess: done("Severity updated"), onError });
+  const assignMut = useMutation({ mutationFn: (id: string | null) => unwrap(assignCaseAction(caseId, id)), onSuccess: done("Assignment updated"), onError });
+  const ackMut = useMutation({ mutationFn: () => unwrap(acknowledgeCaseAction(caseId)), onSuccess: done("Acknowledged — SLA clock stopped"), onError });
+  const watchMut = useMutation({ mutationFn: () => unwrap(setWatchingAction(caseId, !watching)), onSuccess: done(watching ? "Stopped watching" : "Watching — you'll be notified of updates"), onError });
 
   const assignable = canAssignOthers ? team : team.filter((m) => m.id === viewerId);
 

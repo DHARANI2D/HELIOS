@@ -7,12 +7,13 @@ import { toast } from "sonner";
 
 import { deleteRuleAction, removeTuningAction, setRuleStatusAction } from "@/app/(app)/detections/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 export function RuleControls({ id, status, informational }: { id: string; status: "TESTING" | "ACTIVE" | "DISABLED"; informational: boolean }) {
   const router = useRouter();
   const onError = (e: Error) => toast.error(e.message);
-  const set = useMutation({ mutationFn: (s: string) => setRuleStatusAction(id, s), onSuccess: (_r, s) => { toast.success(s === "ACTIVE" ? "Live: matches now open cases" : s === "TESTING" ? "Back in testing" : "Disabled"); router.refresh(); }, onError });
-  const del = useMutation({ mutationFn: () => deleteRuleAction(id), onSuccess: () => { toast.success("Rule deleted"); router.refresh(); }, onError });
+  const set = useMutation({ mutationFn: (s: string) => unwrap(setRuleStatusAction(id, s)), onSuccess: (_r, s) => { toast.success(s === "ACTIVE" ? "Live: matches now open cases" : s === "TESTING" ? "Back in testing" : "Disabled"); router.refresh(); }, onError });
+  const del = useMutation({ mutationFn: () => unwrap(deleteRuleAction(id)), onSuccess: () => { toast.success("Rule deleted"); router.refresh(); }, onError });
   const busy = set.isPending || del.isPending;
   return (
     <div className="flex flex-wrap justify-end gap-1">
@@ -27,6 +28,6 @@ export function RuleControls({ id, status, informational }: { id: string; status
 
 export function RemoveTuning({ id }: { id: string }) {
   const router = useRouter();
-  const del = useMutation({ mutationFn: () => removeTuningAction(id), onSuccess: () => { toast.success("Tuning removed"); router.refresh(); }, onError: (e: Error) => toast.error(e.message) });
+  const del = useMutation({ mutationFn: () => unwrap(removeTuningAction(id)), onSuccess: () => { toast.success("Tuning removed"); router.refresh(); }, onError: (e: Error) => toast.error(e.message) });
   return <Button size="icon" variant="ghost" className="size-7" aria-label="Remove tuning" disabled={del.isPending} onClick={() => del.mutate()}>{del.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}</Button>;
 }

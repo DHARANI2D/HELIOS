@@ -10,6 +10,7 @@ import { aiFeedbackAction, aiStatusAction, dispatchAgentAction } from "@/app/(ap
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Input } from "@/components/ui/input";
+import { unwrap } from "@/lib/action-result";
 
 interface AgentOption {
   key: string;
@@ -30,13 +31,13 @@ export function AgentDispatch({ caseId, agents, initialStatus }: { caseId: strin
 
   const { data: status, dataUpdatedAt, refetch } = useQuery({
     queryKey: ["ai-status", caseId],
-    queryFn: () => aiStatusAction(caseId),
+    queryFn: () => unwrap(aiStatusAction(caseId)),
     enabled: polling,
     refetchInterval: (q) => (q.state.data === undefined || inFlight(q.state.data) ? 2500 : false),
   });
 
   const dispatch = useMutation({
-    mutationFn: () => dispatchAgentAction(caseId, agent),
+    mutationFn: () => unwrap(dispatchAgentAction(caseId, agent)),
     onSuccess: () => {
       toast.success("Agent dispatched — results will appear here");
       // Ignore the previous run's final status until the new one is fetched.
@@ -88,7 +89,7 @@ export function AiFeedback({ runId, current }: { runId: string; current: string 
   const [note, setNote] = React.useState("");
   const [open, setOpen] = React.useState(false);
   const send = useMutation({
-    mutationFn: (feedback: "agree" | "disagree") => aiFeedbackAction(runId, feedback, note),
+    mutationFn: (feedback: "agree" | "disagree") => unwrap(aiFeedbackAction(runId, feedback, note)),
     onSuccess: () => {
       toast.success("Thanks — feedback recorded against this run");
       setOpen(false);

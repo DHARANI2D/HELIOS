@@ -16,13 +16,14 @@ import {
   DialogFooter,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { unwrap } from "@/lib/action-result";
 
 export function GlobalPurgeButton() {
   const [open, setOpen] = React.useState(false);
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: () => globalPurgeAction(),
+    mutationFn: () => unwrap(globalPurgeAction()),
     onSuccess: (count) => {
       toast.error(`Global purge executed — ${count} agent(s) revoked`);
       queryClient.invalidateQueries({ queryKey: ["governance-agents"] });

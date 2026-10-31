@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { unwrap } from "@/lib/action-result";
 
 export interface LadderRow {
   actionType: string;
@@ -47,10 +48,10 @@ function useAct<T>(fn: (v: T) => Promise<unknown>, msg: string) {
 
 export function LadderPanel({ tenantId, started, rows, verdicts, canManage, canApprove, isClient }: Props) {
   const [note, setNote] = React.useState("");
-  const start = useAct(() => startShadowModeAction(tenantId), "Shadow mode started: the AI observes and is measured against your analysts");
-  const lower = useAct(({ a, level }: { a: string; level: number }) => lowerLevelAction(tenantId, a, level, note || "Lowered by the SOC"), "Level lowered");
-  const propose = useAct((a: string) => proposePromotionAction(tenantId, a), "Promotion proposed to the client");
-  const decide = useAct(({ a, approve }: { a: string; approve: boolean }) => decidePromotionAction(tenantId, a, approve, note), "Done");
+  const start = useAct(() => unwrap(startShadowModeAction(tenantId)), "Shadow mode started: the AI observes and is measured against your analysts");
+  const lower = useAct(({ a, level }: { a: string; level: number }) => unwrap(lowerLevelAction(tenantId, a, level, note || "Lowered by the SOC")), "Level lowered");
+  const propose = useAct((a: string) => unwrap(proposePromotionAction(tenantId, a)), "Promotion proposed to the client");
+  const decide = useAct(({ a, approve }: { a: string; approve: boolean }) => unwrap(decidePromotionAction(tenantId, a, approve, note)), "Done");
 
   return (
     <div className="flex flex-col gap-4">
@@ -154,7 +155,7 @@ export function LadderPanel({ tenantId, started, rows, verdicts, canManage, canA
 }
 
 export function ResumeAutomationButton({ tenantId }: { tenantId: string }) {
-  const resume = useAct(() => resumeAutomationAction(tenantId), "Automatic containment resumed");
+  const resume = useAct(() => unwrap(resumeAutomationAction(tenantId)), "Automatic containment resumed");
   return (
     <Button size="sm" variant="outline" className="w-fit" onClick={() => resume.mutate(undefined)} disabled={resume.isPending}>
       {resume.isPending ? <Loader2 className="animate-spin" /> : <Check />} Resume automatic containment

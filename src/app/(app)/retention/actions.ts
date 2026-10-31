@@ -5,18 +5,19 @@ import { z } from "zod";
 
 import { requirePermission } from "@/lib/session";
 import { placeHold, releaseHold, setRetention } from "@/lib/retention/service";
+import { action } from "@/lib/action";
 
 // Log retention and legal holds: admins and SOC managers.
 
 const done = () => revalidatePath("/retention");
 
-export async function setRetentionAction(tenantId: string, input: { hotDays: number; retentionDays: number }) {
+export const setRetentionAction = action(async function setRetentionAction(tenantId: string, input: { hotDays: number; retentionDays: number }) {
   const user = await requirePermission("settings.manage");
   await setRetention(z.string().min(1).parse(tenantId), { hotDays: z.number().parse(input.hotDays), retentionDays: z.number().parse(input.retentionDays) }, user.id);
   done();
-}
+});
 
-export async function placeHoldAction(input: { tenantId: string; caseId?: string; reason: string; from: string; to?: string }) {
+export const placeHoldAction = action(async function placeHoldAction(input: { tenantId: string; caseId?: string; reason: string; from: string; to?: string }) {
   const user = await requirePermission("settings.manage");
   const date = z.iso.date();
   await placeHold(
@@ -30,10 +31,10 @@ export async function placeHoldAction(input: { tenantId: string; caseId?: string
     user.id,
   );
   done();
-}
+});
 
-export async function releaseHoldAction(id: string, reason: string) {
+export const releaseHoldAction = action(async function releaseHoldAction(id: string, reason: string) {
   const user = await requirePermission("settings.manage");
   await releaseHold(id, z.string().max(2000).parse(reason), user.id);
   done();
-}
+});

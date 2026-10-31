@@ -8,10 +8,11 @@ import { detonateUrlAction } from "@/app/(app)/forensics/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DetonationView } from "@/components/forensics/detonation-view";
+import { unwrap } from "@/lib/action-result";
 
 export function UrlDetonator() {
   const [url, setUrl] = React.useState("");
-  const detonate = useMutation({ mutationFn: () => detonateUrlAction(url) });
+  const detonate = useMutation({ mutationFn: () => unwrap(detonateUrlAction(url)) });
 
   return (
     <div className="flex flex-col gap-3">

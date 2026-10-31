@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { InvestigationDialog } from "@/components/governance/investigation-dialog";
 import { cn } from "@/lib/utils";
+import { unwrap } from "@/lib/action-result";
 
 const STATUS_STYLE: Record<string, { icon: typeof ShieldCheck; badge: "secondary" | "destructive" | "outline" }> = {
   ACTIVE: { icon: ShieldCheck, badge: "secondary" },
@@ -24,14 +25,14 @@ export function AgentGrid({ origin }: { origin: string }) {
   const [investigatingId, setInvestigatingId] = React.useState<string | null>(null);
   const [issued, setIssued] = React.useState<{ name: string; token: string } | null>(null);
   const rotate = useMutation({
-    mutationFn: (id: string) => rotateAgentTokenAction(id),
+    mutationFn: (id: string) => unwrap(rotateAgentTokenAction(id)),
     onSuccess: (r) => setIssued({ name: r.name, token: r.token }),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
 
   const { data: agents, isLoading } = useQuery({
     queryKey: ["governance-agents"],
-    queryFn: () => listAgentsAction(),
+    queryFn: () => unwrap(listAgentsAction()),
     refetchInterval: 5000,
   });
 

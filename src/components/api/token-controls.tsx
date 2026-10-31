@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 export function CreateTokenForm({ canWriteAnything }: { canWriteAnything: boolean }) {
   const router = useRouter();
@@ -21,7 +22,7 @@ export function CreateTokenForm({ canWriteAnything }: { canWriteAnything: boolea
   const [issued, setIssued] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const create = useMutation({
-    mutationFn: () => createApiTokenAction({ name, canWrite, expiresInDays: expires === "never" ? null : (Number(expires) as 30 | 90 | 365) }),
+    mutationFn: () => unwrap(createApiTokenAction({ name, canWrite, expiresInDays: expires === "never" ? null : (Number(expires) as 30 | 90 | 365) })),
     onSuccess: ({ token }) => {
       setIssued(token);
       setName("");
@@ -89,7 +90,7 @@ export function CreateTokenForm({ canWriteAnything }: { canWriteAnything: boolea
 export function RevokeTokenButton({ tokenId, name }: { tokenId: string; name: string }) {
   const router = useRouter();
   const revoke = useMutation({
-    mutationFn: () => revokeApiTokenAction(tokenId),
+    mutationFn: () => unwrap(revokeApiTokenAction(tokenId)),
     onSuccess: () => {
       toast.success(`Revoked "${name}"`);
       router.refresh();

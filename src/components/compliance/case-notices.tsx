@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export interface NoticeView {
   id: string;
@@ -179,7 +180,7 @@ function NoticeEditor({ n, categories, onClose }: { n: NoticeView; categories: C
   const [content, setContent] = React.useState<Record<string, unknown>>(n.content);
   const [cats, setCats] = React.useState<string[]>(n.categories);
   const save = useMutation({
-    mutationFn: () => saveNoticeAction(n.id, { content, categories: n.kind === "CERT_IN" ? cats : undefined }),
+    mutationFn: () => unwrap(saveNoticeAction(n.id, { content, categories: n.kind === "CERT_IN" ? cats : undefined })),
     onSuccess: () => {
       toast.success(n.status === "DRAFT" ? "Saved" : "Saved; it goes back to the client for approval");
       onClose();
@@ -295,19 +296,19 @@ function ActionDialog({ d, props, onClose }: { d: Dialogs; props: CaseNoticesPro
     mutationFn: async () => {
       switch (d.kind) {
         case "approve":
-          return approveNoticeAction(d.n.id, props.perms.isClient ? undefined : { name: a, via: b });
+          return unwrap(approveNoticeAction(d.n.id, props.perms.isClient ? undefined : { name: a, via: b }));
         case "submit":
-          return submitNoticeAction(d.n.id, { via, reference: a || undefined, recipientsCount: b ? Number(b) : null, note: c || undefined });
+          return unwrap(submitNoticeAction(d.n.id, { via, reference: a || undefined, recipientsCount: b ? Number(b) : null, note: c || undefined }));
         case "notRequired":
-          return notRequiredAction(d.n.id, a);
+          return unwrap(notRequiredAction(d.n.id, a));
         case "clock":
-          return setClockStartAction(d.n.id, fromLocal(a), b);
+          return unwrap(setClockStartAction(d.n.id, fromLocal(a), b));
         case "extend":
-          return extendDeadlineAction(d.n.id, fromLocal(a), b);
+          return unwrap(extendDeadlineAction(d.n.id, fromLocal(a), b));
         case "openCertIn":
-          return openCertInAction(props.caseId, { categories: cats, clockStartAt: a ? fromLocal(a) : null, reason: b || undefined });
+          return unwrap(openCertInAction(props.caseId, { categories: cats, clockStartAt: a ? fromLocal(a) : null, reason: b || undefined }));
         case "openDpdp":
-          return openDpdpAction(props.caseId, { awareAt: fromLocal(a || localInput(new Date().toISOString())), principalsAffected: b === "" ? null : Number(b), dataCategories: c.split(",").map((x) => x.trim()).filter(Boolean) });
+          return unwrap(openDpdpAction(props.caseId, { awareAt: fromLocal(a || localInput(new Date().toISOString())), principalsAffected: b === "" ? null : Number(b), dataCategories: c.split(",").map((x) => x.trim()).filter(Boolean) }));
       }
     },
     onSuccess: finish(
@@ -414,7 +415,7 @@ export function CaseNotices(props: CaseNoticesProps) {
   const now = useTicking(props.now);
   const [dialog, setDialog] = React.useState<Dialogs | null>(null);
   const simple = useMutation({
-    mutationFn: async (x: { op: "request" | "reopen" | "update"; id: string }) => (x.op === "request" ? requestApprovalAction(x.id) : x.op === "reopen" ? reopenNoticeAction(x.id) : addUpdateAction(props.caseId)),
+    mutationFn: async (x: { op: "request" | "reopen" | "update"; id: string }) => (x.op === "request" ? unwrap(requestApprovalAction(x.id)) : x.op === "reopen" ? unwrap(reopenNoticeAction(x.id)) : unwrap(addUpdateAction(props.caseId))),
     onSuccess: (_r, x) => {
       toast.success(x.op === "request" ? "Sent to the client for approval" : x.op === "reopen" ? "Reopened" : "Update drafted");
       router.refresh();

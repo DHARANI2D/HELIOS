@@ -15,6 +15,7 @@ import { providerFromRow } from "@/lib/ai/resolve";
 import { anthropicProvider } from "@/lib/ai/anthropic";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
 import { startEvaluation } from "@/lib/ai/evals/service";
+import { action } from "@/lib/action";
 
 function revalidate() {
   revalidatePath("/ai");
@@ -28,7 +29,7 @@ const settingsSchema = z.object({
   maxAutoActionsPerHour: z.number().int().min(0).max(100),
 });
 
-export async function saveAiSettingsAction(input: z.input<typeof settingsSchema>) {
+export const saveAiSettingsAction = action(async function saveAiSettingsAction(input: z.input<typeof settingsSchema>) {
   const user = await requirePermission("ai.configure");
   const s = settingsSchema.parse(input);
   await setSetting("ai.killSwitch", s.killSwitch, user.id);
@@ -37,15 +38,15 @@ export async function saveAiSettingsAction(input: z.input<typeof settingsSchema>
   await setSetting("ai.maxAutoActionsPerHour", s.maxAutoActionsPerHour, user.id);
   await logAction({ actorId: user.id, action: "ai.settings_changed", detail: s });
   revalidate();
-}
+});
 
 // The kill switch has its own action so it's one click from anywhere.
-export async function setKillSwitchAction(on: boolean) {
+export const setKillSwitchAction = action(async function setKillSwitchAction(on: boolean) {
   const user = await requirePermission("ai.configure");
   await setSetting("ai.killSwitch", on, user.id);
   await logAction({ actorId: user.id, action: on ? "ai.kill_switch_on" : "ai.kill_switch_off" });
   revalidate();
-}
+});
 
 const providerSchema = z.object({
   id: z.string().optional(),
@@ -58,7 +59,7 @@ const providerSchema = z.object({
   isDefault: z.boolean(),
 });
 
-export async function saveProviderAction(input: z.input<typeof providerSchema>) {
+export const saveProviderAction = action(async function saveProviderAction(input: z.input<typeof providerSchema>) {
   const user = await requirePermission("ai.configure");
   const p = providerSchema.parse(input);
   if (p.kind === "openai_compatible" && !p.baseUrl) throw new Error("Local / OpenAI-compatible providers need a base URL");
@@ -81,33 +82,33 @@ export async function saveProviderAction(input: z.input<typeof providerSchema>) 
   await logAction({ actorId: user.id, action: p.id ? "ai.provider_updated" : "ai.provider_added", detail: { providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, isLocal: saved.isLocal, keyChanged: !!p.apiKey } });
   revalidate();
   return { id: saved.id };
-}
+});
 
-export async function setProviderEnabledAction(id: string, enabled: boolean) {
+export const setProviderEnabledAction = action(async function setProviderEnabledAction(id: string, enabled: boolean) {
   const user = await requirePermission("ai.configure");
   await db.aiProvider.update({ where: { id }, data: { enabled, ...(enabled ? {} : { isDefault: false }) } });
   await logAction({ actorId: user.id, action: enabled ? "ai.provider_enabled" : "ai.provider_disabled", detail: { providerId: id } });
   revalidate();
-}
+});
 
-export async function setDefaultProviderAction(id: string | null) {
+export const setDefaultProviderAction = action(async function setDefaultProviderAction(id: string | null) {
   const user = await requirePermission("ai.configure");
   await db.aiProvider.updateMany({ where: { tenantId: null }, data: { isDefault: false } });
   // Only a platform provider can be the default for everyone.
   if (id) await db.aiProvider.update({ where: { id, tenantId: null }, data: { isDefault: true, enabled: true } });
   await logAction({ actorId: user.id, action: "ai.default_provider_set", detail: { providerId: id } });
   revalidate();
-}
+});
 
-export async function deleteProviderAction(id: string) {
+export const deleteProviderAction = action(async function deleteProviderAction(id: string) {
   const user = await requirePermission("ai.configure");
   await db.aiProvider.delete({ where: { id } });
   await logAction({ actorId: user.id, action: "ai.provider_deleted", detail: { providerId: id } });
   revalidate();
-}
+});
 
 // "env" tests the ANTHROPIC_API_KEY from the environment.
-export async function testProviderAction(id: string) {
+export const testProviderAction = action(async function testProviderAction(id: string) {
   const user = await requirePermission("ai.configure");
   if (id === "env") {
     const result = await anthropicProvider({ name: "Claude (environment key)", model: process.env.ANTHROPIC_MODEL ?? PROVIDER_PRESETS[0].defaultModel }).check();
@@ -120,7 +121,7 @@ export async function testProviderAction(id: string) {
   await logAction({ actorId: user.id, action: "ai.provider_tested", detail: { providerId: id, ok: result.ok } });
   revalidate();
   return result;
-}
+});
 
 const ACTIONS = [...PROPOSABLE_ACTIONS] as [PlaybookActionType, ...PlaybookActionType[]];
 
@@ -136,7 +137,7 @@ const profileSchema = z.object({
   instructions: z.string().max(4000).nullable(),
 });
 
-export async function saveAgentProfileAction(input: z.input<typeof profileSchema>) {
+export const saveAgentProfileAction = action(async function saveAgentProfileAction(input: z.input<typeof profileSchema>) {
   const user = await requirePermission("ai.configure");
   const p = profileSchema.parse(input);
   if (p.providerId) await db.aiProvider.findFirstOrThrow({ where: { id: p.providerId, tenantId: null } });
@@ -155,7 +156,7 @@ export async function saveAgentProfileAction(input: z.input<typeof profileSchema
   await db.aiAgentProfile.upsert({ where: { key: p.key }, update: data, create: { key: p.key, ...data } });
   await logAction({ actorId: user.id, action: "ai.profile_updated", detail: { ...p, instructions: p.instructions ? `${p.instructions.length} chars` : null } });
   revalidate();
-}
+});
 
 const evalSchema = z.object({
   target: z.union([z.object({ kind: z.literal("builtin") }), z.object({ kind: z.literal("env") }), z.object({ kind: z.literal("provider"), id: z.string().min(1) })]),
@@ -165,7 +166,7 @@ const evalSchema = z.object({
 // Scores a model on the golden set. The built-in engine takes a moment and
 // returns its scorecard; a model takes a call per case, so it finishes after
 // the response and the page shows it running until then.
-export async function runEvaluationAction(input: z.input<typeof evalSchema>) {
+export const runEvaluationAction = action(async function runEvaluationAction(input: z.input<typeof evalSchema>) {
   const user = await requirePermission("ai.configure");
   const { target, agentKey } = evalSchema.parse(input);
   // Client providers too: staff who configure AI manage every client's.
@@ -179,4 +180,4 @@ export async function runEvaluationAction(input: z.input<typeof evalSchema>) {
   after(() => done.catch((err) => console.error("evaluation failed", model, err)));
   revalidate();
   return { model, finished: false, passed: null, score: null };
-}
+});

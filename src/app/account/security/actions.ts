@@ -10,6 +10,7 @@ import { seal, unseal } from "@/lib/secrets";
 import { consumeRecoveryCode, newRecoveryCodes, newSecret, otpauthUri, verifyTotp } from "@/lib/mfa";
 import { getSetting } from "@/lib/settings";
 import { isClientRole } from "@/lib/rbac";
+import { action } from "@/lib/action";
 
 // Setting up and managing two-step sign-in for the signed-in account. The
 // secret is stored sealed from the first step but only switched on once a
@@ -22,7 +23,7 @@ async function required(role: string) {
   return policy === "everyone" || (policy === "staff" && !isClientRole(role as never));
 }
 
-export async function startMfaSetupAction() {
+export const startMfaSetupAction = action(async function startMfaSetupAction() {
   const user = await requireUserForMfaSetup();
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { email: true, mfaEnabledAt: true } });
   if (me.mfaEnabledAt) throw new Error("Two-step sign-in is already on");
@@ -31,9 +32,9 @@ export async function startMfaSetupAction() {
   const company = (await getSetting("company.profile")).name || "HELIOS";
   const uri = otpauthUri(secret, me.email, company.replace(/:/g, ""));
   return { secret, uri, qr: await QRCode.toDataURL(uri, { margin: 1, width: 220 }) };
-}
+});
 
-export async function confirmMfaAction(input: string) {
+export const confirmMfaAction = action(async function confirmMfaAction(input: string) {
   const user = await requireUserForMfaSetup();
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { mfaSecretCipher: true, mfaEnabledAt: true } });
   if (!me.mfaSecretCipher || me.mfaEnabledAt) throw new Error("Start the setup again");
@@ -43,7 +44,7 @@ export async function confirmMfaAction(input: string) {
   await db.user.update({ where: { id: user.id }, data: { mfaEnabledAt: new Date(), mfaLastStep: step, mfaRecoveryHashes: hashes } });
   await logAction({ actorId: user.id, action: "auth.mfa_enabled" });
   return { recoveryCodes: codes };
-}
+});
 
 async function proveSecondStep(userId: string, input: string) {
   const me = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { mfaSecretCipher: true, mfaEnabledAt: true, mfaLastStep: true, mfaRecoveryHashes: true, role: true } });
@@ -60,19 +61,19 @@ async function proveSecondStep(userId: string, input: string) {
   return me;
 }
 
-export async function newRecoveryCodesAction(input: string) {
+export const newRecoveryCodesAction = action(async function newRecoveryCodesAction(input: string) {
   const user = await requireUserForMfaSetup();
   await proveSecondStep(user.id, input);
   const { codes, hashes } = newRecoveryCodes();
   await db.user.update({ where: { id: user.id }, data: { mfaRecoveryHashes: hashes } });
   await logAction({ actorId: user.id, action: "auth.recovery_codes_renewed" });
   return { recoveryCodes: codes };
-}
+});
 
-export async function disableMfaAction(input: string) {
+export const disableMfaAction = action(async function disableMfaAction(input: string) {
   const user = await requireUserForMfaSetup();
   const me = await proveSecondStep(user.id, input);
   if (await required(me.role)) throw new Error("Your organization requires two-step sign-in for this account");
   await db.user.update({ where: { id: user.id }, data: { mfaEnabledAt: null, mfaSecretCipher: null, mfaRecoveryHashes: [], mfaLastStep: null } });
   await logAction({ actorId: user.id, action: "auth.mfa_disabled" });
-}
+});

@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { CopyField } from "@/components/integrations/onboard-wizard";
+import { unwrap } from "@/lib/action-result";
 
 export interface UserDraft {
   id?: string;
@@ -60,10 +61,10 @@ export function UserDialogButton({ initial, tenants }: { initial?: UserDraft; te
     mutationFn: async () => {
       const payload = { name: d.name, role: d.role, tenantId: client ? d.tenantId : null, domains: client ? [] : d.domains, title: d.title };
       if (d.id) {
-        await updateUserAction(d.id, payload);
+        await unwrap(updateUserAction(d.id, payload));
         return null;
       }
-      return inviteUserAction({ ...payload, email: d.email });
+      return unwrap(inviteUserAction({ ...payload, email: d.email }));
     },
     onSuccess: (r) => {
       toast.success(d.id ? "User updated" : "User invited");
@@ -161,17 +162,17 @@ export function UserRowControls({ userId, active, self, mfa }: { userId: string;
   const router = useRouter();
   const [creds, setCreds] = React.useState<{ email: string; password: string } | null>(null);
   const toggle = useMutation({
-    mutationFn: (on: boolean) => setUserActiveAction(userId, on),
+    mutationFn: (on: boolean) => unwrap(setUserActiveAction(userId, on)),
     onSuccess: () => router.refresh(),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
   const reset = useMutation({
-    mutationFn: () => resetPasswordAction(userId),
+    mutationFn: () => unwrap(resetPasswordAction(userId)),
     onSuccess: (r) => setCreds(r),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
   const resetMfa = useMutation({
-    mutationFn: () => resetMfaAction(userId),
+    mutationFn: () => unwrap(resetMfaAction(userId)),
     onSuccess: () => {
       toast.success("Two-step sign-in reset: they set it up again at their next sign-in");
       router.refresh();

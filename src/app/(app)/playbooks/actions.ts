@@ -9,6 +9,7 @@ import { requirePermission } from "@/lib/session";
 import { assertCaseAccess } from "@/lib/access";
 import { decideExecution, runRetroactive } from "@/lib/playbooks/engine";
 import { hasAnyCondition, triggerConditionSchema } from "@/lib/playbooks/trigger";
+import { action } from "@/lib/action";
 
 function revalidate(caseId?: string) {
   revalidatePath("/playbooks");
@@ -19,28 +20,28 @@ function revalidate(caseId?: string) {
 
 // Approving containment needs containment.approve (SOC managers, incident
 // responders, admins — and client admins for their own estate).
-export async function decideExecutionAction(executionId: string, decision: "approved" | "rejected", notes?: string) {
+export const decideExecutionAction = action(async function decideExecutionAction(executionId: string, decision: "approved" | "rejected", notes?: string) {
   const user = await requirePermission("containment.approve");
   const pending = await db.playbookExecution.findUniqueOrThrow({ where: { id: executionId }, select: { caseId: true } });
   await assertCaseAccess(user, pending.caseId);
   const execution = await decideExecution(executionId, decision, user.id, notes?.trim() || undefined);
   revalidate(execution.caseId);
   return { status: execution.status };
-}
+});
 
-export async function togglePlaybookAction(playbookId: string, enabled: boolean) {
+export const togglePlaybookAction = action(async function togglePlaybookAction(playbookId: string, enabled: boolean) {
   const user = await requirePermission("playbooks.manage");
   await db.playbook.update({ where: { id: playbookId }, data: { enabled } });
   await logAction({ actorId: user.id, action: enabled ? "playbook.enabled" : "playbook.disabled", detail: { playbookId } });
   revalidate();
-}
+});
 
-export async function runRetroactiveAction(playbookId: string) {
+export const runRetroactiveAction = action(async function runRetroactiveAction(playbookId: string) {
   const user = await requirePermission("playbooks.manage");
   const result = await runRetroactive(playbookId, user.id);
   revalidate();
   return result;
-}
+});
 
 const ACTION_TYPES = [
   "ISOLATE_HOST",
@@ -80,7 +81,7 @@ const playbookSchema = z.object({
 
 export type PlaybookInput = z.input<typeof playbookSchema>;
 
-export async function savePlaybookAction(input: PlaybookInput, playbookId?: string) {
+export const savePlaybookAction = action(async function savePlaybookAction(input: PlaybookInput, playbookId?: string) {
   const user = await requirePermission("playbooks.manage");
   const data = playbookSchema.parse(input);
   const actions = data.actions.map((a, i) => ({ ...a, order: i + 1 }));
@@ -120,9 +121,9 @@ export async function savePlaybookAction(input: PlaybookInput, playbookId?: stri
   });
   revalidate();
   return { id: saved.id };
-}
+});
 
-export async function deletePlaybookAction(playbookId: string) {
+export const deletePlaybookAction = action(async function deletePlaybookAction(playbookId: string) {
   const user = await requirePermission("playbooks.manage");
   const runs = await db.playbookExecution.count({ where: { playbookId } });
   if (runs > 0) {
@@ -136,4 +137,4 @@ export async function deletePlaybookAction(playbookId: string) {
   await logAction({ actorId: user.id, action: "playbook.deleted", detail: { playbookId } });
   revalidate();
   return { deleted: true };
-}
+});

@@ -28,11 +28,12 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { parseAmount } from "@/components/pricing/price-book";
+import { unwrap, type ActionResult } from "@/lib/action-result";
 
-function useAction<A extends unknown[]>(fn: (...args: A) => Promise<unknown>, ok: string) {
+function useAction<A extends unknown[]>(fn: (...args: A) => Promise<ActionResult<unknown>>, ok: string) {
   const router = useRouter();
   return useMutation({
-    mutationFn: (args: A) => fn(...args),
+    mutationFn: (args: A) => unwrap(fn(...args)),
     onSuccess: () => {
       toast.success(ok);
       router.refresh();

@@ -10,6 +10,7 @@ import { requireUser, type SessionUser } from "@/lib/session";
 import { RULED_ACTIONS } from "@/lib/rulebook/schema";
 import { MAX_LEVEL, PROMOTION, promotionCheck } from "@/lib/shadow/ladder";
 import { decidePromotion, ladderStats, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
+import { action } from "@/lib/action";
 
 // The autonomy ladder: staff who configure AI start shadow mode, lower a
 // level, or propose a promotion; the client admin approves promotions (staff
@@ -25,31 +26,31 @@ async function actor(tenantId: string, need: "manage" | "approve"): Promise<Sess
 }
 
 const who = (u: SessionUser) => ({ id: u.id, name: u.name ?? u.email ?? "user" });
-const action = z.enum(RULED_ACTIONS);
+const ruledAction = z.enum(RULED_ACTIONS);
 const done = () => revalidatePath("/rulebook");
 
-export async function startShadowModeAction(tenantId: string) {
+export const startShadowModeAction = action(async function startShadowModeAction(tenantId: string) {
   const user = await actor(tenantId, "manage");
   await startShadowMode(tenantId, who(user));
   done();
-}
+});
 
 // Lowering is always allowed; raising goes through a promotion.
-export async function lowerLevelAction(tenantId: string, actionType: string, level: number, reason: string) {
+export const lowerLevelAction = action(async function lowerLevelAction(tenantId: string, actionType: string, level: number, reason: string) {
   const user = await actor(tenantId, "manage");
-  const a = action.parse(actionType) as PlaybookActionType;
+  const a = ruledAction.parse(actionType) as PlaybookActionType;
   const row = await db.autonomyLevel.findUnique({ where: { tenantId_actionType: { tenantId, actionType: a } } });
   if (!row) throw new Error("Start shadow mode for this client first");
   if (level >= row.level) throw new Error("Raise a level through a promotion the client approves");
   if (reason.trim().length < 3) throw new Error("Say why");
   await setAutonomyLevel(tenantId, a, z.number().int().min(0).max(MAX_LEVEL).parse(level), who(user), reason.trim());
   done();
-}
+});
 
 // Staff propose a promotion when the shadow record supports it.
-export async function proposePromotionAction(tenantId: string, actionType: string) {
+export const proposePromotionAction = action(async function proposePromotionAction(tenantId: string, actionType: string) {
   await actor(tenantId, "manage");
-  const a = action.parse(actionType) as PlaybookActionType;
+  const a = ruledAction.parse(actionType) as PlaybookActionType;
   const row = await db.autonomyLevel.findUnique({ where: { tenantId_actionType: { tenantId, actionType: a } } });
   if (!row) throw new Error("Start shadow mode for this client first");
   const stats = (await ladderStats(tenantId, new Date(Date.now() - PROMOTION.windowDays * 86_400_000))).byAction.get(a);
@@ -60,18 +61,18 @@ export async function proposePromotionAction(tenantId: string, actionType: strin
   const { notify } = await import("@/lib/notifications");
   await notify(admins.map((x) => x.id), { kind: "ai", title: "A promotion of AI autonomy is waiting for you", body: "Review the shadow-mode record and approve or decline it on your rulebook page.", href: "/rulebook" });
   done();
-}
+});
 
-export async function decidePromotionAction(tenantId: string, actionType: string, approve: boolean, note: string) {
+export const decidePromotionAction = action(async function decidePromotionAction(tenantId: string, actionType: string, approve: boolean, note: string) {
   const user = await actor(tenantId, "approve");
-  await decidePromotion(tenantId, action.parse(actionType) as PlaybookActionType, approve, { ...who(user), isClient: user.isClient }, String(note ?? "").slice(0, 1000));
+  await decidePromotion(tenantId, ruledAction.parse(actionType) as PlaybookActionType, approve, { ...who(user), isClient: user.isClient }, String(note ?? "").slice(0, 1000));
   done();
-}
+});
 
 // Lift the circuit breaker once the connector problem is understood.
-export async function resumeAutomationAction(tenantId: string) {
+export const resumeAutomationAction = action(async function resumeAutomationAction(tenantId: string) {
   const user = await actor(tenantId, "manage");
   const { resumeAutomation } = await import("@/lib/connectors/safety");
   await resumeAutomation(tenantId, who(user));
   done();
-}
+});

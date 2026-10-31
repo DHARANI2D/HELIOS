@@ -10,6 +10,7 @@ import { savePriceAction } from "@/app/(app)/pricing/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { unwrap } from "@/lib/action-result";
 
 export interface PriceRow {
   key: string;
@@ -41,7 +42,7 @@ function Row({ row, canEdit, showCost }: { row: PriceRow; canEdit: boolean; show
   const save = useMutation({
     mutationFn: () => {
       if (p === "invalid" || c === "invalid") throw new Error("Enter a number, or leave it empty");
-      return savePriceAction(row.key, p, row.hasCost ? c : null);
+      return unwrap(savePriceAction(row.key, p, row.hasCost ? c : null));
     },
     onSuccess: () => {
       toast.success(`${row.label} saved`);

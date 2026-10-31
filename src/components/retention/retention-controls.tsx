@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { unwrap } from "@/lib/action-result";
 
 const onError = (e: Error) => toast.error(e.message);
 
@@ -18,7 +19,7 @@ export function RetentionForm({ tenantId, hotDays, retentionDays, minDays }: { t
   const router = useRouter();
   const [hot, setHot] = React.useState(hotDays);
   const [total, setTotal] = React.useState(retentionDays);
-  const save = useMutation({ mutationFn: () => setRetentionAction(tenantId, { hotDays: hot, retentionDays: total }), onSuccess: () => { toast.success("Retention saved"); router.refresh(); }, onError });
+  const save = useMutation({ mutationFn: () => unwrap(setRetentionAction(tenantId, { hotDays: hot, retentionDays: total })), onSuccess: () => { toast.success("Retention saved"); router.refresh(); }, onError });
   const changed = hot !== hotDays || total !== retentionDays;
   return (
     <div className="flex items-end gap-2">
@@ -42,7 +43,7 @@ export function HoldForm({ tenants }: { tenants: Array<{ id: string; name: strin
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
   const [caseId, setCaseId] = React.useState("");
-  const place = useMutation({ mutationFn: () => placeHoldAction({ tenantId, reason, from, to: to || undefined, caseId: caseId || undefined }), onSuccess: () => { toast.success("Legal hold placed"); setReason(""); setCaseId(""); router.refresh(); }, onError });
+  const place = useMutation({ mutationFn: () => unwrap(placeHoldAction({ tenantId, reason, from, to: to || undefined, caseId: caseId || undefined })), onSuccess: () => { toast.success("Legal hold placed"); setReason(""); setCaseId(""); router.refresh(); }, onError });
   if (!tenants.length) return null;
   return (
     <div className="grid gap-2 sm:grid-cols-[12rem_1fr_9rem_9rem_10rem_auto] sm:items-end">
@@ -62,7 +63,7 @@ export function ReleaseHold({ id }: { id: string }) {
     mutationFn: async () => {
       const reason = prompt("Why is the hold released?");
       if (!reason) throw new Error("A release needs a reason");
-      return releaseHoldAction(id, reason);
+      return unwrap(releaseHoldAction(id, reason));
     },
     onSuccess: () => { toast.success("Hold released"); router.refresh(); },
     onError,

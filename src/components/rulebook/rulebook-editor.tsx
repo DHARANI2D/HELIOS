@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export interface InventoryAsset {
   hostname: string;
@@ -143,7 +144,7 @@ export function RulebookEditor({ tenantId, initial, active, template, timeZone, 
   const patch = <K extends keyof Rulebook>(key: K, value: Partial<Rulebook[K]>) => setBook((b) => ({ ...b, [key]: { ...(b[key] as object), ...value } }));
 
   const save = useMutation({
-    mutationFn: () => saveRulebookDraftAction(tenantId, { body: book, reason, template: tpl }),
+    mutationFn: () => unwrap(saveRulebookDraftAction(tenantId, { body: book, reason, template: tpl })),
     onSuccess: (r) => {
       toast.success(`Draft v${r?.version} saved`);
       setReason("");
@@ -152,7 +153,7 @@ export function RulebookEditor({ tenantId, initial, active, template, timeZone, 
     onError: (err) => toast.error(err instanceof Error ? err.message : "Couldn't save"),
   });
   const ping = useMutation({
-    mutationFn: (a: Approver) => testApproverAction(tenantId, a),
+    mutationFn: (a: Approver) => unwrap(testApproverAction(tenantId, a)),
     onSuccess: (r) => (r.ok ? toast.success(r.message) : toast.warning(r.message)),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Test failed"),
   });

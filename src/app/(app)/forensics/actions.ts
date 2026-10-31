@@ -7,10 +7,11 @@ import { resolveTenantInput } from "@/lib/tenants";
 import { logAction } from "@/lib/audit";
 import { analyzeSubmission } from "@/lib/forensics/service";
 import { detonateUrl } from "@/lib/forensics/sandbox";
+import { action } from "@/lib/action";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
-export async function analyzeSubmissionAction(formData: FormData) {
+export const analyzeSubmissionAction = action(async function analyzeSubmissionAction(formData: FormData) {
   const user = await requirePermission("forensics.run");
   const detonate = formData.get("detonate") === "on";
   const file = formData.get("file");
@@ -35,12 +36,12 @@ export async function analyzeSubmissionAction(formData: FormData) {
   revalidatePath("/forensics");
   revalidatePath("/");
   return result;
-}
+});
 
 // Standalone toolkit check (desas's "URL sandbox" tool) — no case filed.
-export async function detonateUrlAction(url: string) {
+export const detonateUrlAction = action(async function detonateUrlAction(url: string) {
   const user = await requirePermission("forensics.run");
   const result = await detonateUrl(url.trim());
   await logAction({ actorId: user.id, action: "forensics.url_detonated", detail: { url: result.url, finalUrl: result.finalUrl, score: result.score, error: result.error } });
   return result;
-}
+});

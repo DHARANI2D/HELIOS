@@ -7,11 +7,12 @@ import { toast } from "sonner";
 
 import { setBlockedAction } from "@/app/(app)/threat-intel/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 export function BlockToggle({ indicatorId, blocked }: { indicatorId: string; blocked: boolean }) {
   const router = useRouter();
   const toggle = useMutation({
-    mutationFn: () => setBlockedAction(indicatorId, !blocked),
+    mutationFn: () => unwrap(setBlockedAction(indicatorId, !blocked)),
     onSuccess: () => {
       toast.success(blocked ? "Removed from blocklist" : "Added to blocklist");
       router.refresh();

@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { rerunInvestigationAction } from "@/app/(app)/investigations/actions";
 import { Button } from "@/components/ui/button";
 import type { InvestigationMetadata } from "@/lib/investigations/service";
+import { unwrap } from "@/lib/action-result";
 
 const STAGE_LABEL = { triage: "Triage", rca: "Root cause analysis", qa: "Adversarial QA", report: "Report" } as const;
 const STALL_MS = 15 * 60 * 1000;
@@ -32,7 +33,7 @@ export function PipelineProgress({ caseId, pipeline }: { caseId: string; pipelin
   const stalled = active && now - Date.parse(pipeline.startedAt) > STALL_MS;
 
   const rerun = useMutation({
-    mutationFn: () => rerunInvestigationAction(caseId),
+    mutationFn: () => unwrap(rerunInvestigationAction(caseId)),
     onSuccess: () => {
       toast.success("Investigation re-queued");
       router.refresh();

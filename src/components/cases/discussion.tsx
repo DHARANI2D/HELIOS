@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Markdown } from "@/components/shared/markdown";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { unwrap } from "@/lib/action-result";
 
 export interface CommentView {
   id: string;
@@ -54,11 +55,11 @@ export function Discussion({ caseId, comments, people, canComment, canPublish, i
 
   const post = useMutation({
     mutationFn: () =>
-      addCommentAction(caseId, {
+      unwrap(addCommentAction(caseId, {
         body,
         internal,
         mentions: mentions.filter((m) => body.includes(`@${m.name}`)).map((m) => m.id),
-      }),
+      })),
     onSuccess: () => {
       setBody("");
       setMentions([]);
@@ -68,7 +69,7 @@ export function Discussion({ caseId, comments, people, canComment, canPublish, i
     onError: (err) => toast.error(err instanceof Error ? err.message : "Could not post comment"),
   });
   const publish = useMutation({
-    mutationFn: (commentId: string) => publishReportAction(caseId, commentId),
+    mutationFn: (commentId: string) => unwrap(publishReportAction(caseId, commentId)),
     onSuccess: () => {
       toast.success("Report published to the client");
       router.refresh();

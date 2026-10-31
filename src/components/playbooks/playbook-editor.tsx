@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 const ACTION_TYPES: Array<{ value: PlaybookActionType; label: string; hint: string }> = [
   { value: "ISOLATE_HOST", label: "Isolate host", hint: "method=edr_network_containment" },
@@ -148,7 +149,7 @@ export function PlaybookEditor({ playbook }: { playbook?: EditablePlaybook }) {
         priority,
         actions: actions.map((a) => ({ name: a.name, actionType: a.actionType, parameters: textToParams(a.params) })),
       };
-      return savePlaybookAction(input, playbook?.id);
+      return unwrap(savePlaybookAction(input, playbook?.id));
     },
     onSuccess: () => {
       toast.success(playbook ? "Playbook updated" : "Playbook created");

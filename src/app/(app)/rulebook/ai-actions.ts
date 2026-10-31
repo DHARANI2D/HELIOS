@@ -11,6 +11,7 @@ import { requirePermission, requireUser, type SessionUser } from "@/lib/session"
 import { AGENT_KEYS, type AgentKey } from "@/lib/ai/catalog";
 import { providerFromRow } from "@/lib/ai/resolve";
 import { CLIENT_AGENTS } from "@/lib/ai/gateway";
+import { action } from "@/lib/action";
 
 // A client's AI setup: its own providers (bring your own key), which
 // provider each agent uses, and its monthly budget. Staff who configure AI
@@ -39,7 +40,7 @@ const providerSchema = z.object({
   region: z.string().trim().toLowerCase().max(40).optional().or(z.literal("")),
 });
 
-export async function saveClientProviderAction(tenantId: string, input: z.input<typeof providerSchema>) {
+export const saveClientProviderAction = action(async function saveClientProviderAction(tenantId: string, input: z.input<typeof providerSchema>) {
   const user = await aiActor(tenantId);
   const p = providerSchema.parse(input);
   if (p.kind === "openai_compatible" && !p.baseUrl) throw new Error("OpenAI-compatible providers need a base URL");
@@ -64,18 +65,18 @@ export async function saveClientProviderAction(tenantId: string, input: z.input<
   await logAction({ actorId: user.id, action: p.id ? "ai.client_provider_updated" : "ai.client_provider_added", detail: { tenantId, providerId: saved.id, name: saved.name, kind: saved.kind, model: saved.model, region: saved.region, keyChanged: !!p.apiKey } });
   done();
   return { id: saved.id };
-}
+});
 
-export async function deleteClientProviderAction(tenantId: string, id: string) {
+export const deleteClientProviderAction = action(async function deleteClientProviderAction(tenantId: string, id: string) {
   const user = await aiActor(tenantId);
   const row = await db.aiProvider.findFirst({ where: { id, tenantId } });
   if (!row) throw new Error("Not found");
   await db.aiProvider.delete({ where: { id } });
   await logAction({ actorId: user.id, action: "ai.client_provider_deleted", detail: { tenantId, providerId: id, name: row.name } });
   done();
-}
+});
 
-export async function testClientProviderAction(tenantId: string, id: string) {
+export const testClientProviderAction = action(async function testClientProviderAction(tenantId: string, id: string) {
   const user = await aiActor(tenantId);
   const row = await db.aiProvider.findFirst({ where: { id, tenantId } });
   if (!row) throw new Error("Not found");
@@ -84,14 +85,14 @@ export async function testClientProviderAction(tenantId: string, id: string) {
   await logAction({ actorId: user.id, action: "ai.provider_tested", detail: { tenantId, providerId: id, ok: result.ok } });
   done();
   return result;
-}
+});
 
 const policySchema = z.object({
   defaults: z.record(z.string(), z.string().nullable()),
   monthlyBudgetUsd: z.number().min(0).max(1_000_000).nullable(),
 });
 
-export async function saveClientAiPolicyAction(tenantId: string, input: z.input<typeof policySchema>) {
+export const saveClientAiPolicyAction = action(async function saveClientAiPolicyAction(tenantId: string, input: z.input<typeof policySchema>) {
   const user = await aiActor(tenantId);
   const p = policySchema.parse(input);
   const defaults: Record<string, string> = {};
@@ -108,11 +109,11 @@ export async function saveClientAiPolicyAction(tenantId: string, input: z.input<
   });
   await logAction({ actorId: user.id, action: "ai.client_policy_saved", detail: { tenantId, defaults, monthlyBudgetUsd: budget } });
   done();
-}
+});
 
 // A user's own model per agent, used wherever a client's rulebook lets
 // users choose (and the model is allowed there).
-export async function saveMyModelPreferenceAction(key: string, providerId: string | null) {
+export const saveMyModelPreferenceAction = action(async function saveMyModelPreferenceAction(key: string, providerId: string | null) {
   const user = await requirePermission("ai.dispatch");
   if (!(AGENT_KEYS as string[]).includes(key)) throw new Error("Unknown agent");
   if (providerId && !(await db.aiProvider.count({ where: { id: providerId, enabled: true } }))) throw new Error("Unknown provider");
@@ -123,4 +124,4 @@ export async function saveMyModelPreferenceAction(key: string, providerId: strin
   else delete models[key];
   await db.user.update({ where: { id: user.id }, data: { preferences: { ...prefs, aiModels: models } } });
   done();
-}
+});

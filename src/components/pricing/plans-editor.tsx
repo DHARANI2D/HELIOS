@@ -19,6 +19,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { EmptyState } from "@/components/shared/empty-state";
 import { parseAmount } from "@/components/pricing/price-book";
+import { unwrap } from "@/lib/action-result";
 
 type Draft = {
   key: string;
@@ -96,7 +97,7 @@ function PlanDialog({ plan, open, onOpenChange }: { plan?: ServicePlan; open: bo
   const router = useRouter();
   const [d, setD] = React.useState<Draft>(() => toDraft(plan));
   const save = useMutation({
-    mutationFn: () => savePlanAction(toInput(d), plan?.id),
+    mutationFn: () => unwrap(savePlanAction(toInput(d), plan?.id)),
     onSuccess: () => {
       toast.success(plan ? "Plan updated" : "Plan created");
       onOpenChange(false);
@@ -214,7 +215,7 @@ export function PlansEditor({ plans, tenantCounts, canEdit }: { plans: ServicePl
   const router = useRouter();
   const [editing, setEditing] = React.useState<ServicePlan | "new" | null>(null);
   const remove = useMutation({
-    mutationFn: (id: string) => deletePlanAction(id),
+    mutationFn: (id: string) => unwrap(deletePlanAction(id)),
     onSuccess: (r) => {
       toast.success(r.retired ? "Plan retired — clients on it keep their SLA" : "Plan deleted");
       router.refresh();

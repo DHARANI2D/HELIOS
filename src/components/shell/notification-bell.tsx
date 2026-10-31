@@ -9,6 +9,7 @@ import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { unwrap } from "@/lib/action-result";
 
 const KIND_ICON: Record<string, typeof Bell> = {
   mention: AtSign,
@@ -26,19 +27,19 @@ export function NotificationBell() {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["notifications"],
-    queryFn: () => getNotificationsAction(),
+    queryFn: () => unwrap(getNotificationsAction()),
     refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   });
   const unread = data?.unread ?? 0;
 
   async function markAll() {
-    await markNotificationsReadAction();
+    await unwrap(markNotificationsReadAction());
     await queryClient.invalidateQueries({ queryKey: ["notifications"] });
   }
 
   async function markOne(id: string) {
-    await markNotificationsReadAction([id]);
+    await unwrap(markNotificationsReadAction([id]));
     await queryClient.invalidateQueries({ queryKey: ["notifications"] });
   }
 

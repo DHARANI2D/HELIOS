@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { TenantSelect } from "@/components/shared/tenant-select";
+import { unwrap } from "@/lib/action-result";
 
 export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id: string; name: string }>; defaultTenantId: string | null }) {
   const router = useRouter();
@@ -25,7 +26,7 @@ export function AnalyzeForm({ tenants, defaultTenantId }: { tenants: Array<{ id:
   };
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Analysis failed");
 
-  const analyze = useMutation({ mutationFn: (fd: FormData) => analyzeSubmissionAction(fd), onSuccess: done, onError });
+  const analyze = useMutation({ mutationFn: (fd: FormData) => unwrap(analyzeSubmissionAction(fd)), onSuccess: done, onError });
   const busy = analyze.isPending;
 
   return (

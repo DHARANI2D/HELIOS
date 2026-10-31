@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 export function SigmaImport({ tenants }: { tenants: Array<{ id: string; name: string }> }) {
   const router = useRouter();
@@ -20,9 +21,9 @@ export function SigmaImport({ tenants }: { tenants: Array<{ id: string; name: st
   const [tenantId, setTenantId] = React.useState("");
   const [checks, setChecks] = React.useState<RuleCheck[] | null>(null);
   const onError = (e: Error) => toast.error(e.message);
-  const check = useMutation({ mutationFn: () => checkRulesAction(text, tenantId || null), onSuccess: setChecks, onError });
+  const check = useMutation({ mutationFn: () => unwrap(checkRulesAction(text, tenantId || null)), onSuccess: setChecks, onError });
   const save = useMutation({
-    mutationFn: () => importRulesAction(text, tenantId || null),
+    mutationFn: () => unwrap(importRulesAction(text, tenantId || null)),
     onSuccess: (results) => {
       const ok = results.filter((r) => r.ok).length;
       toast.success(`${ok} rule${ok === 1 ? "" : "s"} imported in testing${results.length > ok ? `; ${results.length - ok} refused` : ""}`);

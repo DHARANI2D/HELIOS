@@ -7,11 +7,12 @@ import { toast } from "sonner";
 
 import { runPlaybookOnCaseAction } from "@/app/(app)/cases/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 export function RunPlaybookButton({ caseId, playbookId }: { caseId: string; playbookId: string }) {
   const router = useRouter();
   const run = useMutation({
-    mutationFn: () => runPlaybookOnCaseAction(caseId, playbookId),
+    mutationFn: () => unwrap(runPlaybookOnCaseAction(caseId, playbookId)),
     onSuccess: ({ queued }) => {
       toast.success(queued ? "Queued for approval" : "Playbook executed");
       router.refresh();

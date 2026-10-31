@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/session";
 import { logAction } from "@/lib/audit";
 import { sendAlert } from "@/lib/alerts/send";
 import { ALERT_GROUPS, CHANNEL_KEYS, E164, channelsFor, parsePrefs, prefsFromGroups, type AlertChannel, type AlertGroup } from "@/lib/alerts/kinds";
+import { action } from "@/lib/action";
 
 // Each person's own alert channels: a phone number for texts, and which
 // kinds of notification also go out by email, SMS or WhatsApp.
@@ -18,7 +19,7 @@ const prefsInput = z.object({
   groups: z.object(Object.fromEntries(ALERT_GROUPS.map((g) => [g.key, z.array(channel).max(3).default([])])) as Record<AlertGroup, z.ZodDefault<z.ZodArray<typeof channel>>>),
 });
 
-export async function saveAlertPrefsAction(input: z.input<typeof prefsInput>) {
+export const saveAlertPrefsAction = action(async function saveAlertPrefsAction(input: z.input<typeof prefsInput>) {
   const user = await requireUser();
   const parsed = prefsInput.safeParse(input);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Check the form");
@@ -29,10 +30,10 @@ export async function saveAlertPrefsAction(input: z.input<typeof prefsInput>) {
   await db.user.update({ where: { id: user.id }, data: { phone: phone || null, alertPrefs: prefs } });
   await logAction({ actorId: user.id, action: "account.alerts_changed", detail: { channels: [...new Set(Object.values(prefs).flat())], phoneSet: !!phone } });
   revalidatePath("/account/alerts");
-}
+});
 
 // Sends one test now on each channel the person uses, so they know it arrives.
-export async function testAlertsAction() {
+export const testAlertsAction = action(async function testAlertsAction() {
   const user = await requireUser();
   const me = await db.user.findUniqueOrThrow({ where: { id: user.id }, select: { email: true, phone: true, alertPrefs: true } });
   const prefs = parsePrefs(me.alertPrefs);
@@ -50,4 +51,4 @@ export async function testAlertsAction() {
   }
   await logAction({ actorId: user.id, action: "account.alerts_tested", detail: { results: results.map((r) => ({ channel: r.channel, ok: r.ok })) } });
   return results;
-}
+});

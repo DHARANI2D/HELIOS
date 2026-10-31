@@ -14,11 +14,12 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TenantSelect } from "@/components/shared/tenant-select";
+import { unwrap } from "@/lib/action-result";
 
 export function IsolationButton({ id, isolated, hostname }: { id: string; isolated: boolean; hostname: string }) {
   const router = useRouter();
   const mut = useMutation({
-    mutationFn: () => setIsolationAction(id, !isolated),
+    mutationFn: () => unwrap(setIsolationAction(id, !isolated)),
     onSuccess: (r) => {
       toast.success(r.manual ? `Marked ${hostname} as ${isolated ? "released" : "isolated"} — no EDR connector, so make sure it's done in the EDR console` : `${isolated ? "Released" : "Isolated"} ${hostname} — ${r.message}`);
       router.refresh();
@@ -36,7 +37,7 @@ export function IsolationButton({ id, isolated, hostname }: { id: string; isolat
 export function CriticalitySelect({ id, value }: { id: string; value: string }) {
   const router = useRouter();
   const mut = useMutation({
-    mutationFn: (criticality: string) => updateEndpointAction(id, { criticality }),
+    mutationFn: (criticality: string) => unwrap(updateEndpointAction(id, { criticality })),
     onSuccess: () => router.refresh(),
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed"),
   });
@@ -56,7 +57,7 @@ export function InventoryImport({ tenants, defaultTenantId, isClient }: { tenant
   const [csv, setCsv] = React.useState("");
   const [tenantId, setTenantId] = React.useState(defaultTenantId ?? "none");
   const mut = useMutation({
-    mutationFn: () => importInventoryAction(csv, tenantId),
+    mutationFn: () => unwrap(importInventoryAction(csv, tenantId)),
     onSuccess: (n) => {
       toast.success(`Imported ${n} endpoint${n === 1 ? "" : "s"}`);
       setOpen(false);

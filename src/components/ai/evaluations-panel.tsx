@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { unwrap } from "@/lib/action-result";
 
 type Target = { kind: "builtin" } | { kind: "env" } | { kind: "provider"; id: string };
 type EvalAgent = "triage" | "phishing" | "threat_intel";
@@ -84,7 +85,7 @@ export function EvaluationsPanel({ targets, scorecards, running, golden, pass, u
   }, [running.length, router]);
 
   const run = useMutation({
-    mutationFn: () => runEvaluationAction({ target: targets.find((t) => t.value === target)!.target, agentKey: agent }),
+    mutationFn: () => unwrap(runEvaluationAction({ target: targets.find((t) => t.value === target)!.target, agentKey: agent })),
     onSuccess: (r) => {
       if (r.finished) toast[r.passed ? "success" : "warning"](`${r.model}: ${Math.round((r.score ?? 0) * 100)}% — ${r.passed ? "passed" : "below the bar"}`);
       else toast.success(`Evaluating ${r.model}: one model call per case, the scorecard appears here when it's done`);

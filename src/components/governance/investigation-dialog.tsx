@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { SEVERITY_LABEL, SEVERITY_BADGE_VARIANT } from "@/lib/severity";
+import { unwrap } from "@/lib/action-result";
 
 interface InvestigationDialogProps {
   agentId: string | null;
@@ -32,7 +33,7 @@ export function InvestigationDialog({ agentId, onClose }: InvestigationDialogPro
 
   const { data, isLoading } = useQuery({
     queryKey: ["governance-investigation", agentId],
-    queryFn: () => investigateAgentAction(agentId!),
+    queryFn: () => unwrap(investigateAgentAction(agentId!)),
     enabled: !!agentId,
   });
 
@@ -42,7 +43,7 @@ export function InvestigationDialog({ agentId, onClose }: InvestigationDialogPro
   }
 
   const restore = useMutation({
-    mutationFn: () => restoreAgentAction(agentId!, "Reviewed by analyst — false positive"),
+    mutationFn: () => unwrap(restoreAgentAction(agentId!, "Reviewed by analyst — false positive")),
     onSuccess: () => {
       toast.success("Agent restored");
       invalidate();
@@ -51,7 +52,7 @@ export function InvestigationDialog({ agentId, onClose }: InvestigationDialogPro
   });
 
   const confirm = useMutation({
-    mutationFn: () => confirmBreachAction(agentId!, "Confirmed via investigation dialog"),
+    mutationFn: () => unwrap(confirmBreachAction(agentId!, "Confirmed via investigation dialog")),
     onSuccess: () => {
       toast.success("Breach confirmed");
       invalidate();

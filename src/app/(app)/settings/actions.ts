@@ -7,21 +7,22 @@ import { logAction } from "@/lib/audit";
 import { requirePermission } from "@/lib/session";
 import { companySchema, getSetting, messagingSchema, setSetting, siteSchema, thresholdsSchema } from "@/lib/settings";
 import { PLATFORM_SECRETS, storePlatformSecret, type PlatformSecret } from "@/lib/platform-secrets";
+import { action } from "@/lib/action";
 
 function revalidate() {
   revalidatePath("/settings");
   revalidatePath("/", "layout");
 }
 
-export async function saveCompanyAction(input: z.input<typeof companySchema>) {
+export const saveCompanyAction = action(async function saveCompanyAction(input: z.input<typeof companySchema>) {
   const user = await requirePermission("settings.manage");
   const profile = companySchema.parse(input);
   await setSetting("company.profile", profile, user.id);
   await logAction({ actorId: user.id, action: "settings.company_changed", detail: { name: profile.name } });
   revalidate();
-}
+});
 
-export async function saveSiteAction(input: z.input<typeof siteSchema>) {
+export const saveSiteAction = action(async function saveSiteAction(input: z.input<typeof siteSchema>) {
   const user = await requirePermission("settings.manage");
   const site = siteSchema.parse(input);
   await setSetting("site.public", site, user.id);
@@ -29,11 +30,11 @@ export async function saveSiteAction(input: z.input<typeof siteSchema>) {
   revalidate();
   revalidatePath("/home");
   revalidatePath("/estimate");
-}
+});
 
 // Only a platform admin moves the whole database between production and
 // test, since it changes how every page presents its data.
-export async function setEnvironmentAction(environment: "production" | "test") {
+export const setEnvironmentAction = action(async function setEnvironmentAction(environment: "production" | "test") {
   const user = await requirePermission("settings.manage");
   if (user.role !== "ADMIN") throw new Error("Only a platform admin can change the environment");
   const to = z.enum(["production", "test"]).parse(environment);
@@ -42,12 +43,12 @@ export async function setEnvironmentAction(environment: "production" | "test") {
   await setSetting("platform.environment", to, user.id);
   await logAction({ actorId: user.id, action: "platform.environment_changed", detail: { from, to } });
   revalidate();
-}
+});
 
 const secretName = z.enum(Object.keys(PLATFORM_SECRETS) as [PlatformSecret, ...PlatformSecret[]]);
 
 // Never echoes the value back; the audit entry records only which key changed.
-export async function savePlatformSecretAction(name: string, value: string | null) {
+export const savePlatformSecretAction = action(async function savePlatformSecretAction(name: string, value: string | null) {
   const user = await requirePermission("settings.manage");
   const key = secretName.parse(name);
   const v = value === null ? null : z.string().trim().min(8, "That doesn't look like a complete key").max(2000).parse(value);
@@ -57,14 +58,14 @@ export async function savePlatformSecretAction(name: string, value: string | nul
   await storePlatformSecret(key, v, user.id);
   await logAction({ actorId: user.id, action: v ? "settings.secret_stored" : "settings.secret_cleared", detail: { secret: key } });
   revalidate();
-}
+});
 
 const forensicsSchema = z.object({
   thresholds: thresholdsSchema,
   allowDomains: z.array(z.string()).max(500),
 });
 
-export async function saveForensicsSettingsAction(input: z.input<typeof forensicsSchema>) {
+export const saveForensicsSettingsAction = action(async function saveForensicsSettingsAction(input: z.input<typeof forensicsSchema>) {
   const user = await requirePermission("settings.manage");
   const s = forensicsSchema.parse(input);
   const domains = [...new Set(s.allowDomains.map((d) => d.trim().toLowerCase().replace(/^\*\./, "")).filter(Boolean))];
@@ -74,13 +75,13 @@ export async function saveForensicsSettingsAction(input: z.input<typeof forensic
   await setSetting("forensics.allowDomains", domains, user.id);
   await logAction({ actorId: user.id, action: "settings.forensics_changed", detail: { thresholds: s.thresholds, allowDomains: domains.length } });
   revalidate();
-}
+});
 
 // ---------------------------------------------------------------- sign-in and encryption
 
 const securitySchema = z.object({ mfa: z.enum(["optional", "staff", "everyone"]), ssoOnlyForStaff: z.boolean() });
 
-export async function saveSecuritySettingsAction(input: z.input<typeof securitySchema>) {
+export const saveSecuritySettingsAction = action(async function saveSecuritySettingsAction(input: z.input<typeof securitySchema>) {
   const user = await requirePermission("settings.manage");
   const s = securitySchema.parse(input);
   const { SSO } = await import("@/lib/sso");
@@ -89,23 +90,23 @@ export async function saveSecuritySettingsAction(input: z.input<typeof securityS
   await setSetting("security.ssoOnlyForStaff", s.ssoOnlyForStaff, user.id);
   await logAction({ actorId: user.id, action: "security.settings_changed", detail: s });
   revalidate();
-}
+});
 
-export async function saveMessagingSettingsAction(input: z.input<typeof messagingSchema>) {
+export const saveMessagingSettingsAction = action(async function saveMessagingSettingsAction(input: z.input<typeof messagingSchema>) {
   const user = await requirePermission("settings.manage");
   const parsed = messagingSchema.safeParse(input);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Check the form");
   await setSetting("alerts.messaging", parsed.data, user.id);
   await logAction({ actorId: user.id, action: "settings.messaging_changed", detail: { provider: parsed.data.provider, maxPerUserPerHour: parsed.data.maxPerUserPerHour } });
   revalidate();
-}
+});
 
 // Clients' credentials still sealed with the master key move onto their own keys.
-export async function adoptClientKeysAction() {
+export const adoptClientKeysAction = action(async function adoptClientKeysAction() {
   const user = await requirePermission("settings.manage");
   if (user.role !== "ADMIN") throw new Error("Forbidden: admin role required");
   const { adoptClientKeys } = await import("@/lib/keys");
   const moved = await adoptClientKeys(user.id);
   revalidate();
   return { moved };
-}
+});

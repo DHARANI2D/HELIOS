@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   initial: MessagingSettings;
@@ -24,7 +25,7 @@ interface Props {
 export function AlertChannels({ initial, ready, counts, canEdit }: Props) {
   const router = useRouter();
   const [m, setM] = React.useState(initial);
-  const save = useMutation({ mutationFn: () => saveMessagingSettingsAction(m), onSuccess: () => { toast.success("Alert channels saved"); router.refresh(); }, onError: (e: Error) => toast.error(e.message) });
+  const save = useMutation({ mutationFn: () => unwrap(saveMessagingSettingsAction(m)), onSuccess: () => { toast.success("Alert channels saved"); router.refresh(); }, onError: (e: Error) => toast.error(e.message) });
   const field = (k: keyof MessagingSettings, label: string, placeholder: string) => (
     <div className="grid gap-1.5">
       <Label htmlFor={`msg-${k}`} className="text-xs">{label}</Label>

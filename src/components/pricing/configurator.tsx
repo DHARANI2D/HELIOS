@@ -32,6 +32,7 @@ import { SolutionDesign } from "@/components/pricing/solution-design";
 import { SurfaceCoverageCard } from "@/components/pricing/surface-coverage";
 import { surfaceCoverage } from "@/lib/assets/coverage";
 import type { PlatformFacts } from "@/lib/assets/designer";
+import { unwrap } from "@/lib/action-result";
 
 const KIND_LABEL = { service: "Managed service", license: "Tool licences", ai: "AI first response", services: "Professional services" } as const;
 const KINDS = ["service", "license", "ai", "services"] as const;
@@ -148,7 +149,7 @@ export function Configurator({ ctx, canSeeMargin, canManage, tenants, initial, q
   };
 
   const save = useMutation({
-    mutationFn: () => saveQuoteAction(cfg, { quoteId, tenantId: tenantId === "none" ? null : tenantId }),
+    mutationFn: () => unwrap(saveQuoteAction(cfg, { quoteId, tenantId: tenantId === "none" ? null : tenantId })),
     onSuccess: (r) => {
       toast.success(`Quote ${r.reference} saved`);
       router.push(`/pricing/quotes/${r.id}`);

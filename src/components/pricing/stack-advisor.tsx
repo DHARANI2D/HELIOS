@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Money } from "@/components/pricing/upgrade-review";
+import { unwrap, type ActionResult } from "@/lib/action-result";
 
 const CHANGE: Record<AdviceChange, { label: string; variant: "success" | "info" | "warning" | "soft" | "outline" }> = {
   add: { label: "Add", variant: "success" },
@@ -32,7 +33,7 @@ interface Props {
   money: Money;
   onApply: (config: QuoteConfig) => void;
   // Asks the AI advisor on the server; absent when it's switched off.
-  askAi?: (cfg: QuoteConfig, goal: AdvisorGoal) => Promise<AiAdvice>;
+  askAi?: (cfg: QuoteConfig, goal: AdvisorGoal) => Promise<ActionResult<AiAdvice>>;
   audience: "staff" | "public";
 }
 
@@ -49,7 +50,7 @@ export function StackAdvisor({ ctx, cfg, money, onApply, askAi, audience }: Prop
   const aiCurrent = ai && ai.asked === fingerprint ? ai.advice : null;
 
   const ask = useMutation({
-    mutationFn: () => askAi!(cfg, goal),
+    mutationFn: () => unwrap(askAi!(cfg, goal)),
     onSuccess: (advice) => {
       setAi({ advice, asked: fingerprint });
       if (advice.status === "fallback") toast.warning("The AI model didn't answer; showing the rules' suggestion.");

@@ -7,12 +7,13 @@ import { toast } from "sonner";
 
 import { decideExecutionAction } from "@/app/(app)/playbooks/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 export function ExecutionDecision({ executionId, canApprove }: { executionId: string; canApprove: boolean }) {
   const router = useRouter();
 
   const decide = useMutation({
-    mutationFn: (decision: "approved" | "rejected") => decideExecutionAction(executionId, decision),
+    mutationFn: (decision: "approved" | "rejected") => unwrap(decideExecutionAction(executionId, decision)),
     onSuccess: ({ status }) => {
       toast.success(status === "REJECTED" ? "Execution rejected" : `Playbook ${status === "SUCCEEDED" ? "executed" : status.toLowerCase()}`);
       router.refresh();

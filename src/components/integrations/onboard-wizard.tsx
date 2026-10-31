@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TenantSelect } from "@/components/shared/tenant-select";
+import { unwrap } from "@/lib/action-result";
 
 export interface CategoryView {
   key: string;
@@ -98,7 +99,7 @@ export function OnboardWizard({ categories, tools, tenants, defaultTenantId, isC
 
   const onboard = useMutation({
     mutationFn: () =>
-      onboardIntegrationAction({
+      unwrap(onboardIntegrationAction({
         vendor: toolKey!,
         tenantId,
         name,
@@ -107,7 +108,7 @@ export function OnboardWizard({ categories, tools, tenants, defaultTenantId, isC
         responseWebhookUrl: responseUrl,
         webhookSecret: secret,
         chatWebhookUrl: chatUrl,
-      }),
+      })),
     onSuccess: (r) => {
       setResult(r);
       toast.success("Tool onboarded");

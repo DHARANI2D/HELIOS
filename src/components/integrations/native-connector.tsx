@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
+import { unwrap } from "@/lib/action-result";
 
 interface Props {
   integrationId: string;
@@ -41,7 +42,7 @@ export function NativeConnectorButton(props: Props) {
   const [expires, setExpires] = React.useState(props.credentialExpiresAt);
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
   const save = useMutation({
-    mutationFn: () => saveNativeConnectorAction(props.integrationId, { on: state !== "off", mode: state === "live" ? "live" : "dry_run", values, credentialExpiresAt: expires }),
+    mutationFn: () => unwrap(saveNativeConnectorAction(props.integrationId, { on: state !== "off", mode: state === "live" ? "live" : "dry_run", values, credentialExpiresAt: expires })),
     onSuccess: () => {
       toast.success(state === "off" ? "Native connector switched off" : state === "live" ? "Native connector is live" : "Native connector in dry run: it checks targets and changes nothing");
       router.refresh();
@@ -49,7 +50,7 @@ export function NativeConnectorButton(props: Props) {
     onError,
   });
   const test = useMutation({
-    mutationFn: () => testNativeConnectorAction(props.integrationId),
+    mutationFn: () => unwrap(testNativeConnectorAction(props.integrationId)),
     onSuccess: (r) => {
       if (r.ok) toast.success(r.message);
       else toast.error(r.message);

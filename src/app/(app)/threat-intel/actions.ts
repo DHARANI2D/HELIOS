@@ -10,6 +10,7 @@ import { classifyIndicator } from "@/lib/threat-intel/indicators";
 import { indicatorReasons, indicatorVerdict, lookupIndicator } from "@/lib/threat-intel/service";
 import { configuredProviders } from "@/lib/threat-intel/providers";
 import { importFeed } from "@/lib/threat-intel/feeds";
+import { action } from "@/lib/action";
 
 function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>, providersConfigured: Awaited<ReturnType<typeof configuredProviders>>) {
   const { indicator } = result;
@@ -32,7 +33,7 @@ function serialize(result: Awaited<ReturnType<typeof lookupIndicator>>, provider
 
 export type IndicatorLookup = ReturnType<typeof serialize>;
 
-export async function lookupAction(raw: string, force = false): Promise<IndicatorLookup> {
+export const lookupAction = action(async function lookupAction(raw: string, force: boolean = false): Promise<IndicatorLookup> {
   const user = await requirePermission("intel.view");
   const ioc = classifyIndicator(raw);
   if (!ioc) throw new Error("Not a recognizable IP, domain, URL, file hash, or email address");
@@ -40,9 +41,9 @@ export async function lookupAction(raw: string, force = false): Promise<Indicato
   await logAction({ actorId: user.id, action: "intel.lookup", detail: { type: ioc.type, value: ioc.value, cached: result.cached } });
   revalidatePath("/threat-intel");
   return serialize(result, await configuredProviders());
-}
+});
 
-export async function recheckIndicatorAction(indicatorId: string): Promise<IndicatorLookup> {
+export const recheckIndicatorAction = action(async function recheckIndicatorAction(indicatorId: string): Promise<IndicatorLookup> {
   const user = await requirePermission("intel.view");
   const indicator = await db.threatIndicator.findUniqueOrThrow({ where: { id: indicatorId } });
   const result = await lookupIndicator(indicator.type as IndicatorType, indicator.value, { force: true });
@@ -51,9 +52,9 @@ export async function recheckIndicatorAction(indicatorId: string): Promise<Indic
   const caseLinks = await db.caseIndicator.findMany({ where: { indicatorId }, select: { caseId: true } });
   for (const { caseId } of caseLinks) revalidatePath(`/cases/${caseId}`);
   return serialize(result, await configuredProviders());
-}
+});
 
-export async function setBlockedAction(indicatorId: string, blocked: boolean) {
+export const setBlockedAction = action(async function setBlockedAction(indicatorId: string, blocked: boolean) {
   const user = await requirePermission("intel.manage");
   const indicator = await db.threatIndicator.update({
     where: { id: indicatorId },
@@ -65,18 +66,18 @@ export async function setBlockedAction(indicatorId: string, blocked: boolean) {
     detail: { type: indicator.type, value: indicator.value },
   });
   revalidatePath("/threat-intel");
-}
+});
 
-export async function setFeedEnabledAction(feedId: string, enabled: boolean) {
+export const setFeedEnabledAction = action(async function setFeedEnabledAction(feedId: string, enabled: boolean) {
   const user = await requirePermission("intel.manage");
   const feed = await db.threatFeed.update({ where: { id: feedId }, data: { enabled } });
   await logAction({ actorId: user.id, action: enabled ? "intel.feed_enabled" : "intel.feed_disabled", detail: { feed: feed.name } });
   revalidatePath("/threat-intel");
-}
+});
 
-export async function importFeedAction(feedId: string) {
+export const importFeedAction = action(async function importFeedAction(feedId: string) {
   const user = await requirePermission("intel.manage");
   const feed = await importFeed(feedId, user.id);
   revalidatePath("/threat-intel");
   return { name: feed.name, count: feed.lastCount ?? 0 };
-}
+});

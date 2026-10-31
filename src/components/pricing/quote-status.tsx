@@ -8,11 +8,12 @@ import { toast } from "sonner";
 import { setQuoteStatusAction } from "@/app/(app)/pricing/actions";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
+import { unwrap } from "@/lib/action-result";
 
 export function QuoteStatusControl({ quoteId, status }: { quoteId: string; status: string }) {
   const router = useRouter();
   const mut = useMutation({
-    mutationFn: (s: string) => setQuoteStatusAction(quoteId, s),
+    mutationFn: (s: string) => unwrap(setQuoteStatusAction(quoteId, s)),
     onSuccess: () => {
       toast.success("Quote status updated");
       router.refresh();

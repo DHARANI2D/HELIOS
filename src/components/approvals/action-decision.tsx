@@ -7,13 +7,14 @@ import { toast } from "sonner";
 
 import { decideResponseActionAction } from "@/app/(app)/cases/actions";
 import { Button } from "@/components/ui/button";
+import { unwrap } from "@/lib/action-result";
 
 // Approve or reject one held response action from the inbox. The response
 // policy still decides (two-person rule, client rulebook) when it's approved.
 export function ActionDecision({ actionId }: { actionId: string }) {
   const router = useRouter();
   const decide = useMutation({
-    mutationFn: (decision: "approved" | "rejected") => decideResponseActionAction(actionId, decision),
+    mutationFn: (decision: "approved" | "rejected") => unwrap(decideResponseActionAction(actionId, decision)),
     onSuccess: ({ status }, decision) => {
       toast.success(decision === "rejected" ? "Rejected" : status === "PENDING_APPROVAL" ? "Approved; it needs one more approver" : `Approved: ${status.toLowerCase().replaceAll("_", " ")}`);
       router.refresh();

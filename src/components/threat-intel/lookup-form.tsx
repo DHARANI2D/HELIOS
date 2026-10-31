@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { VerdictBadge } from "@/components/threat-intel/verdict-badge";
+import { unwrap } from "@/lib/action-result";
 
 export function LookupForm() {
   const router = useRouter();
@@ -18,7 +19,7 @@ export function LookupForm() {
   const [force, setForce] = React.useState(false);
 
   const lookup = useMutation({
-    mutationFn: () => lookupAction(value, force),
+    mutationFn: () => unwrap(lookupAction(value, force)),
     onSuccess: () => router.refresh(),
   });
   const result: IndicatorLookup | undefined = lookup.data;

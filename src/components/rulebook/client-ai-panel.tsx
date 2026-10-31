@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
+import { unwrap } from "@/lib/action-result";
 
 export interface ProviderView {
   id: string;
@@ -61,15 +62,15 @@ export function ClientAiPanel({ tenantId, canEdit, rulesText, providers, agents,
   const [limit, setLimit] = React.useState(budget ? String(budget) : "");
   const [adding, setAdding] = React.useState(false);
   const [d, setD] = React.useState({ name: "", kind: "anthropic" as "anthropic" | "openai_compatible", baseUrl: "", model: "claude-sonnet-5-5", apiKey: "", isLocal: false, region: "" });
-  const savePolicy = useAct(() => saveClientAiPolicyAction(tenantId, { defaults: choice, monthlyBudgetUsd: limit ? Number(limit) : null }), () => "AI choices saved");
-  const addProvider = useAct(() => saveClientProviderAction(tenantId, d), () => {
+  const savePolicy = useAct(() => unwrap(saveClientAiPolicyAction(tenantId, { defaults: choice, monthlyBudgetUsd: limit ? Number(limit) : null })), () => "AI choices saved");
+  const addProvider = useAct(() => unwrap(saveClientProviderAction(tenantId, d)), () => {
     setAdding(false);
     setD({ ...d, name: "", apiKey: "" });
     return "Provider added";
   });
-  const remove = useAct((id: string) => deleteClientProviderAction(tenantId, id), () => "Provider removed");
-  const test = useMutation({ mutationFn: (id: string) => testClientProviderAction(tenantId, id), onSuccess: (r) => (r.ok ? toast.success(r.message) : toast.error(r.message)), onError: (e) => toast.error(e instanceof Error ? e.message : "Test failed") });
-  const pref = useAct(({ key, id }: { key: string; id: string | null }) => saveMyModelPreferenceAction(key, id), () => "Your model choice saved");
+  const remove = useAct((id: string) => unwrap(deleteClientProviderAction(tenantId, id)), () => "Provider removed");
+  const test = useMutation({ mutationFn: (id: string) => unwrap(testClientProviderAction(tenantId, id)), onSuccess: (r) => (r.ok ? toast.success(r.message) : toast.error(r.message)), onError: (e) => toast.error(e instanceof Error ? e.message : "Test failed") });
+  const pref = useAct(({ key, id }: { key: string; id: string | null }) => unwrap(saveMyModelPreferenceAction(key, id)), () => "Your model choice saved");
   const pct = budget ? Math.min(100, Math.round((spend.spent / budget) * 100)) : null;
   const usable = providers.filter((p) => !p.blocked);
 

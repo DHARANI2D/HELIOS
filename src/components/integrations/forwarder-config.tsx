@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 type Channel = "security" | "system" | "sysmon" | "powershell";
 
@@ -63,13 +64,13 @@ export function ForwarderButton({ integrationId, name, view, canManage }: { inte
   const port = (v: string) => (v.trim() ? Number(v) : null);
   const issue = useMutation({
     mutationFn: () =>
-      issueForwarderConfigAction(integrationId, {
+      unwrap(issueForwarderConfigAction(integrationId, {
         os,
         syslog: syslogOn ? { udpPort: port(udp), tcpPort: port(tcp), format } : null,
         windowsChannels: os === "windows" ? channels : [],
         files: files.split("\n").map((f) => f.trim()).filter(Boolean),
         bufferLimitMb: Number(buffer) || 2048,
-      }),
+      })),
     onSuccess: (r) => {
       setIssued(r);
       toast.success("Configuration issued: deploy it to the forwarder");
@@ -78,7 +79,7 @@ export function ForwarderButton({ integrationId, name, view, canManage }: { inte
     onError,
   });
   const verify = useMutation({
-    mutationFn: () => verifyForwarderConfigAction(check),
+    mutationFn: () => unwrap(verifyForwarderConfigAction(check)),
     onSuccess: (r) => (r.ok ? toast.success : toast.error)(r.reason),
     onError,
   });

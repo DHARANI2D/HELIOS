@@ -9,6 +9,7 @@ import { goLiveBlockers } from "@/lib/ingest/health";
 import { logAction } from "@/lib/audit";
 import { requirePermission, requireUser } from "@/lib/session";
 import { can } from "@/lib/rbac";
+import { action } from "@/lib/action";
 
 const tenantSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -27,7 +28,7 @@ function slugify(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "client";
 }
 
-export async function saveTenantAction(input: z.input<typeof tenantSchema>, tenantId?: string) {
+export const saveTenantAction = action(async function saveTenantAction(input: z.input<typeof tenantSchema>, tenantId?: string) {
   const user = await requirePermission("tenants.manage");
   const data = tenantSchema.parse(input);
   const plan = data.planId ? await db.servicePlan.findUnique({ where: { id: data.planId } }) : null;
@@ -54,11 +55,11 @@ export async function saveTenantAction(input: z.input<typeof tenantSchema>, tena
   revalidatePath("/tenants");
   revalidatePath(`/tenants/${saved.id}`);
   return { id: saved.id };
-}
+});
 
 // The client's consent for AI containment on their estate. Set by the MSSP
 // (tenants.manage) or by the client's own admin.
-export async function setAiCapAction(tenantId: string, cap: string) {
+export const setAiCapAction = action(async function setAiCapAction(tenantId: string, cap: string) {
   const user = await requireUser();
   const own = user.role === "CLIENT_ADMIN" && user.tenantId === tenantId;
   if (!own && !can(user, "tenants.manage")) throw new Error("Forbidden");
@@ -68,20 +69,20 @@ export async function setAiCapAction(tenantId: string, cap: string) {
   await logAction({ actorId: user.id, action: "tenant.ai_consent_changed", detail: { tenantId, from: before.aiAutonomyCap, to: value, byClient: own } });
   revalidatePath(`/tenants/${tenantId}`);
   revalidatePath("/");
-}
+});
 
 // A client's own data key: rotate it (credentials re-sealed), or destroy it
 // when offboarding a suspended client (its stored credentials become unreadable).
-export async function rotateTenantKeyAction(tenantId: string) {
+export const rotateTenantKeyAction = action(async function rotateTenantKeyAction(tenantId: string) {
   const user = await requirePermission("tenants.manage");
   if (user.role !== "ADMIN") throw new Error("Forbidden: admin role required");
   const { rotateTenantKey } = await import("@/lib/keys");
   const r = await rotateTenantKey(tenantId, user.id);
   revalidatePath(`/tenants/${tenantId}`);
   return r;
-}
+});
 
-export async function destroyTenantKeysAction(tenantId: string, confirmName: string) {
+export const destroyTenantKeysAction = action(async function destroyTenantKeysAction(tenantId: string, confirmName: string) {
   const user = await requirePermission("tenants.manage");
   if (user.role !== "ADMIN") throw new Error("Forbidden: admin role required");
   const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { name: true } });
@@ -90,4 +91,4 @@ export async function destroyTenantKeysAction(tenantId: string, confirmName: str
   const r = await destroyTenantKeys(tenantId, user.id);
   revalidatePath(`/tenants/${tenantId}`);
   return r;
-}
+});

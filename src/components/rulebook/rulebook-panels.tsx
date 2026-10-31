@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { unwrap } from "@/lib/action-result";
 
 function useAct<T, R = unknown>(fn: (v: T) => Promise<R>, done: (r: R) => string | null) {
   const router = useRouter();
@@ -43,8 +44,8 @@ function useAct<T, R = unknown>(fn: (v: T) => Promise<R>, done: (r: R) => string
 // ---------------------------------------------------------------- draft & sign
 
 export function DraftControls({ tenantId, status, version, canEdit }: { tenantId: string; status: "DRAFT" | "AWAITING_SIGNATURE"; version: number; canEdit: boolean }) {
-  const submit = useAct(() => submitRulebookAction(tenantId), (r) => `Sent for signature${r.notified ? ` to ${r.notified} client admin${r.notified === 1 ? "" : "s"}` : " (the client has no admin account yet)"}`);
-  const discard = useAct(() => discardRulebookDraftAction(tenantId), () => "Draft discarded");
+  const submit = useAct(() => unwrap(submitRulebookAction(tenantId)), (r) => `Sent for signature${r.notified ? ` to ${r.notified} client admin${r.notified === 1 ? "" : "s"}` : " (the client has no admin account yet)"}`);
+  const discard = useAct(() => unwrap(discardRulebookDraftAction(tenantId)), () => "Draft discarded");
   if (!canEdit) return null;
   return (
     <div className="flex flex-wrap gap-2">
@@ -63,7 +64,7 @@ export function DraftControls({ tenantId, status, version, canEdit }: { tenantId
 export function SignPanel({ tenantId, version, isClient }: { tenantId: string; version: number; isClient: boolean }) {
   const [note, setNote] = React.useState("");
   const [ack, setAck] = React.useState(false);
-  const sign = useAct(() => signRulebookAction(tenantId, { note, acknowledged: ack }), (r) => `Rulebook v${r.version} is in force`);
+  const sign = useAct(() => unwrap(signRulebookAction(tenantId, { note, acknowledged: ack })), (r) => `Rulebook v${r.version} is in force`);
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
       <p className="text-sm font-medium">{isClient ? `Sign rulebook v${version}` : `Activate v${version} on the client's behalf`}</p>
@@ -91,7 +92,7 @@ const OUTCOME_VARIANT: Record<Outcome, "success" | "warning" | "outline" | "dest
 const ORDER: Outcome[] = ["EXECUTED", "PENDING_APPROVAL", "SUGGESTED", "BLOCKED"];
 
 export function DryRunPanel({ tenantId, book, label }: { tenantId: string; book: Rulebook; label: string }) {
-  const run = useMutation({ mutationFn: () => dryRunRulebookAction(tenantId, book), onError: (err) => toast.error(err instanceof Error ? err.message : "Dry run failed") });
+  const run = useMutation({ mutationFn: () => unwrap(dryRunRulebookAction(tenantId, book)), onError: (err) => toast.error(err instanceof Error ? err.message : "Dry run failed") });
   const r = run.data as DryRunResult | undefined;
   return (
     <div className="flex flex-col gap-4">
@@ -189,11 +190,11 @@ const KINDS = { ip: "IP address", host: "Host", user: "Account", domain: "Sender
 
 export function AllowlistPanel({ tenantId, rows, canEdit }: { tenantId: string; rows: AllowlistRow[]; canEdit: boolean }) {
   const [d, setD] = React.useState({ kind: "ip" as keyof typeof KINDS, value: "", reason: "", owner: "", expiresAt: "" });
-  const add = useAct(() => addAllowlistEntryAction(tenantId, { ...d, expiresAt: d.expiresAt || null }), () => {
+  const add = useAct(() => unwrap(addAllowlistEntryAction(tenantId, { ...d, expiresAt: d.expiresAt || null })), () => {
     setD({ ...d, value: "", reason: "" });
     return "Added to the allowlist";
   });
-  const remove = useAct((id: string) => removeAllowlistEntryAction(tenantId, id), () => "Removed");
+  const remove = useAct((id: string) => unwrap(removeAllowlistEntryAction(tenantId, id)), () => "Removed");
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
@@ -244,8 +245,8 @@ export function AllowlistPanel({ tenantId, rows, canEdit }: { tenantId: string; 
 export function CodePanel({ tenantId, book, canEdit }: { tenantId: string; book: Rulebook; canEdit: boolean }) {
   const [yaml, setYaml] = React.useState("");
   const [reason, setReason] = React.useState("");
-  const exp = useMutation({ mutationFn: () => exportRulebookYamlAction(tenantId, book), onSuccess: (text) => setYaml(text), onError: (err) => toast.error(err instanceof Error ? err.message : "Export failed") });
-  const imp = useAct(() => importRulebookYamlAction(tenantId, { yaml, reason }), (r) => `Imported as draft v${r?.version}`);
+  const exp = useMutation({ mutationFn: () => unwrap(exportRulebookYamlAction(tenantId, book)), onSuccess: (text) => setYaml(text), onError: (err) => toast.error(err instanceof Error ? err.message : "Export failed") });
+  const imp = useAct(() => unwrap(importRulebookYamlAction(tenantId, { yaml, reason })), (r) => `Imported as draft v${r?.version}`);
   const download = () => {
     const url = URL.createObjectURL(new Blob([yaml], { type: "application/yaml" }));
     const a = document.createElement("a");

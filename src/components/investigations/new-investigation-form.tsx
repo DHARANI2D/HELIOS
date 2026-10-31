@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { TenantSelect } from "@/components/shared/tenant-select";
+import { unwrap } from "@/lib/action-result";
 
 export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Array<{ id: string; name: string }>; defaultTenantId: string | null }) {
   const router = useRouter();
@@ -21,7 +22,7 @@ export function NewInvestigationForm({ tenants, defaultTenantId }: { tenants: Ar
   const [logs, setLogs] = React.useState("");
 
   const start = useMutation({
-    mutationFn: (fd: FormData) => startInvestigationAction(fd),
+    mutationFn: (fd: FormData) => unwrap(startInvestigationAction(fd)),
     onSuccess: (r) => {
       toast.success(`Investigation started on ${r.eventCount} events${r.skipped.length ? ` (skipped: ${r.skipped.join("; ")})` : ""}`);
       router.push(`/cases/${r.caseId}`);

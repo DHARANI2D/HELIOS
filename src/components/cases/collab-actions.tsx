@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import type { TeamMember } from "@/components/cases/triage-panel";
+import { unwrap } from "@/lib/action-result";
 
 const TIERS = [
   { value: 1, label: "Tier 1 · triage" },
@@ -49,7 +50,7 @@ export function CollabActions({ caseId, tier, team, hasClient, canEscalate, canS
   const onError = (err: unknown) => toast.error(err instanceof Error ? err.message : "Failed");
 
   const escalate = useMutation({
-    mutationFn: () => escalateCaseAction(caseId, { tier: toTier, assigneeId: assignee || undefined, note }),
+    mutationFn: () => unwrap(escalateCaseAction(caseId, { tier: toTier, assigneeId: assignee || undefined, note })),
     onSuccess: () => {
       toast.success(`Moved to tier ${toTier}`);
       close();
@@ -58,7 +59,7 @@ export function CollabActions({ caseId, tier, team, hasClient, canEscalate, canS
     onError,
   });
   const share = useMutation({
-    mutationFn: () => shareCaseAction(caseId, { target, userIds: picked, note }),
+    mutationFn: () => unwrap(shareCaseAction(caseId, { target, userIds: picked, note })),
     onSuccess: (summary) => {
       toast.success(summary);
       close();
