@@ -225,7 +225,7 @@ export async function ingestForIntegration(integration: Integration, body: unkno
     for (const m of mapped) {
       if (m.kind === "alert") alerts.push(m.alert);
       else if (m.kind === "event") telemetry.push({ ocsf: m.ocsf });
-      else telemetry.push({ source: m.source, data: m.data });
+      else telemetry.push({ source: m.source, data: m.data, sourceEventId: m.sourceEventId });
     }
   }
   const deadLettered = await deadLetter(integration, dead, { batchId: opts.batchId, format: opts.format });

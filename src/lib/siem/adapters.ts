@@ -119,7 +119,9 @@ export function toEventRow(event: NormalizedEvent, batchId: string, sourceEventI
       hostName: event.actor.host,
       service: event.actor.service,
       processName: event.actor.process,
-      commandLine: event.actor.process,
+      // The full command line when the source gave one; actor.process holds the
+      // process name when both are known.
+      commandLine: str(event.metadata.command_line, event.metadata.commandline, event.metadata.commandLine) ?? event.actor.process,
       parentProcessName: (event.metadata.parentProcess as string | undefined) ?? undefined,
       sourceIp: event.network.sourceIp,
       destIp: event.network.destIp,

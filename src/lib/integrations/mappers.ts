@@ -35,7 +35,7 @@ export interface VendorAlert {
 
 // alert: the tool decided something is bad; telemetry: the original
 // adapters' shape; event: already mapped to OCSF (lib/ocsf/sources).
-export type Mapped = { kind: "alert"; alert: VendorAlert } | { kind: "telemetry"; source: TelemetrySource; data: Raw } | { kind: "event"; ocsf: OcsfEvent };
+export type Mapped = { kind: "alert"; alert: VendorAlert } | { kind: "telemetry"; source: TelemetrySource; data: Raw; sourceEventId?: string } | { kind: "event"; ocsf: OcsfEvent };
 
 export interface InventoryRecord {
   hostname: string;
@@ -118,11 +118,34 @@ export function severityFromNumber(value: unknown, scale: 5 | 15 | 100): CaseSev
   return "INFO";
 }
 
+// An epoch in milliseconds or seconds, as a number or a numeric string.
+const epoch = (v: unknown) => (typeof v === "string" && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : v);
+const baseName = (path: string | undefined) => path?.split(/[\\/]/).pop() || undefined;
+
+// Falcon raw events (Falcon Data Replicator, or the event stream), by
+// event_simpleName: process starts, network connections and logons get the
+// fields the detectors read; anything else is kept under its own name.
+function crowdstrikeTelemetry(r: Raw): Mapped {
+  const name = str(r.event_simpleName) ?? "FALCON_EVENT";
+  const common = { timestamp: date(epoch(r.timestamp), epoch(r.ContextTimeStamp)).toISOString(), hostname: str(r.ComputerName), user: str(r.UserName, r.UserPrincipal), vendor_event: name, aid: str(r.aid) };
+  const sourceEventId = str(r.id, r.event_id) ? `falcon:${str(r.id, r.event_id)}` : undefined;
+  if (/ProcessRollup2$/.test(name)) {
+    return { kind: "telemetry", source: "endpoint", sourceEventId, data: { ...common, event_type: "PROCESS_START", process_name: baseName(str(r.ImageFileName)) ?? str(r.FileName), command_line: str(r.CommandLine), parent_process: str(r.ParentBaseFileName), sha256: str(r.SHA256HashData), pid: str(r.RawProcessId) } };
+  }
+  if (/^NetworkConnectIP[46]$/.test(name)) {
+    return { kind: "telemetry", source: "network", sourceEventId, data: { ...common, src_ip: str(r.LocalAddressIP4, r.LocalAddressIP6), dst_ip: str(r.RemoteAddressIP4, r.RemoteAddressIP6), dst_port: str(r.RemotePort), protocol: str(r.Protocol) } };
+  }
+  if (/^UserLogon(Failed2?)?$/.test(name)) {
+    return { kind: "telemetry", source: "auth", sourceEventId, data: { ...common, result: name.startsWith("UserLogonFailed") ? "FAILED" : "SUCCESS", source_ip: str(r.RemoteAddressIP4, r.RemoteIP) } };
+  }
+  return { kind: "telemetry", source: "endpoint", sourceEventId, data: { ...common, event_type: name, process_name: str(r.FileName), command_line: str(r.CommandLine) } };
+}
+
 function crowdstrike(r: Raw): Mapped {
   // Streaming API DetectionSummaryEvent, or the Alerts API v2 entity.
   const e = (r.event && typeof r.event === "object" ? r.event : r) as Raw;
   const title = str(e.DetectName, e.display_name, e.name, e.DetectDescription);
-  if (!title) return generic(r, "endpoint");
+  if (!title) return r.event_simpleName || r.ComputerName || r.aid ? crowdstrikeTelemetry(r) : generic(r, "endpoint");
   return {
     kind: "alert",
     alert: {
@@ -143,10 +166,29 @@ function crowdstrike(r: Raw): Mapped {
   };
 }
 
+// Defender advanced hunting rows: as returned by the hunting API, or wrapped
+// by the streaming API ({ category: "AdvancedHunting-<Table>", properties }).
+function defenderTelemetry(r: Raw): Mapped {
+  const p = (r.properties && typeof r.properties === "object" ? r.properties : r) as Raw;
+  const table = str(r.category)?.replace(/^AdvancedHunting-/, "") ?? (p.ProcessCommandLine ? "DeviceProcessEvents" : p.RemoteIP && p.LogonType ? "DeviceLogonEvents" : p.RemoteIP ? "DeviceNetworkEvents" : "Defender");
+  const common = { timestamp: date(p.Timestamp, r.time).toISOString(), hostname: str(p.DeviceName), user: str(p.AccountUpn, p.AccountName, p.InitiatingProcessAccountUpn, p.InitiatingProcessAccountName), vendor_event: `${table}${p.ActionType ? `/${String(p.ActionType)}` : ""}` };
+  const sourceEventId = str(p.ReportId) ? `defender:${str(p.DeviceId) ?? ""}:${str(p.ReportId)}:${table}` : undefined;
+  if (table === "DeviceProcessEvents") {
+    return { kind: "telemetry", source: "endpoint", sourceEventId, data: { ...common, event_type: "PROCESS_START", process_name: str(p.FileName), command_line: str(p.ProcessCommandLine), parent_process: str(p.InitiatingProcessFileName), sha256: str(p.SHA256) } };
+  }
+  if (table === "DeviceLogonEvents") {
+    return { kind: "telemetry", source: "auth", sourceEventId, data: { ...common, result: /fail/i.test(String(p.ActionType ?? "")) ? "FAILED" : "SUCCESS", source_ip: str(p.RemoteIP) } };
+  }
+  if (table === "DeviceNetworkEvents") {
+    return { kind: "telemetry", source: "network", sourceEventId, data: { ...common, src_ip: str(p.LocalIP), dst_ip: str(p.RemoteIP), dst_port: str(p.RemotePort), protocol: str(p.Protocol) } };
+  }
+  return { kind: "telemetry", source: "endpoint", sourceEventId, data: { ...common, event_type: table, process_name: str(p.FileName, p.InitiatingProcessFileName), command_line: str(p.ProcessCommandLine, p.InitiatingProcessCommandLine) } };
+}
+
 function defender(r: Raw): Mapped {
   // Microsoft Graph security alert (v2).
   const title = str(r.title, r.alertDisplayName);
-  if (!title) return generic(r, "endpoint");
+  if (!title) return r.DeviceName || r.properties ? defenderTelemetry(r) : generic(r, "endpoint");
   const evidence = Array.isArray(r.evidence) ? (r.evidence as Raw[]) : [];
   const host = evidence.map((ev) => str(ev.deviceDnsName, ev.hostName)).find(Boolean);
   const user = evidence.map((ev) => str(get(ev, "userAccount.accountName"), get(ev, "userAccount.userPrincipalName"))).find(Boolean);

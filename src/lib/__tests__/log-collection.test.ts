@@ -227,3 +227,34 @@ describe("source health", () => {
     expect(median([5, 1, 3])).toBe(3);
   });
 });
+
+describe("vendor telemetry that isn't an alert", () => {
+  it("maps Falcon raw events by event_simpleName, with epoch-millisecond times and the event id", () => {
+    const [proc] = mapRecord("crowdstrike", { event_simpleName: "ProcessRollup2", timestamp: "1793431432000", ComputerName: "WS-07", UserName: "jdoe", ImageFileName: "\\Device\\HarddiskVolume3\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", CommandLine: "powershell -enc SQBFAFgA", ParentBaseFileName: "winword.exe", SHA256HashData: "a".repeat(64), id: "e-1", aid: "aid1" }, "endpoint");
+    expect(proc).toMatchObject({ kind: "telemetry", source: "endpoint", sourceEventId: "falcon:e-1", data: { event_type: "PROCESS_START", hostname: "WS-07", user: "jdoe", process_name: "powershell.exe", command_line: "powershell -enc SQBFAFgA", parent_process: "winword.exe", timestamp: new Date(1793431432000).toISOString() } });
+    expect(mapRecord("crowdstrike", { event_simpleName: "NetworkConnectIP4", ComputerName: "WS-07", LocalAddressIP4: "10.0.0.5", RemoteAddressIP4: "203.0.113.9", RemotePort: "443" }, "endpoint")[0]).toMatchObject({ source: "network", data: { dst_ip: "203.0.113.9", dst_port: "443" } });
+    expect(mapRecord("crowdstrike", { event_simpleName: "UserLogonFailed2", ComputerName: "DC-01", UserName: "admin" }, "endpoint")[0]).toMatchObject({ source: "auth", data: { result: "FAILED", user: "admin" } });
+    // Other events keep their own name, so they never count as a process start.
+    expect(mapRecord("crowdstrike", { event_simpleName: "DnsRequest", ComputerName: "WS-07" }, "endpoint")[0]).toMatchObject({ source: "endpoint", data: { event_type: "DnsRequest" } });
+    // Detections still become alerts.
+    expect(mapRecord("crowdstrike", { event: { DetectName: "Credential Theft", ComputerName: "WS-07", Severity: 4 } }, "endpoint")[0].kind).toBe("alert");
+  });
+
+  it("maps Defender advanced hunting rows, plain or from the streaming API", () => {
+    const row = { Timestamp: "2026-10-31T07:00:00Z", DeviceName: "ws-07.corp.example", DeviceId: "d1", ReportId: 77, AccountName: "jdoe", FileName: "rundll32.exe", ProcessCommandLine: "rundll32.exe evil.dll,Start", InitiatingProcessFileName: "excel.exe", SHA256: "b".repeat(64), ActionType: "ProcessCreated" };
+    expect(mapRecord("defender", row, "endpoint")[0]).toMatchObject({ kind: "telemetry", source: "endpoint", sourceEventId: "defender:d1:77:DeviceProcessEvents", data: { event_type: "PROCESS_START", hostname: "ws-07.corp.example", process_name: "rundll32.exe", parent_process: "excel.exe" } });
+    const streamed = { time: "2026-10-31T07:00:01Z", category: "AdvancedHunting-DeviceLogonEvents", properties: { Timestamp: "2026-10-31T07:00:00Z", DeviceName: "dc-01", AccountName: "admin", ActionType: "LogonFailed", RemoteIP: "198.51.100.4", LogonType: "Network", ReportId: 5, DeviceId: "d2" } };
+    expect(mapRecord("defender", streamed, "endpoint")[0]).toMatchObject({ source: "auth", data: { result: "FAILED", user: "admin", source_ip: "198.51.100.4" } });
+    expect(mapRecord("defender", { title: "Suspicious PowerShell", severity: "high", evidence: [] }, "endpoint")[0].kind).toBe("alert");
+  });
+});
+
+describe("stored telemetry rows", () => {
+  it("keep the process name and the full command line apart", async () => {
+    const { normalize, toEventRow } = await import("@/lib/siem/adapters");
+    const row = toEventRow(normalize("endpoint", { hostname: "WS-1", process_name: "powershell.exe", command_line: "powershell -enc SQBFAFgA" }), "b1");
+    expect(row).toMatchObject({ processName: "powershell.exe", commandLine: "powershell -enc SQBFAFgA" });
+    // With only a command line, it fills both, as before.
+    expect(toEventRow(normalize("endpoint", { hostname: "WS-1", command_line: "cmd /c whoami" }), "b1")).toMatchObject({ processName: "cmd /c whoami", commandLine: "cmd /c whoami" });
+  });
+});
