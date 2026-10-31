@@ -7,6 +7,7 @@ import { logAction } from "@/lib/audit";
 import { openSealed, sealFor } from "@/lib/keys";
 import { activeRulebook } from "@/lib/rulebook/service";
 import { archiveStore, residency, type ArchiveStore } from "@/lib/retention/storage";
+import { dropPartition, ensurePartitions, eventsPartitioned, listPartitions, partitionTenants } from "@/lib/retention/partitions";
 
 // Log retention. Events stay searchable in the database for a client's hot
 // period, then move to the archive store one UTC day at a time (compressed
@@ -183,10 +184,53 @@ export async function purgeDue(now = new Date(), store: ArchiveStore | null = ar
   return { archives, events, held };
 }
 
+// Whole months of events past every retention they're under: a month's
+// partition goes in one statement instead of row by row, when every client
+// with events in it is past its retention for the whole month, no hold
+// covers any of it, and no case holds any of its events. The rest falls to
+// purgeDue's batches as before.
+export async function dropExpiredPartitions(now = new Date()) {
+  if (!(await eventsPartitioned())) return { dropped: [] as string[], events: 0 };
+  const dropped: string[] = [];
+  let events = 0;
+  const rules = new Map<string, { cutoff: Date; holds: LegalHold[] }>();
+  const ruleFor = async (tenantId: string | null) => {
+    const key = tenantId ?? "";
+    if (!rules.has(key)) {
+      const { retentionDays } = await retentionRules(tenantId);
+      rules.set(key, { cutoff: startOfDay(new Date(now.getTime() - retentionDays * DAY)), holds: await activeHolds(tenantId) });
+    }
+    return rules.get(key)!;
+  };
+  for (const p of await listPartitions()) {
+    if (p.to > now) break;
+    const tenants = await partitionTenants(p);
+    // An empty month goes once it's past the longest retention anyone has.
+    const scope = tenants.length ? tenants : await scopes();
+    let expired = true;
+    for (const tenantId of scope) {
+      const r = await ruleFor(tenantId);
+      if (p.to > r.cutoff || (tenants.length && heldBetween(r.holds, p.from, p.to))) {
+        expired = false;
+        break;
+      }
+    }
+    if (!expired) continue;
+    const n = await dropPartition(p);
+    if (n == null) continue;
+    dropped.push(p.name);
+    events += n;
+    await logAction({ action: "retention.partition_dropped", detail: { partition: p.name, from: p.from.toISOString(), to: p.to.toISOString(), events: n, tenants: tenants.length } });
+  }
+  return { dropped, events };
+}
+
 export async function runRetention(now = new Date()) {
+  const partitions = await ensurePartitions(now);
   const a = await archiveDue(now);
+  const dropped = await dropExpiredPartitions(now);
   const p = await purgeDue(now);
-  return { ...a, purged: p };
+  return { ...a, partitions: { ...partitions, ...dropped }, purged: p };
 }
 
 // ---------------------------------------------------------------- reading

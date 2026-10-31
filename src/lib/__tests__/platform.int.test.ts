@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { createServer as createTcpServer, type AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { UserRole } from "@prisma/client";
+import type { Prisma, UserRole } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { logAction, verifyAuditChain } from "@/lib/audit";
@@ -71,7 +71,8 @@ import { reviewUpgrades } from "@/lib/pricing/upgrades";
 import { processDeliveries, queueToContact } from "@/lib/alerts/outbox";
 import { investigate } from "@/lib/ai/investigator/run";
 import { addTuning, checkRules, importRules, setRuleStatus } from "@/lib/detections/service";
-import { archiveDue, archiveLines, placeHold, purgeDue, readArchive, releaseHold, setRetention } from "@/lib/retention/service";
+import { archiveDue, archiveLines, dropExpiredPartitions, placeHold, purgeDue, readArchive, releaseHold, setRetention } from "@/lib/retention/service";
+import { dropPartition, ensureMonth, ensurePartitions, eventsPartitioned, listPartitions, partitionName } from "@/lib/retention/partitions";
 import { mkdtemp, readFile as readFileFs, writeFile as writeFileFs } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1512,6 +1513,60 @@ tags: [attack.execution, attack.t1059.001]`;
       await expect(readArchive(archives[1].id, adminId)).rejects.toThrow(/recorded hash/);
     } finally {
       delete process.env.HELIOS_ARCHIVE_DIR;
+    }
+  });
+
+  it("keeps events in monthly partitions, and drops a whole month once it's past everyone's retention", async () => {
+    expect(await eventsPartitioned()).toBe(true);
+    const where = async (id: string) => (await db.$queryRaw<Array<{ part: string }>>`SELECT tableoid::regclass::text AS part FROM security_events WHERE id = ${id}`)[0]?.part;
+    const tenantA = await db.tenant.create({ data: { name: "Test · Partitions A", slug: "test-partitions-a" } });
+    const tenantB = await db.tenant.create({ data: { name: "Test · Partitions B", slug: "test-partitions-b" } });
+    const event = (tenantId: string, at: string, extra: Partial<Prisma.SecurityEventCreateManyInput> = {}) => ({ id: `part-${tenantId.slice(-6)}-${at}-${Math.random().toString(36).slice(2, 8)}`, tenantId, timestamp: new Date(at), source: "endpoint", eventType: "PROCESS_START", hostName: "PART-WS", ...extra });
+
+    // This month and the next three exist; live events never land in the default partition.
+    await ensurePartitions(new Date());
+    const months = (await listPartitions()).map((p) => p.name);
+    for (let i = 0; i <= 3; i++) expect(months).toContain(partitionName(new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + i, 1))));
+    const live = event(tenantA.id, new Date().toISOString());
+    await db.securityEvent.createMany({ data: [live] });
+    expect(await where(live.id)).toBe(partitionName(new Date()));
+
+    // A row for a month with no partition waits in the default one, and moves when its month is made.
+    const far = new Date(Date.UTC(2031, 4, 1));
+    const existing = (await listPartitions()).find((p) => p.name === partitionName(far));
+    if (existing) await dropPartition(existing);
+    const stray = event(tenantA.id, "2031-05-10T10:00:00.000Z");
+    await db.securityEvent.createMany({ data: [stray] });
+    expect(await where(stray.id)).toBe("security_events_default");
+    expect(await ensureMonth(far)).toBe(true);
+    expect(await ensureMonth(far)).toBe(false);
+    expect(await where(stray.id)).toBe("security_events_2031_05");
+    const [{ rls }] = await db.$queryRaw<Array<{ rls: boolean }>>`SELECT relforcerowsecurity AS rls FROM pg_class WHERE relname = 'security_events_2031_05'`;
+    expect(rls).toBe(true);
+    // A resend of the same source event is still stored once.
+    const sourced = { ...event(tenantA.id, "2031-05-11T10:00:00.000Z"), integrationId: "part-int", sourceEventId: "src-1" };
+    expect((await db.securityEvent.createMany({ data: [sourced, { ...sourced, id: `${sourced.id}-again` }], skipDuplicates: true })).count).toBe(1);
+
+    // Old months: one only past retention, one holding case evidence, one under a hold.
+    for (const m of [0, 1, 2]) await ensureMonth(new Date(Date.UTC(2024, m, 1)));
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Old case", severity: "LOW", tenantId: tenantA.id, deferPipelines: true });
+    await db.securityEvent.createMany({ data: [event(tenantA.id, "2024-01-15T00:00:00.000Z"), event(tenantA.id, "2024-01-20T00:00:00.000Z"), event(tenantA.id, "2024-02-15T00:00:00.000Z", { caseId: kase.id }), event(tenantA.id, "2024-02-16T00:00:00.000Z"), event(tenantB.id, "2024-03-15T00:00:00.000Z")] });
+    await placeHold({ tenantId: tenantB.id, reason: "Litigation hold, matter 2024-03", fromAt: new Date("2024-03-10T00:00:00Z"), toAt: new Date("2024-03-20T00:00:00Z") }, adminId);
+    const r = await dropExpiredPartitions(new Date());
+    expect(r.dropped).toContain("security_events_2024_01");
+    expect(r.dropped).not.toContain("security_events_2024_02");
+    expect(r.dropped).not.toContain("security_events_2024_03");
+    const left = (await listPartitions()).map((p) => p.name);
+    expect(left).toEqual(expect.arrayContaining(["security_events_2024_02", "security_events_2024_03", partitionName(new Date()), "security_events_2031_05"]));
+    expect(left).not.toContain("security_events_2024_01");
+    expect(await db.securityEvent.count({ where: { tenantId: tenantA.id, timestamp: { lt: new Date("2024-02-01T00:00:00Z") } } })).toBe(0);
+    expect(await db.securityEvent.count({ where: { caseId: kase.id } })).toBe(1);
+    expect(await db.auditLog.count({ where: { action: "retention.partition_dropped" } })).toBeGreaterThan(0);
+
+    // Tidy the months this test made.
+    for (const p of (await listPartitions()).filter((x) => ["security_events_2024_02", "security_events_2024_03", "security_events_2031_05"].includes(x.name))) {
+      await db.securityEvent.updateMany({ where: { timestamp: { gte: p.from, lt: p.to } }, data: { caseId: null } });
+      await dropPartition(p);
     }
   });
 

@@ -326,7 +326,10 @@ model TimelineEntry {
 // Wazuh/Google SecOps parsers. Detection runs over a window of these rows;
 // events tied to an investigation carry its caseId.
 model SecurityEvent {
-  id                String   @id @default(cuid())
+  // Partitioned by month on timestamp (lib/retention/partitions.ts):
+  // Postgres wants the partition key in the primary key and every unique
+  // index. Look an event up with findFirst({ where: { id } }).
+  id                String   @default(cuid())
   batchId           String? // one ingestion run / uploaded file
   caseId            String?
   timestamp         DateTime
@@ -362,7 +365,9 @@ model SecurityEvent {
   case   Case?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  @@unique([integrationId, sourceEventId])
+  @@id([id, timestamp])
+  // A resend of the same source event (same id, same timestamp) is stored once.
+  @@unique([integrationId, sourceEventId, timestamp])
   @@index([tenantId, classUid, timestamp])
   @@index([tenantId, timestamp])
   @@index([timestamp])
