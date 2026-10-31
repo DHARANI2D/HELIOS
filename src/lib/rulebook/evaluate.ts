@@ -141,14 +141,16 @@ export function rulebookHits(rb: Rulebook, ctx: RuleContext): RuleHit[] {
     }
   }
 
-  if (a === "DISABLE_USER" && ctx.target) {
+  // A password reset locks the account out just as surely as disabling it.
+  if ((a === "DISABLE_USER" || a === "RESET_PASSWORD") && ctx.target) {
+    const verb = a === "DISABLE_USER" ? "be disabled" : "have its password reset";
     const protectedBy = (["breakGlass", "service"] as const).flatMap((k) => rb.identities[k].map((p, i) => ({ k, p, i }))).find(({ p }) => matchesIdentity(p, ctx.target));
     if (protectedBy) {
       const what = protectedBy.k === "breakGlass" ? "break-glass account" : "service account";
-      hits.push({ rule: `identities.${protectedBy.k}[${protectedBy.i}]`, outcome: "BLOCKED", hard: true, reason: `${ctx.target} is a ${what} the client says must never be disabled` });
+      hits.push({ rule: `identities.${protectedBy.k}[${protectedBy.i}]`, outcome: "BLOCKED", hard: true, reason: `${ctx.target} is a ${what} the client says must never ${verb}` });
     }
     const vip = rb.identities.vip.findIndex((p) => matchesIdentity(p, ctx.target));
-    if (vip >= 0) hits.push({ rule: `identities.vip[${vip}]`, outcome: "PENDING_APPROVAL", hard: false, reason: `${ctx.target} is a VIP account: approval only, never disabled automatically` });
+    if (vip >= 0) hits.push({ rule: `identities.vip[${vip}]`, outcome: "PENDING_APPROVAL", hard: false, reason: `${ctx.target} is a VIP account: approval only, never ${verb} automatically` });
   }
 
   if (ctx.allowlisted) {

@@ -79,6 +79,7 @@ import { notify } from "@/lib/notifications";
 import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNoticePdf, requestApproval, saveNotice, setClockStart, submitNotice } from "@/lib/compliance/service";
 import { evidenceMap } from "@/lib/compliance/iso27001";
 import type { SessionUser } from "@/lib/session";
+import { purgeTargetOfCase } from "@/lib/response/targets";
 import { commercialClocks, contractFromQuote, convertPilot, generateInvoices, issueInvoice, markPaid, pilotReport, saveBillingProfile, saveContract, sendContract, signContract, voidInvoice } from "@/lib/billing/service";
 import { acknowledgePage, addOverride, generateShifts, onCallNow, pageOnCall, runPaging } from "@/lib/operations/paging";
 import { runQaSampling, sampleWeek, submitQaReview } from "@/lib/operations/qa";
@@ -1621,6 +1622,23 @@ tags: [attack.execution, attack.t1059.001]`;
     expect(await voidInvoice(q2.id, "", sales.id)).toBe("discarded");
     await commercialClocks(new Date(now.getTime() + 400 * DAY));
     expect((await db.contract.findUniqueOrThrow({ where: { id: contract.id } })).status).toBe("ENDED");
+  });
+
+  it("purges an email case's message or hands it to a person, and won't reset a protected account's password", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Mail purge", slug: "test-mail-purge" } });
+    const author = { id: adminId, name: "Test Admin" };
+    const kase = await createCase({ sourceType: "EMAIL_ANALYSIS", title: "Email: Invoice overdue", severity: "HIGH", tenantId: tenant.id, deferPipelines: true, metadata: { email: { messageId: "<lure-1@evil.example>", to: "Ann <ann@corp.example>", cc: "bob@corp.example" } } });
+    const target = purgeTargetOfCase((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).metadata)!;
+    expect(target).toBe("<lure-1@evil.example> to ann@corp.example, bob@corp.example");
+    // No Exchange Online connector: a person does it, told exactly what.
+    const purge = await requestAnalystAction({ caseId: kase.id, actionType: "PURGE_EMAIL", target, actor: author, canApprove: true });
+    expect(purge.status).toBe("MANUAL_REQUIRED");
+    expect((await db.responseAction.findFirstOrThrow({ where: { caseId: kase.id, actionType: "PURGE_EMAIL" } })).result).toMatchObject({ summary: expect.stringContaining("Remove message <lure-1@evil.example> from ann@corp.example, bob@corp.example") });
+
+    await saveDraft(tenant.id, { body: { identities: { breakGlass: ["break-glass*"] } }, reason: "Onboarding" }, author);
+    await signRulebook(tenant.id, { ...author, isClient: false }, "Client approved by email today");
+    const reset = await requestAnalystAction({ caseId: kase.id, actionType: "RESET_PASSWORD", target: "break-glass-01@corp.example", actor: author, canApprove: true });
+    expect(reset.status).toBe("BLOCKED");
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

@@ -563,6 +563,10 @@ enum PlaybookActionType {
   DISABLE_USER
   QUARANTINE_FILE
   BLOCK_SENDER
+  // Remove a delivered message from its recipients' mailboxes.
+  PURGE_EMAIL
+  // Set a new password (required to change at next sign-in) and end sessions.
+  RESET_PASSWORD
   // Rollbacks for the containment actions above.
   RELEASE_HOST
   UNBLOCK_IP

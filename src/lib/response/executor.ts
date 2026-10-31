@@ -6,6 +6,7 @@ import { renderTemplate } from "@/lib/playbooks/trigger";
 import { dispatchAction, type DispatchResult } from "@/lib/integrations/dispatch";
 import { dispatchChatMessage } from "@/lib/integrations/chat";
 import { humanRulebookGate } from "@/lib/rulebook/service";
+import { parsePurgeTarget, purgeTargetOfCase } from "@/lib/response/targets";
 
 export { ACTION_LABEL };
 
@@ -54,6 +55,8 @@ export const CONTAINMENT_ACTIONS = new Set<PlaybookActionType>([
   "DISABLE_USER",
   "QUARANTINE_FILE",
   "BLOCK_SENDER",
+  "PURGE_EMAIL",
+  "RESET_PASSWORD",
 ]);
 
 export const ROLLBACK_OF: Partial<Record<PlaybookActionType, PlaybookActionType>> = {
@@ -240,6 +243,26 @@ export async function executeAction(req: ActionRequest, kase: Case, ctx: ActionC
       if (no) return no;
       await setIndicatorBlocked(sender.includes("@") ? "EMAIL_ADDRESS" : "DOMAIN", sender.toLowerCase(), true);
       return viaConnector(base, kase, req, "BLOCK_SENDER", sender, { done: `Blocked sender ${sender}`, todo: `Block sender ${sender}` }, { sender });
+    }
+
+    case "PURGE_EMAIL": {
+      // "<message-id> to a@x, b@y": from the request, or the email case itself.
+      const target = p.message ?? purgeTargetOfCase(kase.metadata);
+      if (!target) return { ...base, status: "succeeded", skipped: true, summary: "No message id and recipients on this case" };
+      const parsed = parsePurgeTarget(target);
+      if (!parsed) return { ...base, status: "failed", summary: `Not done — "${target.slice(0, 120)}" isn't a message: use "<message-id> to recipient@example.com, …"` };
+      const no = await refusal(base, kase, req, target);
+      if (no) return no;
+      const n = parsed.recipients.length;
+      return viaConnector(base, kase, req, "PURGE_EMAIL", target, { done: `Removed message ${parsed.messageId} from ${n} mailbox${n === 1 ? "" : "es"}`, todo: `Remove message ${parsed.messageId} from ${parsed.recipients.join(", ")}` }, { messageId: parsed.messageId, recipients: parsed.recipients });
+    }
+
+    case "RESET_PASSWORD": {
+      const user = p.user ?? ctx.user;
+      if (!user) return { ...base, status: "succeeded", skipped: true, summary: "No account identified on this case" };
+      const no = await refusal(base, kase, req, user);
+      if (no) return no;
+      return viaConnector(base, kase, req, "RESET_PASSWORD", user, { done: `Reset the password of ${user} and ended its sessions`, todo: `Reset the password of ${user} (change required at next sign-in) and end its sessions` }, { user });
     }
 
     case "KILL_PROCESS": {

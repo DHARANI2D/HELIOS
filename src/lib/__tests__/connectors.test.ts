@@ -9,6 +9,8 @@ import { crowdstrike } from "@/lib/connectors/vendors/crowdstrike";
 import { sentinelone } from "@/lib/connectors/vendors/sentinelone";
 import { okta } from "@/lib/connectors/vendors/okta";
 import { cloudflare } from "@/lib/connectors/vendors/cloudflare";
+import { exchange } from "@/lib/connectors/vendors/exchange";
+import { parsePurgeTarget, purgeTarget, purgeTargetOfCase } from "@/lib/response/targets";
 
 // Contract tests against each vendor's documented request and response
 // shapes: a fake API that answers by method and URL, and records calls.
@@ -225,5 +227,92 @@ describe("Cloudflare", () => {
     expect(unpre).toMatchObject({ ok: true, resolved: { id: "r1" }, alreadyDone: false });
     const undone = await cloudflare.execute(req(c, "UNBLOCK_IP", "203.0.113.9"), unpre.ok ? unpre.resolved : (null as never));
     expect((await cloudflare.verify(req(c, "UNBLOCK_IP", ""), undone.ref)).state).toBe("confirmed");
+  });
+});
+
+describe("Microsoft Entra ID password reset", () => {
+  it("sets a random password to change at next sign-in, ends sessions, and confirms both", async () => {
+    const at = new Date();
+    const later = new Date(at.getTime() + 5000).toISOString();
+    const { http, calls } = fakeApi([
+      MS_TOKEN,
+      { method: "GET", match: /\/users\/jdoe%40corp\.example\?/, reply: [{ body: { id: "u1", userPrincipalName: "jdoe@corp.example", accountEnabled: true, onPremisesSyncEnabled: null } }] },
+      { method: "GET", match: /\/users\/hybrid%40corp\.example\?/, reply: [{ body: { id: "u2", userPrincipalName: "hybrid@corp.example", accountEnabled: true, onPremisesSyncEnabled: true } }] },
+      { method: "PATCH", match: /\/users\/u1$/, reply: [{ status: 204 }] },
+      { method: "POST", match: /\/users\/u1\/revokeSignInSessions$/, reply: [{ body: { value: true } }] },
+      { method: "GET", match: /\/users\/u1\?\$select=id,lastPasswordChangeDateTime/, reply: [{ body: { id: "u1", lastPasswordChangeDateTime: "2020-01-01T00:00:00Z", signInSessionsValidFromDateTime: later } }, { body: { id: "u1", lastPasswordChangeDateTime: later, signInSessionsValidFromDateTime: later } }] },
+    ]);
+    const c = ctx(http, MS, { clientSecret: "s" });
+    expect(await entra.preflight(req(c, "RESET_PASSWORD", "hybrid@corp.example"))).toMatchObject({ ok: false, reason: expect.stringMatching(/on-premises/) });
+    const pre = await entra.preflight(req(c, "RESET_PASSWORD", "jdoe@corp.example"));
+    expect(pre).toMatchObject({ ok: true });
+    const done = await entra.execute(req(c, "RESET_PASSWORD", "jdoe@corp.example"), pre.ok ? pre.resolved : (null as never));
+    const body = calls.find((x) => x.method === "PATCH")!.body as { passwordProfile: { forceChangePasswordNextSignIn: boolean; password: string } };
+    expect(body.passwordProfile.forceChangePasswordNextSignIn).toBe(true);
+    expect(body.passwordProfile.password).toMatch(/^.{28,}$/);
+    // The password isn't kept anywhere HELIOS writes.
+    expect(JSON.stringify(done)).not.toContain(body.passwordProfile.password);
+    expect(calls.some((x) => x.url.endsWith("/u1/revokeSignInSessions"))).toBe(true);
+    expect((await entra.verify(req(c, "RESET_PASSWORD", ""), done.ref)).state).toBe("pending");
+    expect((await entra.verify(req(c, "RESET_PASSWORD", ""), done.ref)).state).toBe("confirmed");
+  });
+});
+
+describe("Microsoft Exchange Online", () => {
+  const target = purgeTarget("<abc@mail.evil.example>", ["a@corp.example", "B@corp.example", "gone@corp.example"]);
+
+  it("reads purge targets back, and builds one from an email case", () => {
+    expect(target).toBe("<abc@mail.evil.example> to a@corp.example, b@corp.example, gone@corp.example");
+    expect(parsePurgeTarget(target)).toEqual({ messageId: "<abc@mail.evil.example>", recipients: ["a@corp.example", "b@corp.example", "gone@corp.example"] });
+    expect(parsePurgeTarget("abc@x to y@z")).toBeNull();
+    expect(purgeTargetOfCase({ email: { messageId: "m1@x.example", to: "Ann <ann@corp.example>, bob@corp.example", cc: "ann@corp.example" } })).toBe("<m1@x.example> to ann@corp.example, bob@corp.example");
+    expect(purgeTargetOfCase({ email: { to: "ann@corp.example" } })).toBeNull();
+  });
+
+  it("finds each copy by Message-ID, moves it to Recoverable Items, and confirms none is left", async () => {
+    const found = { value: [{ id: "m-a" }] };
+    const { http, calls } = fakeApi([
+      MS_TOKEN,
+      { method: "GET", match: /\/users\/a%40corp\.example\/messages\?\$filter=internetMessageId%20eq%20'%3Cabc%40mail\.evil\.example%3E'/, reply: [{ body: found }, { body: found }, { body: found }, { body: { value: [] } }] },
+      { method: "GET", match: /\/users\/b%40corp\.example\/messages\?/, reply: [{ body: { value: [{ id: "m-b1" }, { id: "m-b2" }] } }, { body: { value: [{ id: "m-b1" }, { id: "m-b2" }] } }, { body: { value: [] } }] },
+      { method: "GET", match: /\/users\/gone%40corp\.example\/messages\?/, reply: [{ status: 404, body: { error: { code: "ErrorInvalidUser" } } }] },
+      { method: "POST", match: /\/messages\/m-[ab]\d?\/move$/, reply: [{ status: 201, body: { id: "moved" } }] },
+    ]);
+    const c = ctx(http, MS, { clientSecret: "s" });
+    const pre = await exchange.preflight(req(c, "PURGE_EMAIL", target));
+    expect(pre).toMatchObject({ ok: true, alreadyDone: false, resolved: { name: "<abc@mail.evil.example> (3 copies in 2 of 3 mailboxes)" } });
+    const done = await exchange.execute(req(c, "PURGE_EMAIL", target), pre.ok ? pre.resolved : (null as never));
+    const moves = calls.filter((x) => x.method === "POST" && x.url.endsWith("/move"));
+    expect(moves).toHaveLength(3);
+    expect(moves.every((m) => (m.body as { destinationId: string }).destinationId === "recoverableitemsdeletions")).toBe(true);
+    expect((await exchange.verify(req(c, "PURGE_EMAIL", target), done.ref)).state).toBe("pending");
+    expect((await exchange.verify(req(c, "PURGE_EMAIL", target), done.ref)).state).toBe("confirmed");
+  });
+
+  it("calls a message that's in no mailbox already gone, and refuses when no recipient has a mailbox", async () => {
+    const { http } = fakeApi([MS_TOKEN, { method: "GET", match: /\/users\/a%40corp\.example\/messages/, reply: [{ body: { value: [] } }] }, { method: "GET", match: /\/users\/x%40other\.example\/messages/, reply: [{ status: 404 }] }]);
+    const c = ctx(http, MS, { clientSecret: "s" });
+    expect(await exchange.preflight(req(c, "PURGE_EMAIL", purgeTarget("<abc@x>", ["a@corp.example"])))).toMatchObject({ ok: true, alreadyDone: true });
+    expect(await exchange.preflight(req(c, "PURGE_EMAIL", purgeTarget("<abc@x>", ["x@other.example"])))).toMatchObject({ ok: false });
+  });
+});
+
+describe("CrowdStrike Falcon file block", () => {
+  const sha = "a".repeat(64);
+  it("blocks a hash with a prevent IOC on every platform and confirms it", async () => {
+    forgetToken("cs-ioc:falcon");
+    const { http, calls } = fakeApi([
+      { method: "POST", match: /oauth2\/token/, reply: [{ status: 201, body: { access_token: "cs-token", expires_in: 1799 } }] },
+      { method: "GET", match: /iocs\/combined\/indicator\/v1\?filter=type%3A'sha256'%2Bvalue%3A'a{64}'/, reply: [{ body: { resources: [] } }, { body: { resources: [{ id: "ioc1", action: "prevent", value: sha }] } }] },
+      { method: "POST", match: /iocs\/entities\/indicators\/v1$/, reply: [{ status: 201, body: { resources: [{ id: "ioc1" }] } }] },
+    ]);
+    const c = ctx(http, { clientId: "id" }, { clientSecret: "s" }, "cs-ioc");
+    expect(await crowdstrike.preflight(req(c, "QUARANTINE_FILE", "b".repeat(40)))).toMatchObject({ ok: false, reason: expect.stringMatching(/SHA-256 or MD5/) });
+    const pre = await crowdstrike.preflight(req(c, "QUARANTINE_FILE", sha.toUpperCase()));
+    expect(pre).toMatchObject({ ok: true, alreadyDone: false });
+    const done = await crowdstrike.execute(req(c, "QUARANTINE_FILE", sha.toUpperCase()), pre.ok ? pre.resolved : (null as never));
+    const body = calls.find((x) => x.method === "POST" && x.url.endsWith("/indicators/v1"))!.body as { comment: string; indicators: Array<Record<string, unknown>> };
+    expect(body.indicators[0]).toMatchObject({ type: "sha256", value: sha, action: "prevent", platforms: ["windows", "mac", "linux"], applied_globally: true, source: "HELIOS" });
+    expect((await crowdstrike.verify(req(c, "QUARANTINE_FILE", sha), done.ref)).state).toBe("confirmed");
   });
 });

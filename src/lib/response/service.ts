@@ -28,6 +28,8 @@ const PARAM_FOR: Partial<Record<PlaybookActionType, string>> = {
   KILL_PROCESS: "process",
   QUARANTINE_FILE: "hash",
   BLOCK_SENDER: "sender",
+  PURGE_EMAIL: "message",
+  RESET_PASSWORD: "user",
   REVOKE_AGENT: "agentId",
   RESTORE_AGENT: "agentId",
 };

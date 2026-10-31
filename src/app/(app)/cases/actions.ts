@@ -20,6 +20,7 @@ import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
 import { DISPATCHABLE_AGENTS, type AgentKey } from "@/lib/ai/catalog";
 import { runAgentOnCase } from "@/lib/ai/first-response";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
+import { ANALYST_ONLY_ACTIONS } from "@/lib/response/labels";
 import { completeManualAction, decideResponseAction, requestAnalystAction, rollbackResponseAction } from "@/lib/response/service";
 import { action } from "@/lib/action";
 
@@ -177,7 +178,7 @@ export const aiFeedbackAction = action(async function aiFeedbackAction(runId: st
 
 // --- response actions ----------------------------------------------------
 
-const REQUESTABLE = [...PROPOSABLE_ACTIONS] as [PlaybookActionType, ...PlaybookActionType[]];
+const REQUESTABLE = [...PROPOSABLE_ACTIONS, ...ANALYST_ONLY_ACTIONS] as [PlaybookActionType, ...PlaybookActionType[]];
 
 export const requestResponseAction = action(async function requestResponseAction(caseId: string, input: { actionType: string; target: string; rationale?: string }) {
   const user = await caseActor(caseId, "containment.request");

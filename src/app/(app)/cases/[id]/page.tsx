@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ArrowLeft, Ban, BellRing, Bot, Building2, ClipboardCheck, Crosshair, Download, Eye, Fingerprint, Landmark, Link2, ListChecks, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
 
+import type { PlaybookActionType } from "@prisma/client";
+
 import { db } from "@/lib/db";
 import { dbFor } from "@/lib/tenant-db";
 import { pageGuard, type SessionUser } from "@/lib/session";
@@ -46,6 +48,7 @@ import { onCallNow } from "@/lib/operations/paging";
 import { qaContext } from "@/lib/operations/qa";
 import { parseProgress, parseSteps } from "@/lib/runbooks/match";
 import { CaseRunbooks } from "@/components/runbooks/case-runbooks";
+import { purgeTargetOfCase } from "@/lib/response/targets";
 import { QaReviewForm } from "@/components/operations/qa-review";
 import { AcknowledgePage, PageOnCall } from "@/components/operations/oncall-controls";
 
@@ -151,7 +154,7 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
     ...clientUsers.map((u) => ({ id: u.id, name: u.name ?? u.email, role: `${roleLabel(u.role)} · ${kase.tenant?.name ?? "client"}`, client: true })),
   ];
 
-  const requestable = PROPOSABLE_ACTIONS.map((value) => {
+  const fromEvidence = PROPOSABLE_ACTIONS.map((value) => {
     const pool =
       value === "ISOLATE_HOST" || value === "COLLECT_LOGS" ? evidence.entities.hosts
         : value === "BLOCK_IP" ? evidence.entities.ips
@@ -160,8 +163,14 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
               : value === "QUARANTINE_FILE" ? evidence.entities.hashes
                 : value === "BLOCK_SENDER" ? [...evidence.entities.emails, ...evidence.entities.domains]
                   : evidence.entities.agents;
-    return { value, label: ACTION_LABEL[value], targets: pool.filter((t) => matchTarget(value, t, evidence.entities)).slice(0, 25) };
-  }).filter((r) => r.targets.length > 0);
+    return { value: value as PlaybookActionType, label: ACTION_LABEL[value], targets: pool.filter((t) => matchTarget(value, t, evidence.entities)).slice(0, 25) };
+  });
+  const requestable = [
+    ...fromEvidence,
+    // Analysts' own: purge the email this case is about, reset an account's password.
+    { value: "PURGE_EMAIL" as PlaybookActionType, label: ACTION_LABEL.PURGE_EMAIL, targets: [purgeTargetOfCase(kase.metadata)].filter((t): t is string => !!t) },
+    { value: "RESET_PASSWORD" as PlaybookActionType, label: ACTION_LABEL.RESET_PASSWORD, targets: evidence.entities.users.slice(0, 25) },
+  ].filter((r) => r.targets.length > 0);
 
   return (
     <div className="flex flex-col gap-6">

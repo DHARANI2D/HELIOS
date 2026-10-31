@@ -7,11 +7,12 @@ import { crowdstrike } from "@/lib/connectors/vendors/crowdstrike";
 import { sentinelone } from "@/lib/connectors/vendors/sentinelone";
 import { okta } from "@/lib/connectors/vendors/okta";
 import { cloudflare } from "@/lib/connectors/vendors/cloudflare";
+import { exchange } from "@/lib/connectors/vendors/exchange";
 
 // Native response connectors by the catalog tools they serve. A tool without
 // one can still act through the signed response webhook (a SOAR or script).
 
-export const CONNECTORS: NativeConnector[] = [defender, entra, crowdstrike, sentinelone, okta, cloudflare];
+export const CONNECTORS: NativeConnector[] = [defender, entra, crowdstrike, sentinelone, okta, cloudflare, exchange];
 
 export function connectorForTool(toolKey: string): NativeConnector | undefined {
   return CONNECTORS.find((c) => c.tools.includes(toolKey));

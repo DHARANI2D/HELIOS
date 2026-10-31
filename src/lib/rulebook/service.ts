@@ -57,6 +57,7 @@ const ALLOWLIST_KIND: Partial<Record<PlaybookActionType, string>> = {
   COLLECT_LOGS: "host",
   BLOCK_IP: "ip",
   DISABLE_USER: "user",
+  RESET_PASSWORD: "user",
   BLOCK_SENDER: "sender",
   QUARANTINE_FILE: "hash",
   KILL_PROCESS: "process",

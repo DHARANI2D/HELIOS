@@ -261,13 +261,14 @@ Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable th
 ### Response actions (`lib/response`)
 
 `executor.ts` is the only place an action happens.
-- **Native connectors** (`lib/connectors`): HELIOS calls the vendor's API with the client's own least-privilege credentials, and these are preferred when set up. There are six:
+- **Native connectors** (`lib/connectors`): HELIOS calls the vendor's API with the client's own least-privilege credentials, and these are preferred when set up. There are seven:
 
   | Connector | Actions |
   |---|---|
   | Microsoft Defender for Endpoint | Isolate and release devices; block file hashes and IPs with indicators |
-  | Microsoft Entra ID (Graph) | Disable an account and revoke its sessions; re-enable it |
-  | CrowdStrike Falcon | Contain a host; lift containment |
+  | Microsoft Entra ID (Graph) | Disable an account and revoke its sessions; re-enable it; reset its password (a random one HELIOS doesn't keep, to change at the next sign-in) and end its sessions |
+  | Microsoft Exchange Online (Graph mail) | Purge a delivered message: each recipient's copy, found by its Message-ID, moved to Recoverable Items |
+  | CrowdStrike Falcon | Contain a host; lift containment; block a file's SHA-256 or MD5 with a prevent IOC |
   | SentinelOne | Disconnect an agent from the network; reconnect it |
   | Okta | Suspend an account and clear its sessions; unsuspend it |
   | Cloudflare | Block an IP account-wide with an IP Access rule; remove the block |
@@ -278,6 +279,15 @@ Every job can be repeated safely. Set `HELIOS_BACKGROUND_JOBS=off` to disable th
   3. **Verify:** read the vendor's state back.
 
   A request the vendor hasn't confirmed yet is `IN_PROGRESS`, which never counts as containment. The verification job follows it every 30 seconds until it is confirmed (`EXECUTED`, and the inventory is updated), fails, or runs past 30 minutes.
+
+  **The newer actions:**
+  - **Purge email** (`PURGE_EMAIL`): the target is `<message-id> to a@x, b@y`, built from an email case's Message-ID, To and Cc. It's confirmed when no recipient's mailbox lists the message any more. An admin can restore it from Recoverable Items. The app needs `Mail.ReadWrite`; limit it to the right mailboxes with RBAC for Applications in Exchange Online.
+  - **Reset password** (`RESET_PASSWORD`): it's refused for an account synced from on-premises AD (change it there). It's confirmed when `lastPasswordChangeDateTime` and `signInSessionsValidFromDateTime` are past the request. It needs `User-PasswordProfile.ReadWrite.All`, with the app holding at least the User Administrator role. The rulebook protects break-glass and service accounts from a reset as it does from a disable, and VIP accounts need approval.
+  - **Not automated:** analysts and playbooks can ask for both; the AI doesn't propose them. Neither has an automatic rollback: a purged message is restored from Recoverable Items, and a reset password is changed by its owner.
+- **Not covered yet.** These go through a signed webhook or are done by hand:
+  - **Tenant-wide sender blocks in Exchange Online:** the Tenant Allow/Block List is Exchange Online PowerShell (`New-TenantAllowBlockListItems`), not Microsoft Graph.
+  - **Defender's investigation package, and new SentinelOne actions:** their documentation couldn't be reached from the build environment, and connectors aren't written from memory.
+  - **CrowdStrike file blocks:** the IOC body follows FalconPy's payload, but the `prevent` action value isn't confirmed in the public sources; check it in a lab.
 
   **Dry-run mode** runs preflight only, reports what it would do, and leaves the action to do by hand. Contract tests run each connector against its vendor's documented request and response shapes. The vendor docs couldn't be opened from the build environment, so check every connector against a lab tenant before production.
 - **Through a webhook.** Otherwise effects go through the tenant's response webhook: an onboarded tool whose catalog entry supports the action and has a webhook URL. That connector gets a signed request (`integrations/dispatch.ts`).

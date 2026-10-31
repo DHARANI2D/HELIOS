@@ -12,7 +12,7 @@ export type Severity = (typeof SEVERITIES)[number];
 
 // The containment actions a rulebook governs. Rollbacks (release, unblock,
 // re-enable, restore) undo containment and are never restricted.
-export const RULED_ACTIONS = ["ISOLATE_HOST", "BLOCK_IP", "KILL_PROCESS", "QUARANTINE_FILE", "DISABLE_USER", "BLOCK_SENDER", "COLLECT_LOGS", "REVOKE_AGENT"] as const;
+export const RULED_ACTIONS = ["ISOLATE_HOST", "BLOCK_IP", "KILL_PROCESS", "QUARANTINE_FILE", "DISABLE_USER", "RESET_PASSWORD", "BLOCK_SENDER", "PURGE_EMAIL", "COLLECT_LOGS", "REVOKE_AGENT"] as const;
 export type RuledAction = (typeof RULED_ACTIONS)[number];
 
 export const ACTION_MODES = {
@@ -112,7 +112,9 @@ const DEFAULT_ACTIONS: Record<RuledAction, ActionRule> = {
   KILL_PROCESS: { mode: "approve", autoFrom: "HIGH" },
   QUARANTINE_FILE: { mode: "approve", autoFrom: "HIGH" },
   DISABLE_USER: { mode: "approve", autoFrom: "CRITICAL" },
+  RESET_PASSWORD: { mode: "approve", autoFrom: "CRITICAL" },
   BLOCK_SENDER: { mode: "approve", autoFrom: "HIGH" },
+  PURGE_EMAIL: { mode: "approve", autoFrom: "HIGH" },
   COLLECT_LOGS: { mode: "approve", autoFrom: "MEDIUM" },
   REVOKE_AGENT: { mode: "approve", autoFrom: "HIGH" },
 };
@@ -226,7 +228,9 @@ export const RULED_ACTION_LABEL: Record<RuledAction, string> = {
   KILL_PROCESS: "Kill process",
   QUARANTINE_FILE: "Quarantine file",
   DISABLE_USER: "Disable account",
+  RESET_PASSWORD: "Reset password",
   BLOCK_SENDER: "Block sender",
+  PURGE_EMAIL: "Purge email",
   COLLECT_LOGS: "Collect logs",
   REVOKE_AGENT: "Revoke AI agent",
 };

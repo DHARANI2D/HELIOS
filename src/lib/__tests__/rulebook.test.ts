@@ -66,6 +66,10 @@ describe("rulebook rules", () => {
     expect(disable("svc-backup@corp.example")[0]).toMatchObject({ outcome: "BLOCKED", rule: "identities.service[0]" });
     expect(disable("CEO@corp.example")[0]).toMatchObject({ outcome: "PENDING_APPROVAL", rule: "identities.vip[0]" });
     expect(disable("alice")).toEqual([]);
+    // A password reset locks the account out too.
+    const reset = (target: string) => rulebookHits(book, ctx({ actionType: "RESET_PASSWORD", target, asset: null }));
+    expect(reset("break-glass2")[0]).toMatchObject({ outcome: "BLOCKED", hard: true, reason: expect.stringContaining("password reset") });
+    expect(reset("ceo")[0]).toMatchObject({ outcome: "PENDING_APPROVAL", rule: "identities.vip[0]" });
     expect(matchesIdentity("j*", "CORP\\jdoe")).toBe(true);
     expect(matchesIdentity("svc.*", "svcXbackup")).toBe(false);
   });
