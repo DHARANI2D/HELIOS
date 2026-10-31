@@ -14,6 +14,7 @@ export const ALERT_GROUPS = [
   { key: "incidents", label: "Incident updates, escalations and SLA breaches", kinds: ["shared", "escalated", "sla"] },
   { key: "mine", label: "Cases assigned to me, mentions and cases I watch", kinds: ["assigned", "mention", "watching"] },
   { key: "sources", label: "Log sources going quiet", kinds: ["ingest"] },
+  { key: "digest", label: "The daily digest of what HELIOS did", kinds: ["digest"] },
 ] as const;
 export type AlertGroup = (typeof ALERT_GROUPS)[number]["key"];
 

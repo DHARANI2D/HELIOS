@@ -65,6 +65,32 @@ export const messagingSchema = z.object({
 export type MessagingSettings = z.infer<typeof messagingSchema>;
 export const MESSAGING_DEFAULTS: MessagingSettings = { provider: "none", smsFrom: "", whatsappFrom: "", whatsappTemplate: "", webhookUrl: "", maxPerUserPerHour: 20 };
 
+// SOC operations (lib/operations): paging the on-call analyst, weekly QA of
+// what the AI did on its own, and the daily digest.
+const timeZone = z.string().trim().refine((tz) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Use an IANA time zone, e.g. Asia/Kolkata");
+export const operationsSchema = z.object({
+  // Open cases at or above this severity page whoever is on call.
+  pageSeverity: z.enum(["MEDIUM", "HIGH", "CRITICAL"]),
+  // Minutes before an unacknowledged page goes to the next person.
+  ackMinutes: z.number().int().min(2).max(120),
+  // Share of each client's AI-handled cases a person reviews each week, and
+  // the least per client.
+  qaSharePct: z.number().int().min(1).max(100),
+  qaMinPerClient: z.number().int().min(0).max(50),
+  // The daily digest goes out at this hour, in this time zone.
+  digestHour: z.number().int().min(0).max(23),
+  timeZone,
+});
+export type OperationsSettings = z.infer<typeof operationsSchema>;
+export const OPERATIONS_DEFAULTS: OperationsSettings = { pageSeverity: "CRITICAL", ackMinutes: 15, qaSharePct: 10, qaMinPerClient: 2, digestHour: 9, timeZone: "Asia/Kolkata" };
+
 // A credential sealed with lib/secrets; only the last 4 characters are kept
 // in clear, to show which key is stored.
 const sealedSecret = z.object({ sealed: z.string(), last4: z.string() }).nullable().default(null);
@@ -101,6 +127,7 @@ const SETTINGS = {
   "secret.twilio": sealedSecret,
   "secret.alertWebhook": sealedSecret,
   "alerts.messaging": messagingSchema.default(MESSAGING_DEFAULTS),
+  "operations": operationsSchema.default(OPERATIONS_DEFAULTS),
 } as const;
 
 export type SettingKey = keyof typeof SETTINGS;

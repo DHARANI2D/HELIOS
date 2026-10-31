@@ -51,6 +51,9 @@ export const PERMISSIONS = {
   "compliance.view": "See regulatory clocks and notices (CERT-In, DPDP) and the ISO 27001 evidence map",
   "compliance.prepare": "Draft regulatory notices, record the client's approval, and file them",
   "compliance.approve": "Approve a regulatory notice before it is filed (the report is the client's; staff record a client's approval given elsewhere)",
+  "operations.view": "See the on-call rota, pages, runbooks, QA results and digests",
+  "operations.manage": "Edit the on-call rota, runbooks and operations settings",
+  "qa.review": "Review the weekly sample of what the AI did on its own",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -93,7 +96,7 @@ export const ROLE_ORDER: UserRole[] = [
 ];
 
 const ALL = Object.keys(PERMISSIONS) as Permission[];
-const SOC_BASE: Permission[] = ["dashboard.view", "cases.view", "cases.comment", "intel.view", "playbooks.view", "mitre.view", "ai.view", "endpoints.view", "integrations.view", "tenants.view", "rulebook.view"];
+const SOC_BASE: Permission[] = ["dashboard.view", "cases.view", "cases.comment", "intel.view", "playbooks.view", "mitre.view", "ai.view", "endpoints.view", "integrations.view", "tenants.view", "rulebook.view", "operations.view"];
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ADMIN: ALL,
@@ -139,10 +142,12 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "api.tokens",
     "compliance.view",
     "compliance.prepare",
+    "operations.manage",
+    "qa.review",
   ],
   THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback", "api.tokens"],
   DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune", "api.tokens", "rulebook.edit"],
-  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view", "compliance.view"],
+  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view", "compliance.view", "operations.view"],
   SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view", "rulebook.view", "rulebook.edit"],
   CLIENT_ADMIN: ["dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign", "compliance.view", "compliance.approve"],
   CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view", "rulebook.view", "compliance.view"],

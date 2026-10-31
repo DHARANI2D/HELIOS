@@ -88,7 +88,7 @@ export async function scoreClosedCase(caseId: string) {
   const ai = kase.responseActions.filter((a) => a.source === "ai");
   const human = kase.responseActions.filter((a) => a.source === "analyst" && !isRollback(a.parameters));
   const scored = scoreActions(
-    ai.map((a) => ({ actionType: a.actionType, target: a.target, outcome: outcomeOf(a.trace, a.status), status: a.status, decidedById: a.decidedById, level: levelOf(a.parameters), critical: critical(a.target) })),
+    ai.map((a) => ({ actionType: a.actionType, target: a.target, outcome: outcomeOf(a.trace, a.status), status: a.status, decidedById: a.decidedById, level: levelOf(a.parameters), critical: critical(a.target), qa: a.qaVerdict })),
     human.map((h) => ({ actionType: h.actionType, target: h.target, status: h.status })),
     kase.disposition,
   );

@@ -1,6 +1,7 @@
 // Background work that runs on a timer: approval escalation along client
 // approver chains, connector verification, time boxes, regulatory clocks,
-// the autonomy-ladder review, and log collection (the ingest queue, pull
+// the autonomy-ladder review, on-call paging, QA sampling, the daily
+// digest, and log collection (the ingest queue, pull
 // collectors, source health). Started once from src/instrumentation.ts in
 // the web process; with HELIOS_INGEST_WORKER=external the log-collection
 // jobs run in `npm run worker` (src/worker.ts) instead. Off with
@@ -38,6 +39,12 @@ const JOBS: Job[] = [
   { name: "regulatory clocks", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/compliance/service")).checkRegulatoryClocks() },
   // Demotes on a bad week, proposes promotions; idempotent, so hourly is fine.
   { name: "autonomy ladder review", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/shadow/service")).reviewLadders() },
+  // Pages the on-call analyst for severe cases, escalates unanswered pages, sends handoffs.
+  { name: "on-call paging", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/operations/paging")).runPaging() },
+  // Draws last week's QA sample once the week is over.
+  { name: "QA sampling", group: "core", everyMs: 3_600_000, run: async () => (await import("@/lib/operations/qa")).runQaSampling() },
+  // The daily digest, once the set hour has passed.
+  { name: "daily digest", group: "core", everyMs: 10 * 60_000, run: async () => (await import("@/lib/operations/digest")).sendDigests() },
 ];
 
 const STARTED = Symbol.for("helios.jobs.started");

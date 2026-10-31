@@ -38,6 +38,8 @@ export interface AiProposal {
   decidedById: string | null;
   level: number | null;
   critical: boolean;
+  // A QA reviewer's call on an action the AI ran on its own: right | wrong.
+  qa?: string | null;
 }
 
 export interface HumanAction {
@@ -73,7 +75,8 @@ export function scoreActions(ai: AiProposal[], human: HumanAction[], disposition
     const byHand = human.some((h) => same(h, p) && DONE.has(h.status));
     const approved = !!p.decidedById && DONE.has(p.status);
     const accepted = !p.decidedById && DONE.has(p.status) && disposition === "TRUE_POSITIVE";
-    const took = byHand || approved || accepted;
+    // A QA review outranks inferring agreement from the disposition.
+    const took = p.qa === "wrong" ? false : p.qa === "right" ? true : byHand || approved || accepted;
     out.push({
       kind: "action",
       actionType: p.actionType,

@@ -35,14 +35,14 @@ async function overCap(where: { userId?: string; to?: string }, now: Date) {
 }
 
 // One delivery row, or a SKIPPED one saying why it can't go.
-async function enqueue(row: { userId?: string | null; channel: AlertChannel; to: string | null; input: AlertInput }, ready: Awaited<ReturnType<typeof channelStatus>>, now: Date) {
-  const { userId = null, channel, to, input } = row;
+async function enqueue(row: { userId?: string | null; channel: AlertChannel; to: string | null; input: AlertInput; urgent?: boolean }, ready: Awaited<ReturnType<typeof channelStatus>>, now: Date) {
+  const { userId = null, channel, to, input, urgent = false } = row;
   const base = { userId, tenantId: input.tenantId ?? null, channel, to: to ?? "", kind: input.kind, subject: input.subject.slice(0, 200), body: (input.body ?? "").slice(0, 2000), href: absolute(input.href ?? (input.caseId ? `/cases/${input.caseId}` : null)), caseId: input.caseId ?? null };
   let skip: string | null = null;
   if (!ready[channel].ready) skip = ready[channel].reason ?? "Channel not set up";
   else if (!to) skip = channel === "email" ? "No email address" : "No phone number on the account";
   else if (channel !== "email" && !E164.test(to)) skip = "The phone number isn't in international format";
-  else {
+  else if (!urgent) {
     const cap = await overCap(userId ? { userId } : { to }, now);
     if (cap) skip = `Over ${cap} alerts in the hour: the rest wait in the app`;
   }
@@ -60,6 +60,19 @@ export async function queueForUsers(userIds: string[], input: AlertInput, now = 
     await enqueue({ userId: u.id, channel, to: channel === "email" ? u.email : u.phone, input: { ...input, tenantId: input.tenantId ?? u.tenantId } }, ready, now);
   }
   return wanted.length;
+}
+
+// A page to the on-call analyst: by SMS and email whatever the person's
+// alert choices, and past the hourly cap.
+export async function queueUrgent(userIds: string[], input: AlertInput, now = new Date()) {
+  const users = await db.user.findMany({ where: { id: { in: userIds }, active: true }, select: { id: true, email: true, phone: true } });
+  const ready = await channelStatus();
+  const rows = [];
+  for (const u of users) {
+    rows.push(await enqueue({ userId: u.id, channel: "sms", to: u.phone, input, urgent: true }, ready, now));
+    rows.push(await enqueue({ userId: u.id, channel: "email", to: u.email, input, urgent: true }, ready, now));
+  }
+  return rows;
 }
 
 // An approver in a client's chain, reached at the contact the rulebook gives.

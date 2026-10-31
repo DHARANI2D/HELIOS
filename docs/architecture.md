@@ -246,6 +246,9 @@ Timers in the server process:
 | Regulatory clocks (CERT-In and DPDP deadlines) | Minute |
 | Alert deliveries (email, SMS, WhatsApp) | 10 seconds |
 | Ladder review | Hour |
+| On-call paging (severe cases, escalation, handoffs) | Minute |
+| QA sampling (last week's, once) | Hour |
+| Daily digest (once the set hour has passed) | 10 minutes |
 | Ingest queue (backstop for the kick after each enqueue) | 2 seconds |
 | Pull collectors (each stream on its own interval) | 30 seconds |
 | Source health | 5 minutes |
@@ -341,6 +344,33 @@ Logs arrive three ways, all into one durable queue:
 - **India.** The page says whether the logs are shown to be in India: the database region the operator declares (`HELIOS_DATA_REGION`) and the archive store's region, both Indian (AWS `ap-south-1`/`ap-south-2`, Azure Central/South/West India, Google Cloud `asia-south1`/`asia-south2`). HELIOS can only report what it's configured with, not where the servers physically are.
 - **Not built:** the events table isn't partitioned by time; archiving and deletion work through it in bounded batches instead. Partitioning is worth adding once a deployment holds hundreds of millions of events.
 - **Isolation:** `event_archives` and `legal_holds` carry a `tenantId` and have the same row-level policy as the other client tables.
+
+### SOC operations (`lib/operations`, `lib/runbooks`, `/operations`, `/runbooks`)
+
+- **On call.** A rota of shifts (`oncall_shifts`), primary and backup, generated from a list of people taking turns (8, 12 or 24 hours, or a week). Generating replaces the regular shifts in that period; cover added by hand (a swap, leave) beats the rotation for its hours, the latest cover winning. Only active SOC staff can be on call. The page shows the next two weeks and any stretch in the next seven days with nobody primary.
+- **Pages** (`oncall_pages`, one per cause by key). The job, every minute:
+  - pages the primary for open cases at or above the paging severity (default critical) that nobody has acknowledged, created in the last day;
+  - after the acknowledgement window (default 15 minutes) unanswered, pages the backup, then the SOC managers (admins if there are none); a level with nobody on it is skipped, so with nobody on call a page goes straight to the managers;
+  - marks a page answered when its case is acknowledged or closed another way;
+  - sends whoever starts a shift a handoff: open high and critical cases, unanswered pages, containment waiting for approval, regulatory notices due within 12 hours, quiet sources.
+  - **Delivery:** in the app, and by SMS and email whatever the person's alert choices and past the hourly cap (`queueUrgent`). A tripped circuit breaker pages, and analysts can page from a case or the operations page. Answering ("I'm on it") acknowledges the case and gives it to whoever answered if nobody had it. Each step claims its row, so several instances can run the job.
+- **Runbooks** (`runbooks`, `case_runbooks`). Procedures for analysts: steps, some required. A runbook matches cases by ATT&CK technique (a technique also matches its sub-techniques) or title words (a keyword matches words starting with it), narrowed by source and minimum severity; at least one technique or keyword has to hit.
+  - **Attaching:** when a case is finalized, up to three matching runbooks attach themselves, the client's own first; analysts can add or remove one. A case keeps the steps as they were when attached, so editing a runbook (which bumps its version) doesn't rewrite cases already worked.
+  - **Working them:** steps are ticked, or skipped with a reason, on the case. Progress is merged in the database (`jsonb ||`), so two people working different steps at once don't overwrite each other; each step goes on the timeline.
+  - **Closing:** a case can't be closed as a true positive while a required step is neither done nor skipped.
+  - **Starter runbooks:** phishing, compromised account, malware on an endpoint, ransomware, data exfiltration. They're added only when someone chooses to, then edited to the SOC's practice.
+- **QA of the AI** (`qa_reviews`). Each Monday the job draws the week before's sample, once (a claim row in `platform_settings`):
+  - **Population:** cases where the AI ran actions with nobody approving them (executed, rolled back, in progress or failed), or called the case benign.
+  - **Size:** per client, the configured share (default 10%), at least the configured floor (default 2), never more than there are.
+  - **Draw:** weighted sampling without replacement (Efraimidis and Spirakis), weights ×4 critical, ×3 high, ×2 for a Sigma rule imported in the last 30 days, ×2 for an action on a critical asset. The random number comes from a hash of the week and the case, so a week always draws the same cases.
+  - **Reviewers:** SOC managers and incident responders in turn, never the analyst who closed the case. The review is on the case: per autonomous action, should it have run; and was the verdict right.
+  - **Effect:** a reviewer's call is stored on the action (`qaVerdict`) and replaces the inference from the disposition when the ladder scores the case. "Shouldn't have run" counts as a wrong containment that week, and the ladder review runs at once, so a QA finding can demote an action type straight away. SOC managers are told about anything judged wrong.
+- **Daily digest** (`digest_runs`). At the top of the ladder the AI acts without telling anyone at the time; the digest is where it reports.
+  - **Recipients:** once a day after the set hour in the set time zone (default 09:00 Asia/Kolkata), each client's admins get theirs and the SOC managers one across every client.
+  - **Contents:** what the AI did on its own (with level, rollbacks, QA calls), cases opened and closed, containment waiting for approval, regulatory deadlines within a day, quiet sources, the week's QA results, and for the SOC, pages.
+  - **Delivery:** it goes in the app (`/digest/<id>`) and by email for those who chose it under My alerts. A day with nothing to say is recorded and not sent. Each run covers the time since the previous one.
+- **Permissions:** `operations.view` (all SOC staff and auditors) to see the rota, pages, runbooks and QA; `operations.manage` (SOC managers, incident responders, admins) to edit the rota, runbooks and settings; `qa.review` (SOC managers, incident responders, admins) to review. Ticking runbook steps needs `cases.triage`; paging needs `cases.escalate`. Clients read their own digests.
+- **Isolation:** `oncall_pages`, `runbooks`, `case_runbooks`, `qa_reviews` and `digest_runs` carry a `tenantId` (null for the SOC's own) and have the same row-level policy as the other client tables.
 
 ### Server Actions (`lib/action.ts`)
 

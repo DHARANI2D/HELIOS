@@ -28,8 +28,11 @@ export async function circuitBreakerFor(tenantId: string | null | undefined) {
 }
 
 export async function pauseAutomation(tenantId: string, reason: string, actorId?: string) {
-  const t = await db.tenant.update({ where: { id: tenantId }, data: { automationPausedAt: new Date(), automationPauseReason: reason }, select: { name: true } });
+  const t = await db.tenant.update({ where: { id: tenantId }, data: { automationPausedAt: new Date(), automationPauseReason: reason }, select: { name: true, automationPausedAt: true } });
   await logAction({ actorId, action: "automation.paused", detail: { tenantId, reason } });
+  // A tripped breaker wakes whoever is on call.
+  const { pageOnCall } = await import("@/lib/operations/paging");
+  await pageOnCall({ key: `breaker:${tenantId}:${t.automationPausedAt!.toISOString()}`, title: `Automatic containment paused for ${t.name}`, body: reason, tenantId, createdById: actorId ?? null }).catch((err) => console.error("Paging failed", err));
   await notify(await staffFor(["SOC_MANAGER", "INCIDENT_RESPONDER"], null), {
     kind: "approval",
     title: `Automatic containment paused for ${t.name}`,

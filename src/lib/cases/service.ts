@@ -20,6 +20,11 @@ export async function setCaseStatus(caseId: string, status: CaseStatus, actorId:
   if (closing && !disposition) throw new Error("Choose a disposition to close the case: true positive, benign true positive or false positive");
   if (closing && reason.length < 3) throw new Error("Say why (the reason is kept with the disposition)");
   if (status === "FALSE_POSITIVE" && disposition !== "FALSE_POSITIVE") throw new Error("A case closed as a false positive has that disposition");
+  if (closing && disposition === "TRUE_POSITIVE") {
+    const { openRequiredSteps } = await import("@/lib/runbooks/service");
+    const open = await openRequiredSteps(caseId);
+    if (open.length) throw new Error(`Finish or skip (with a reason) the required runbook steps first: ${open.map((r) => `${r.title}: ${r.steps.join("; ")}`).join(" · ")}`);
+  }
   // The first human status change counts as acknowledgement.
   await db.case.update({
     where: { id: caseId },

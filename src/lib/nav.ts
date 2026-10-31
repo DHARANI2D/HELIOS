@@ -13,6 +13,8 @@ import {
   Globe2,
   LayoutDashboard,
   Laptop,
+  ListChecks,
+  PhoneCall,
   Mail,
   Network,
   Plug,
@@ -52,9 +54,11 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "Reports", clientTitle: "Service reports", href: "/reports", icon: BarChart3, group: "Operate", permission: "reports.view", description: "Volume, response times, SLA and AI performance by period" },
   { title: "Compliance", href: "/compliance", icon: Landmark, group: "Operate", permission: "compliance.view", description: "CERT-In and DPDP reporting clocks, notices and ISO 27001 evidence" },
   { title: "AI Agents", href: "/ai", icon: Bot, group: "Operate", permission: "ai.view", description: "AI first responders, providers, autonomy and run log" },
+  { title: "SOC Operations", href: "/operations", icon: PhoneCall, group: "Operate", permission: "operations.view", description: "Who is on call and the pages they get, weekly QA of what the AI did on its own, and the daily digests" },
   { title: "Investigations", href: "/investigations", icon: Search, group: "Analyze", permission: "investigations.run", description: "Multi-agent root-cause analysis" },
   { title: "Email & File Forensics", href: "/forensics", icon: Mail, group: "Analyze", permission: "forensics.run", description: "Sandbox detonation and document forensics" },
   { title: "Response Playbooks", href: "/playbooks", icon: Workflow, group: "Analyze", permission: "playbooks.view", description: "Automated containment workflows" },
+  { title: "Runbooks", href: "/runbooks", icon: ListChecks, group: "Analyze", permission: "operations.view", description: "Procedures for analysts, attached to the cases they match and worked as a checklist" },
   { title: "Detection Engineering", href: "/detections", icon: SlidersHorizontal, group: "Analyze", permission: "detections.tune", description: "Built-in detectors, Sigma rules tested before they go live, and per-client tuning" },
   { title: "Agent Governance", href: "/governance", icon: UserCog, group: "Analyze", permission: "governance.manage", description: "AI agent identity, trust, and policy" },
   { title: "Threat Intelligence", href: "/threat-intel", icon: Globe2, group: "Intelligence", permission: "intel.view", description: "Shared IOC lookups and enrichment" },
@@ -87,6 +91,7 @@ export function navItemFor(pathname: string, items: NavItem[] = NAV_ITEMS): NavI
 // Pages that aren't in the sidebar but still need a title in the top bar.
 export const OTHER_PAGES: Array<Pick<NavItem, "href" | "title" | "description">> = [
   { href: "/account/alerts", title: "My alerts", description: "Which notifications also reach you by email, SMS or WhatsApp" },
+  { href: "/digest", title: "Daily digests", description: "What HELIOS did on its own each day, what was waiting, and the deadlines coming up" },
 ];
 
 export const otherPageFor = (pathname: string) => OTHER_PAGES.find((p) => pathname === p.href || pathname.startsWith(`${p.href}/`));

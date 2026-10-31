@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Ban, Bot, Building2, Crosshair, Download, Eye, Fingerprint, Landmark, Link2, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
+import { ArrowLeft, Ban, BellRing, Bot, Building2, ClipboardCheck, Crosshair, Download, Eye, Fingerprint, Landmark, Link2, ListChecks, Radar, ScrollText, ShieldAlert, Users, Workflow } from "lucide-react";
 
 import { db } from "@/lib/db";
 import { dbFor } from "@/lib/tenant-db";
@@ -42,6 +42,12 @@ import { RecheckButton } from "@/components/threat-intel/recheck-button";
 import { CaseNotices } from "@/components/compliance/case-notices";
 import { caseNoticesProps } from "@/lib/compliance/view";
 import { VerdictBadge } from "@/components/threat-intel/verdict-badge";
+import { onCallNow } from "@/lib/operations/paging";
+import { qaContext } from "@/lib/operations/qa";
+import { parseProgress, parseSteps } from "@/lib/runbooks/match";
+import { CaseRunbooks } from "@/components/runbooks/case-runbooks";
+import { QaReviewForm } from "@/components/operations/qa-review";
+import { AcknowledgePage, PageOnCall } from "@/components/operations/oncall-controls";
 
 const EXECUTION_VARIANT = {
   PENDING_APPROVAL: "warning",
@@ -103,14 +109,24 @@ async function loadCasePage(id: string, user: SessionUser) {
 
   const recommended = user.isClient ? [] : await recommendPlaybooks(kase.id, evidence.entities);
   const regulatory = kase.tenantId && can(user, "compliance.view") ? await caseNoticesProps(kase, user, now) : null;
-  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory };
+  // SOC operations: runbooks, the QA review, and who is on call.
+  const ops = user.isClient
+    ? null
+    : await Promise.all([
+        db.caseRunbook.findMany({ where: { caseId: kase.id }, orderBy: { createdAt: "asc" } }),
+        db.runbook.findMany({ where: { enabled: true, OR: [{ tenantId: null }, ...(kase.tenantId ? [{ tenantId: kase.tenantId }] : [])] }, select: { id: true, title: true }, orderBy: { title: "asc" } }),
+        can(user, "operations.view") ? qaContext(kase.id) : Promise.resolve(null),
+        onCallNow(now),
+        db.onCallPage.findFirst({ where: { caseId: kase.id }, orderBy: { createdAt: "desc" } }),
+      ]).then(([runbooks, available, qa, onCall, page]) => ({ runbooks, available, qa, onCall, page }));
+  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory, ops };
 }
 
 export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]">) {
   const { id } = await params;
   const user = await pageGuard("cases.view");
   await assertCaseAccess(user, id, "page");
-  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory } = await loadCasePage(id, user);
+  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory, ops } = await loadCasePage(id, user);
 
   const ranPlaybookIds = new Set(kase.playbookRuns.map((r) => r.playbookId));
   const suggestions = recommended.filter((p) => !ranPlaybookIds.has(p.id));
@@ -122,7 +138,9 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
   const isShadow = (r: { resolution: unknown }) => !!(r.resolution as { shadow?: boolean } | null)?.shadow;
   const shadowHidden = !closed && kase.aiRuns.some(isShadow);
   const latestTriage = kase.aiRuns.find((r) => ["triage", "phishing", "threat_intel", "investigator"].includes(r.agentKey) && r.status !== "failed" && (closed || !isShadow(r)));
-  const triage = latestTriage?.output as TriageOutput | undefined;
+  // Stored output can predate fields the page reads; fill the lists in.
+  const stored = latestTriage?.output as Partial<TriageOutput> | null | undefined;
+  const triage = stored?.verdict ? ({ ...stored, summary: stored.summary ?? "", confidence: stored.confidence ?? 0, key_findings: stored.key_findings ?? [], analyst_next_steps: stored.analyst_next_steps ?? [], recommended_actions: stored.recommended_actions ?? [] } as TriageOutput) : undefined;
   const grounding = latestTriage?.grounding as (GroundingReport & { injection?: InjectionFinding[] }) | undefined;
   const lastFailure = kase.aiRuns[0]?.status === "failed" ? kase.aiRuns[0] : null;
 
@@ -205,6 +223,33 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+          {ops?.qa && (
+            <Card id="qa" className="scroll-mt-20 border-warning/40">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base"><ClipboardCheck className="size-4" /> QA review</CardTitle>
+                <CardDescription>
+                  Sampled for the week of {ops.qa.review.week.toISOString().slice(0, 10)}: {ops.qa.review.reasons.join(", ")}. Was the AI right to do what it did on its own?
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {ops.qa.review.status === "DONE" ? (
+                  <p className="text-sm">
+                    <Badge variant={ops.qa.review.outcome === "agree" ? "success" : ops.qa.review.outcome === "partly" ? "warning" : "destructive"}>{ops.qa.review.outcome === "agree" ? "AI right" : ops.qa.review.outcome === "partly" ? "Partly right" : "AI wrong"}</Badge>
+                    <span className="ml-2 text-muted-foreground">Reviewed by {ops.qa.review.reviewedBy} {ops.qa.review.reviewedAt ? formatRelative(ops.qa.review.reviewedAt, now) : ""}{ops.qa.review.notes ? `: ${ops.qa.review.notes}` : ""}</span>
+                  </p>
+                ) : can(user, "qa.review") && kase.dispositionById !== user.id ? (
+                  <QaReviewForm
+                    reviewId={ops.qa.review.id}
+                    verdict={ops.qa.verdict}
+                    actions={ops.qa.actions.map((a) => ({ id: a.id, label: ACTION_LABEL[a.actionType], target: a.target, status: a.status, level: (a.parameters as { ladderLevel?: string } | null)?.ladderLevel ?? null }))}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">Waiting for a reviewer{kase.dispositionById === user.id ? " other than you (you closed the case)" : ""}.</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {showSoc && can(user, "ai.view") && (
             <Card className="border-chart-4/25">
               <CardHeader>
@@ -336,6 +381,23 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
               />
             </CardContent>
           </Card>
+
+          {ops && (ops.runbooks.length > 0 || ops.available.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base"><ListChecks className="size-4" /> Runbooks</CardTitle>
+                <CardDescription>The procedure for this kind of case. A true positive can&apos;t be closed while a required step is neither done nor skipped with a reason.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CaseRunbooks
+                  caseId={kase.id}
+                  canWork={can(user, "cases.triage") && !closed}
+                  available={ops.available}
+                  runbooks={ops.runbooks.map((r) => ({ id: r.id, title: r.title, version: r.version, attachedBy: r.attachedBy, steps: parseSteps(r.steps), progress: parseProgress(r.progress) }))}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {regulatory && (
             <Card id="regulatory" className="scroll-mt-20">
@@ -499,6 +561,27 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
                     {plan.containMinutes[kase.severity] ? `, contain within ${formatMinutes(plan.containMinutes[kase.severity])}` : ""}.
                   </p>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {ops && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base"><BellRing className="size-4" /> On call</CardTitle>
+                <CardDescription>
+                  {ops.onCall.primary ? `${ops.onCall.primary.user.name ?? ops.onCall.primary.user.email} is on call` : "Nobody is primary on call: a page goes to the backup or the SOC managers"}
+                  {ops.onCall.backup ? `, backup ${ops.onCall.backup.user.name ?? ops.onCall.backup.user.email}` : ""}.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3">
+                {ops.page && (
+                  <div className="flex items-center justify-between gap-2 rounded-md border p-2 text-xs">
+                    <span>Paged {formatRelative(ops.page.createdAt, now)}{ops.page.ackAt ? `, answered by ${ops.page.ackByName}` : ", not answered yet"}</span>
+                    {!ops.page.ackAt && can(user, "operations.view") && <AcknowledgePage id={ops.page.id} />}
+                  </div>
+                )}
+                {can(user, "cases.escalate") && !closed && <PageOnCall caseId={kase.id} />}
               </CardContent>
             </Card>
           )}

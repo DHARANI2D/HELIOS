@@ -204,6 +204,8 @@ function scheduleEnrichment(caseId: string) {
 
 export async function finalizeCase(caseId: string) {
   await evaluatePlaybooksForCase(caseId);
+  // A runbook that fails to attach never stops the case.
+  await import("@/lib/runbooks/service").then((m) => m.attachRunbooks(caseId)).catch((err) => console.error("runbook matching failed", caseId, err));
   scheduleEnrichment(caseId);
   scheduleFirstResponse(caseId);
 }

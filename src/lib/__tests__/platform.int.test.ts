@@ -79,6 +79,11 @@ import { notify } from "@/lib/notifications";
 import { addUpdate, approveNotice, checkRegulatoryClocks, openDpdp, renderNoticePdf, requestApproval, saveNotice, setClockStart, submitNotice } from "@/lib/compliance/service";
 import { evidenceMap } from "@/lib/compliance/iso27001";
 import type { SessionUser } from "@/lib/session";
+import { acknowledgePage, addOverride, generateShifts, onCallNow, pageOnCall, runPaging } from "@/lib/operations/paging";
+import { runQaSampling, sampleWeek, submitQaReview } from "@/lib/operations/qa";
+import { buildDigest, sendDigests } from "@/lib/operations/digest";
+import { weekStart } from "@/lib/operations/qa-sample";
+import { attachRunbooks, installTemplates, openRequiredSteps, setStep } from "@/lib/runbooks/service";
 
 // End-to-end against a real Postgres. Truncates every table, so it only runs
 // when RUN_DB_TESTS=1 and DATABASE_URL points at a database whose name ends
@@ -1004,6 +1009,8 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await new Promise<void>((resolve) => smtp.listen(0, "127.0.0.1", resolve));
     process.env.HELIOS_SMTP_URL = `smtp://127.0.0.1:${(smtp.address() as AddressInfo).port}`;
     process.env.HELIOS_MAIL_FROM = "SOC <soc@mssp.test>";
+    // Forget a "no mail server" cached by an earlier test's page.
+    await storePlatformSecret("smtp", null, adminId);
 
     try {
       const H = 3_600_000;
@@ -1374,6 +1381,161 @@ tags: [attack.execution, attack.t1059.001]`;
     } finally {
       delete process.env.HELIOS_ARCHIVE_DIR;
     }
+  });
+
+  it("pages the on-call analyst, escalates to the backup and the managers, and hands over at shift start", async () => {
+    const MIN = 60_000;
+    const now = new Date();
+    const staff = async (email: string, role: "ANALYST" | "SOC_MANAGER" | "INCIDENT_RESPONDER", phone?: string) => (await db.user.create({ data: { email, name: email.split("@")[0], role, phone } })).id;
+    const primary = await staff("oncall.primary@test.local", "ANALYST", "+919800000001");
+    const backup = await staff("oncall.backup@test.local", "INCIDENT_RESPONDER");
+    const manager = await staff("oncall.manager@test.local", "SOC_MANAGER");
+    await setSetting("operations", { pageSeverity: "CRITICAL", ackMinutes: 15, qaSharePct: 10, qaMinPerClient: 2, digestHour: 0, timeZone: "Asia/Kolkata" });
+
+    await expect(generateShifts({ userIds: [primary, adminId], from: new Date(now.getTime() - 60 * MIN), shiftHours: 12, shifts: 4, withBackup: false }, adminId)).resolves.toBe(4);
+    // Regenerating replaces the regular shifts; the backup rotation is the next person.
+    await generateShifts({ userIds: [primary, backup], from: new Date(now.getTime() - 60 * MIN), shiftHours: 12, shifts: 4, withBackup: true }, adminId);
+    expect(await db.onCallShift.count({ where: { role: "primary" } })).toBe(4);
+    const on = await onCallNow(now);
+    expect([on.primary?.userId, on.backup?.userId]).toEqual([primary, backup]);
+    const client = await db.user.create({ data: { email: "oncall.client@test.local", name: "Client", role: "CLIENT_ADMIN" } });
+    await expect(generateShifts({ userIds: [client.id], from: now, shiftHours: 12, shifts: 1, withBackup: false }, adminId)).rejects.toThrow(/SOC staff/);
+
+    // A critical case nobody acknowledges pages the primary, in the app and by SMS and email.
+    const tenant = await db.tenant.create({ data: { name: "Test · On call", slug: "test-oncall" } });
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Domain admin created at 3am", severity: "CRITICAL", tenantId: tenant.id, deferPipelines: true });
+    const first = await runPaging(now);
+    expect(first.opened).toBeGreaterThanOrEqual(1);
+    const page = await db.onCallPage.findUniqueOrThrow({ where: { key: `case:${kase.id}` } });
+    expect(page).toMatchObject({ level: 0, pagedIds: [primary] });
+    expect(await db.notification.count({ where: { userId: primary, kind: "oncall", title: { contains: "Domain admin created" } } })).toBe(1);
+    const deliveries = await db.alertDelivery.findMany({ where: { userId: primary, kind: "oncall", caseId: kase.id } });
+    expect(deliveries.map((d) => d.channel).sort()).toEqual(["email", "sms"]);
+    // Paging again does nothing new; the handoff went to the people starting shifts.
+    await runPaging(new Date(now.getTime() + MIN));
+    expect(await db.onCallPage.count({ where: { key: `case:${kase.id}` } })).toBe(1);
+    expect(await db.notification.count({ where: { userId: primary, kind: "oncall", title: { startsWith: "You're on call" } } })).toBe(1);
+
+    // No answer: the backup, then the managers.
+    await runPaging(new Date(now.getTime() + 16 * MIN));
+    expect((await db.onCallPage.findUniqueOrThrow({ where: { id: page.id } })).level).toBe(1);
+    expect(await db.notification.count({ where: { userId: backup, kind: "oncall", caseId: kase.id, title: { startsWith: "[No answer" } } })).toBe(1);
+    await runPaging(new Date(now.getTime() + 32 * MIN));
+    const top = await db.onCallPage.findUniqueOrThrow({ where: { id: page.id } });
+    expect(top.level).toBe(2);
+    expect(top.pagedIds).toEqual(expect.arrayContaining([primary, backup, manager]));
+
+    // Answering the page acknowledges the case and gives it to whoever answered.
+    await acknowledgePage(page.id, { id: backup, name: "oncall.backup" });
+    await expect(acknowledgePage(page.id, { id: primary, name: "oncall.primary" })).rejects.toThrow(/already answered/);
+    expect(await db.case.findUniqueOrThrow({ where: { id: kase.id } })).toMatchObject({ assignedToId: backup, acknowledgedAt: expect.any(Date) });
+
+    // A case acknowledged on the case itself answers its page.
+    const other = await createCase({ sourceType: "SIEM_ALERT", title: "Second critical", severity: "CRITICAL", tenantId: tenant.id, deferPipelines: true });
+    await runPaging(new Date(now.getTime() + 33 * MIN));
+    await setCaseStatus(other.id, "TRIAGING", backup, "Looking");
+    await runPaging(new Date(now.getTime() + 34 * MIN));
+    expect((await db.onCallPage.findUniqueOrThrow({ where: { key: `case:${other.id}` } })).ackByName).toBe("Acknowledged on the case");
+
+    // Cover beats the rotation for its hours; with nobody on call, a page goes to the managers.
+    await addOverride({ userId: manager, role: "primary", startsAt: new Date(now.getTime() - MIN), endsAt: new Date(now.getTime() + 60 * MIN), note: "Swap" }, adminId);
+    expect((await onCallNow(now)).primary?.userId).toBe(manager);
+    await db.onCallShift.deleteMany({});
+    const lonely = await pageOnCall({ key: "manual:test", title: "Firewall down at a client" }, now);
+    expect(lonely.page).toMatchObject({ level: 2, pagedIds: expect.arrayContaining([manager]) });
+    expect((await pageOnCall({ key: "manual:test", title: "again" }, now)).created).toBe(false);
+  });
+
+  it("attaches matching runbooks and won't close a true positive with required steps open", async () => {
+    expect(await installTemplates(adminId)).toBe(5);
+    expect(await installTemplates(adminId)).toBe(0);
+    const tenant = await db.tenant.create({ data: { name: "Test · Runbooks", slug: "test-runbooks" } });
+    const own = await db.runbook.create({ data: { tenantId: tenant.id, title: "Acme: call the IT head before purging mail", match: { sources: [], techniques: ["T1566"], keywords: [], minSeverity: null }, steps: [{ id: "call", title: "Call the IT head", detail: "", required: true }] } });
+    const kase = await createCase({ sourceType: "EMAIL_ANALYSIS", title: "Credential phishing to finance", severity: "HIGH", tenantId: tenant.id, techniques: ["T1566.002"], deferPipelines: true });
+    expect(await attachRunbooks(kase.id)).toBe(2);
+    const attached = await db.caseRunbook.findMany({ where: { caseId: kase.id }, orderBy: { createdAt: "asc" } });
+    expect(attached.map((a) => a.title)).toEqual([own.title, "Phishing email"]);
+    expect(await attachRunbooks(kase.id)).toBe(0);
+    // Another client never gets this client's runbook.
+    const elsewhere = await createCase({ sourceType: "EMAIL_ANALYSIS", title: "Phishing elsewhere", severity: "LOW", techniques: ["T1566.001"], deferPipelines: true });
+    await attachRunbooks(elsewhere.id);
+    expect((await db.caseRunbook.findMany({ where: { caseId: elsewhere.id } })).map((a) => a.title)).toEqual(["Phishing email"]);
+
+    await expect(setCaseStatus(kase.id, "RESOLVED", adminId, undefined, { disposition: "TRUE_POSITIVE", reason: "Confirmed phish" })).rejects.toThrow(/required runbook steps/);
+    const phishing = attached[1];
+    const actor = { id: adminId, name: "Test Admin" };
+    await expect(setStep(phishing.id, "scope", { state: "skipped" }, actor)).rejects.toThrow(/why/);
+    // Steps ticked at the same time both stick.
+    await Promise.all(["confirm", "purge", "clicked"].map((id) => setStep(phishing.id, id, { state: "done" }, actor)));
+    await setStep(phishing.id, "scope", { state: "skipped", note: "Only one recipient" }, actor);
+    await setStep(attached[0].id, "call", { state: "done", note: "Spoke to Ravi" }, actor);
+    expect(await openRequiredSteps(kase.id)).toEqual([]);
+    // A false positive doesn't need the runbook; this one is a true positive and now closes.
+    await setCaseStatus(kase.id, "RESOLVED", adminId, undefined, { disposition: "TRUE_POSITIVE", reason: "Confirmed phish" });
+    const step = await db.timelineEntry.findFirst({ where: { caseId: kase.id, action: "runbook.step", detail: { contains: "skipped: Only one recipient" } } });
+    expect(step).not.toBeNull();
+  });
+
+  it("samples what the AI did on its own for QA, and a wrong call counts against it on the ladder", async () => {
+    const DAY = 86_400_000;
+    const now = new Date();
+    const lastWeek = new Date(weekStart(now).getTime() - 7 * DAY);
+    const inLastWeek = new Date(lastWeek.getTime() + 2 * DAY);
+    const tenant = await db.tenant.create({ data: { name: "Test · QA", slug: "test-qa" } });
+    const closer = await db.user.create({ data: { email: "qa.closer@test.local", name: "Closer", role: "SOC_MANAGER" } });
+    const reviewer = await db.user.create({ data: { email: "qa.reviewer@test.local", name: "Reviewer", role: "INCIDENT_RESPONDER" } });
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Isolated a build server", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    const action = await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "BUILD-01", source: "ai", status: "EXECUTED", decidedAt: inLastWeek, parameters: { ladderLevel: "4" }, createdAt: inLastWeek } });
+    await db.aiRun.create({ data: { caseId: kase.id, agentKey: "triage", trigger: "auto", engine: "heuristic", status: "succeeded", output: { verdict: "true_positive" }, createdAt: inLastWeek } });
+    const benign = await createCase({ sourceType: "SIEM_ALERT", title: "Admin script flagged", severity: "MEDIUM", tenantId: tenant.id, deferPipelines: true });
+    await db.aiRun.create({ data: { caseId: benign.id, agentKey: "triage", trigger: "auto", engine: "heuristic", status: "succeeded", output: { verdict: "benign" }, createdAt: inLastWeek } });
+    // Something only a person did is not QA's business.
+    const human = await createCase({ sourceType: "SIEM_ALERT", title: "Analyst isolated", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    await db.responseAction.create({ data: { caseId: human.id, tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "WS-9", source: "ai", status: "EXECUTED", decidedById: closer.id, createdAt: inLastWeek } });
+    await setCaseStatus(kase.id, "RESOLVED", closer.id, undefined, { disposition: "TRUE_POSITIVE", reason: "Malware confirmed" });
+    expect(await db.aiDecisionOutcome.findFirst({ where: { caseId: kase.id, kind: "action" } })).toMatchObject({ agreed: true, falseContainment: false });
+
+    const first = await runQaSampling(now);
+    expect(first).toMatchObject({ population: 2, sampled: 2 });
+    expect(await runQaSampling(now)).toBeNull();
+    const review = await db.qaReview.findFirstOrThrow({ where: { caseId: kase.id } });
+    expect(review.reasons).toEqual(["AI acted on its own (1)", "high severity"]);
+    expect(review.reviewerId).not.toBe(closer.id);
+    expect((await sampleWeek(lastWeek)).sampled).toBe(0);
+    expect(await db.notification.count({ where: { kind: "qa", title: { contains: "to review" } } })).toBeGreaterThan(0);
+
+    await expect(submitQaReview(review.id, { actions: {}, verdictRight: true, notes: "" }, { id: closer.id, name: "Closer" })).rejects.toThrow(/other than the analyst/);
+    await expect(submitQaReview(review.id, { actions: {}, verdictRight: true, notes: "" }, { id: reviewer.id, name: "Reviewer" })).rejects.toThrow(/each action/);
+    await expect(submitQaReview(review.id, { actions: { [action.id]: "wrong" }, verdictRight: null, notes: "" }, { id: reviewer.id, name: "Reviewer" })).rejects.toThrow(/verdict/);
+    expect(await submitQaReview(review.id, { actions: { [action.id]: "wrong" }, verdictRight: true, notes: "Build servers are never isolated" }, { id: reviewer.id, name: "Reviewer" })).toBe("partly");
+    expect((await db.responseAction.findUniqueOrThrow({ where: { id: action.id } })).qaVerdict).toBe("wrong");
+    // The reviewer's call replaces the inference from the disposition.
+    expect(await db.aiDecisionOutcome.findFirst({ where: { caseId: kase.id, kind: "action" } })).toMatchObject({ agreed: false, falseContainment: true });
+    await expect(submitQaReview(review.id, { actions: { [action.id]: "right" }, verdictRight: true, notes: "" }, { id: reviewer.id, name: "Reviewer" })).rejects.toThrow(/already been reviewed/);
+  });
+
+  it("sends each client's admins a daily digest of what HELIOS did, once a day", async () => {
+    const now = new Date();
+    const tenant = await db.tenant.create({ data: { name: "Test · Digest", slug: "test-digest" } });
+    const admin = await db.user.create({ data: { email: "digest.admin@test.local", name: "Digest Admin", role: "CLIENT_ADMIN", tenantId: tenant.id } });
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Beacon to known C2", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "BLOCK_IP", target: "203.0.113.50", source: "ai", status: "EXECUTED", parameters: { ladderLevel: "4" } } });
+    await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "ISOLATE_HOST", target: "WS-77", source: "ai", status: "PENDING_APPROVAL" } });
+    const d = await buildDigest({ id: tenant.id, name: tenant.name, isTest: false }, new Date(now.getTime() - 86_400_000), new Date(now.getTime() + 1000));
+    expect(d).toMatchObject({ aiActionsTotal: 1, pendingApprovals: 1, opened: { total: 1, high: 1 }, pages: null });
+    expect(d.aiActions[0]).toMatchObject({ action: "Block IP", target: "203.0.113.50", level: 4 });
+
+    const at = new Date(Date.now() + 1000);
+    await sendDigests(at);
+    const run = await db.digestRun.findFirstOrThrow({ where: { tenantId: tenant.id } });
+    expect(run.recipients).toBe(1);
+    const note = await db.notification.findFirstOrThrow({ where: { userId: admin.id, kind: "digest" } });
+    expect(note.href).toBe(`/digest/${run.id}`);
+    expect(note.body).toContain("Block IP 203.0.113.50");
+    expect(await db.digestRun.count({ where: { tenantId: null } })).toBe(1);
+    await sendDigests(new Date(at.getTime() + 60_000));
+    expect(await db.digestRun.count({ where: { tenantId: tenant.id } })).toBe(1);
+    expect(await db.notification.count({ where: { userId: admin.id, kind: "digest" } })).toBe(1);
   });
 
   it("keeps the audit chain intact under concurrent writes and detects tampering", async () => {

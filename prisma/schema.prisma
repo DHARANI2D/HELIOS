@@ -84,6 +84,7 @@ model User {
   aiFeedback             AiRun[]                 @relation("AiRunFeedback")
   apiTokens              ApiToken[]
   alertDeliveries        AlertDelivery[]
+  onCallShifts           OnCallShift[]
 
   @@index([tenantId])
   @@map("users")
@@ -285,6 +286,8 @@ model Case {
   notifications   Notification[]
   responseActions ResponseAction[]
   aiOutcomes      AiDecisionOutcome[]
+  runbooks        CaseRunbook[]
+  qaReviews       QaReview[]
   notices         RegulatoryNotice[]
 
   @@index([tenantId, status])
@@ -1159,6 +1162,8 @@ model ResponseAction {
   // back at this time unless someone extends them.
   expiresAt         DateTime?
   result            Json?
+  // A QA reviewer's call on an action the AI ran on its own: right | wrong.
+  qaVerdict         String?
   createdAt         DateTime             @default(now())
 
   case  Case   @relation(fields: [caseId], references: [id], onDelete: Cascade)
@@ -1591,4 +1596,150 @@ model LegalHold {
 
   @@index([tenantId])
   @@map("legal_holds")
+}
+
+// ---------------------------------------------------------------- SOC operations
+
+// The on-call rota: who answers pages, and when. An override (a swap or
+// cover) takes precedence over the regular rotation for its hours.
+model OnCallShift {
+  id            String    @id @default(cuid())
+  userId        String
+  // primary | backup
+  role          String    @default("primary")
+  startsAt      DateTime
+  endsAt        DateTime
+  override      Boolean   @default(false)
+  note          String?
+  // The handoff summary sent at the start of the shift.
+  handoffSentAt DateTime?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([startsAt, endsAt])
+  @@map("oncall_shifts")
+}
+
+// A page to whoever is on call, escalating (primary, backup, SOC managers)
+// until someone acknowledges it.
+model OnCallPage {
+  id          String        @id @default(cuid())
+  // One page per cause, e.g. case:<id>.
+  key         String        @unique
+  tenantId    String?
+  caseId      String?
+  title       String
+  body        String?       @db.Text
+  severity    CaseSeverity?
+  // 0 primary, 1 backup, 2 SOC managers.
+  level       Int           @default(0)
+  pagedIds    String[]      @default([])
+  lastPagedAt DateTime      @default(now())
+  createdById String?
+  createdAt   DateTime      @default(now())
+  ackAt       DateTime?
+  ackById     String?
+  ackByName   String?
+
+  @@index([ackAt, lastPagedAt])
+  @@map("oncall_pages")
+}
+
+// A procedure for analysts, attached to the cases it matches: a checklist
+// of steps, some required before a true positive is closed. Global
+// (tenantId null) or one client's own.
+model Runbook {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  title       String
+  description String?  @db.Text
+  // { sources, techniques, keywords, minSeverity } (lib/runbooks/match.ts).
+  match       Json
+  // [{ id, title, detail, required }]
+  steps       Json
+  version     Int      @default(1)
+  enabled     Boolean  @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  cases CaseRunbook[]
+
+  @@index([tenantId])
+  @@map("runbooks")
+}
+
+// A runbook on a case: the steps as they were when attached, and progress.
+model CaseRunbook {
+  id          String    @id @default(cuid())
+  caseId      String
+  tenantId    String?
+  runbookId   String?
+  title       String
+  version     Int
+  steps       Json
+  // stepId → { by, byId, at, note, skipped }
+  progress    Json      @default("{}")
+  // "matched" or the name of who attached it.
+  attachedBy  String
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  case    Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  runbook Runbook? @relation(fields: [runbookId], references: [id], onDelete: SetNull)
+
+  @@unique([caseId, runbookId])
+  @@index([tenantId])
+  @@map("case_runbooks")
+}
+
+// A case sampled for a human to check what the AI did on its own: actions
+// it ran without a person, or a case it called benign.
+model QaReview {
+  id           String    @id @default(cuid())
+  tenantId     String?
+  caseId       String
+  // Monday 00:00 UTC of the week sampled.
+  week         DateTime
+  reasons      String[]
+  weight       Float
+  reviewerId   String?
+  // PENDING | DONE
+  status       String    @default("PENDING")
+  // Whether the AI's verdict was right (null: it gave none).
+  verdictRight Boolean?
+  // agree | partly | disagree
+  outcome      String?
+  notes        String?   @db.Text
+  reviewedById String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, week])
+  @@index([week, status])
+  @@index([tenantId])
+  @@map("qa_reviews")
+}
+
+// One daily digest sent: to a client's admins, or the SOC's own.
+model DigestRun {
+  id         String   @id @default(cuid())
+  // <tenantId or "soc">:<YYYY-MM-DD>
+  key        String   @unique
+  tenantId   String?
+  day        DateTime
+  fromAt     DateTime
+  toAt       DateTime
+  recipients Int
+  summary    Json
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, day])
+  @@map("digest_runs")
 }
