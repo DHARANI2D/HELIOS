@@ -305,6 +305,9 @@ The AI contains threats only within rules people set, and the rules change only 
 - **No AI takeover:** requests and approvals come only from signed-in, active people. No agent has a session, an account or a tool that reaches change control, the rulebook, the ladder or the AI settings. The hourly ladder review (deterministic code, not an AI) can propose a promotion, never approve one.
 - **Applying:** the last approval applies the change in one transaction, exactly once, after checking that what it changes is still as it was when asked (the same rulebook text, the same level, consent, profile or settings). Otherwise the change lapses (`STALE`) and has to be asked for again.
 - **Stopping never waits:** the kill switch on, lowering a level or the client's consent, and narrowing the agent or the platform limits all apply at once and are audited.
+- **Review travels with the request:** a rulebook version's request carries what changes against the version in force and a dry run of the last 30 days of AI proposals under it; approvers see both on the change.
+- **Checked again at the moment of acting** (`lib/response/guard.ts`): containment the AI runs with nobody's approval is re-checked in the executor against the rules in force *now*: the kill switch, the circuit breaker, consent, plan, the ladder, the rulebook's verdict, and that the rulebook it was decided under is still the version in force and unaltered. Rules that moved on hold it for a person. An action beyond initial containment, or one decided under no rulebook or one never approved, is a violation: it's blocked, the client's automatic containment is paused (circuit breaker) and the SOC is paged.
+- **Monitor:** every five minutes a job re-checks the last day of containment the AI ran on its own and reports any violation once, the same way.
 - **Trail:** each request, approval, rejection, withdrawal, application and lapse is in the audit chain with the fingerprint. The people who need to act are notified. `/changes` lists what's waiting and what was decided; the rulebook page shows its client's pending changes, and `/approvals` counts them.
 
 ### Background jobs (`src/instrumentation.ts`, `lib/jobs/scheduler.ts`)
@@ -315,6 +318,7 @@ Timers in the server process:
 |---|---|
 | Approval escalation | Minute |
 | Connector verification | 30 seconds |
+| Containment monitor (AI actions outside the approved rules) | 5 minutes |
 | Time-box rollbacks | Minute |
 | Credential reminders | 6 hours |
 | Regulatory clocks (CERT-In and DPDP deadlines) | Minute |

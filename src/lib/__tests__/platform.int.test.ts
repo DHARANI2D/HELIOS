@@ -17,6 +17,7 @@ import { createCase } from "@/lib/cases/writer";
 import { completeManualAction, decideResponseAction, performResponseAction, recordResponseAction, requestAnalystAction } from "@/lib/response/service";
 import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
 import { approveChange, rejectChange, requestChange, withdrawChange, type ChangeActor } from "@/lib/changes/service";
+import { monitorAutonomousContainment } from "@/lib/response/guard";
 import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { resolveForClient } from "@/lib/ai/gateway";
 import { loadProfile, providerFromRow } from "@/lib/ai/resolve";
@@ -661,6 +662,55 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await setSetting("ai.killSwitch", false);
   });
 
+  it("checks AI containment again at the moment of acting, and stops automation on a violation", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Guard", slug: "test-guard", aiAutonomyCap: "AUTO_CONTAIN" } });
+    await saveDraft(tenant.id, { body: { actions: { BLOCK_IP: { mode: "auto", autoFrom: "HIGH" } } }, reason: "Auto-block from high" }, adminActor());
+    await putInForce(tenant.id);
+    const v1 = await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } });
+    const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Guard case", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });
+    const aiAction = (actionType: "BLOCK_IP" | "RESET_PASSWORD", target: string, policyHash: string | null) =>
+      recordResponseAction({ caseId: kase.id, actionType, target, source: "ai", status: "PENDING_APPROVAL", decision: { trace: [], approvals: 1, policyVersion: v1.version, policyHash } });
+    const ai = { name: "Triage agent (auto-contain)" };
+
+    // Decided under the version in force and still allowed: it goes ahead (by hand here: no connector).
+    const ok = await performResponseAction((await aiAction("BLOCK_IP", "203.0.113.7", v1.contentHash)).id, ai);
+    expect(["MANUAL_REQUIRED", "EXECUTED"]).toContain(ok.status);
+
+    // A new version came into force after the AI decided: a person decides.
+    await saveDraft(tenant.id, { body: { actions: { BLOCK_IP: { mode: "approve", autoFrom: "HIGH" } } }, reason: "Blocks need approval" }, adminActor());
+    const { changeId } = await submitForSignature(tenant.id, adminActor());
+    const change = await db.ruleChange.findUniqueOrThrow({ where: { id: changeId } });
+    // The review travels with the request: what changes, and the dry run.
+    const impact = (change.payload as { impact: { diff: Array<{ path: string; before?: string; after?: string }>; dryRun: { days: number } | null } }).impact;
+    expect(impact.diff).toEqual(expect.arrayContaining([expect.objectContaining({ path: "actions.BLOCK_IP.mode", before: "auto", after: "approve" })]));
+    expect(impact.dryRun?.days).toBe(30);
+    await signRulebook(tenant.id, adminActor(), "Client approved by email today", "client");
+    await signRulebook(tenant.id, await staffActor("second.approver@test.local"), "", "helios");
+    const late = await performResponseAction((await aiAction("BLOCK_IP", "203.0.113.8", v1.contentHash)).id, ai);
+    expect(late).toMatchObject({ status: "PENDING_APPROVAL" });
+    expect(late.policyReason).toMatch(/came into force after the AI decided/);
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).automationPausedAt).toBeNull();
+
+    // Beyond initial containment, with nobody's approval: blocked, automation paused, SOC told.
+    const v2 = await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } });
+    const rogue = await performResponseAction((await recordResponseAction({ caseId: kase.id, actionType: "RESET_PASSWORD", target: "jdoe", source: "ai", status: "PENDING_APPROVAL", decision: { trace: [], approvals: 1, policyVersion: v2.version, policyHash: v2.contentHash } })).id, ai);
+    expect(rogue.status).toBe("BLOCKED");
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).automationPauseReason).toMatch(/outside the approved rules/);
+    expect(await db.auditLog.count({ where: { action: "containment.policy_violation" } })).toBe(1);
+
+    // While paused, nothing the AI decided runs on its own.
+    const paused = await performResponseAction((await aiAction("BLOCK_IP", "203.0.113.9", v2.contentHash)).id, ai);
+    expect(paused.status).toBe("PENDING_APPROVAL");
+    await db.tenant.update({ where: { id: tenant.id }, data: { automationPausedAt: null, automationPauseReason: null } });
+
+    // The monitor catches what got past without the executor, once.
+    await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "DISABLE_USER", target: "ceo", source: "ai", status: "EXECUTED", policyHash: v2.contentHash } });
+    await db.responseAction.create({ data: { caseId: kase.id, tenantId: tenant.id, actionType: "BLOCK_IP", target: "198.51.100.1", source: "ai", status: "EXECUTED", policyHash: "f".repeat(64) } });
+    expect(await monitorAutonomousContainment()).toBe(2);
+    expect(await monitorAutonomousContainment()).toBe(0);
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).automationPausedAt).not.toBeNull();
+  });
+
   it("measures AI in shadow mode and moves the ladder on the record", async () => {
     const tenant = await db.tenant.create({ data: { name: "Test · Shadow", slug: "test-shadow" } });
     const author = { id: adminId, name: "Test Admin" };
@@ -725,7 +775,8 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await new Promise<void>((resolve) => falcon.listen(0, "127.0.0.1", resolve));
     const falconUrl = `http://127.0.0.1:${(falcon.address() as AddressInfo).port}`;
     try {
-      const tenant = await db.tenant.create({ data: { name: "Test · Native", slug: "test-native" } });
+      // Consents to automatic containment: the AI's own actions below are checked against it.
+      const tenant = await db.tenant.create({ data: { name: "Test · Native", slug: "test-native", aiAutonomyCap: "AUTO_CONTAIN" } });
       const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "crowdstrike_falcon_enterprise", secrets: { connector: { clientSecret: "s" } } }, adminId);
       await db.integration.update({ where: { id: integration.id }, data: { config: { connector: "crowdstrike_falcon", connectorMode: "live", connectorConfig: { baseUrl: falconUrl, clientId: "id" } } } });
       const kase = await createCase({ sourceType: "SIEM_ALERT", title: "Native containment", severity: "HIGH", tenantId: tenant.id, deferPipelines: true });

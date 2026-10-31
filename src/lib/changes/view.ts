@@ -25,6 +25,8 @@ export interface ChangeView {
   appliedAt: string | null;
   hash: string;
   href: string | null;
+  // A rulebook version's lines that change, and its dry run.
+  impact: { againstVersion: number | null; diff: Array<{ path: string; kind: string; before?: string; after?: string }>; dryRun: { days: number; total: number; then: Record<string, number>; now: Record<string, number>; changed: number } | null } | null;
   can: { client: boolean; clientOnBehalf: boolean; helios: boolean; reject: boolean; withdraw: boolean };
   // Why this person can't approve, when they'd expect to.
   blocked: string | null;
@@ -56,6 +58,7 @@ export function changeView(c: RuleChange & { tenant?: { name: string } | null },
     appliedAt: iso(c.appliedAt),
     hash: c.payloadHash,
     href,
+    impact: c.kind === "RULEBOOK_VERSION" ? impactOf(c.payload) : null,
     can: {
       client: clientBlock === null,
       clientOnBehalf: clientBlock === null && !user.isClient,
@@ -73,4 +76,11 @@ function waitingNote(c: RuleChange, user: Approver, block: string): string | nul
   if (needsClient && c.clientApprovedAt && !c.heliosApprovedAt && (user.isClient || block.startsWith("Someone other") || block.startsWith("You recorded"))) return `Waiting for HELIOS's approval${user.isClient ? "" : ` from someone other than ${c.requestedById === user.id ? "you" : c.requestedByName}`}.`;
   if (needsClient && !c.clientApprovedAt && c.heliosApprovedAt) return "Waiting for the client's approval.";
   return block === "n/a" ? null : block;
+}
+
+type Impact = NonNullable<ChangeView["impact"]>;
+function impactOf(payload: unknown): ChangeView["impact"] {
+  const p = payload as { againstVersion?: number | null; impact?: { diff?: Impact["diff"]; dryRun?: Impact["dryRun"] } } | null;
+  if (!p?.impact) return null;
+  return { againstVersion: p.againstVersion ?? null, diff: p.impact.diff ?? [], dryRun: p.impact.dryRun ?? null };
 }

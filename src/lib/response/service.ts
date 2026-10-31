@@ -1,5 +1,6 @@
 import type { CaseStatus, PlaybookActionType, ResponseActionStatus } from "@prisma/client";
 
+import { checkAutonomousAction, isAutonomous, reportViolation } from "@/lib/response/guard";
 import { db } from "@/lib/db";
 import { logAction } from "@/lib/audit";
 import { notify, staffFor } from "@/lib/notifications";
@@ -113,6 +114,18 @@ async function markCaseAfterResponse(caseId: string) {
 // Runs an action that's been cleared (by policy or by a human).
 export async function performResponseAction(actionId: string, actor: Actor) {
   const action = await db.responseAction.findUniqueOrThrow({ where: { id: actionId } });
+  // Containment the AI runs with nobody's approval is checked again here,
+  // against the rules in force now, whatever path it came by (lib/response/guard.ts).
+  if (isAutonomous(action)) {
+    const check = await checkAutonomousAction(action);
+    if (!check.ok) {
+      const held = await db.responseAction.update({ where: { id: actionId }, data: { status: check.status, policyReason: check.reason, decidedAt: null } });
+      await db.timelineEntry.create({ data: { caseId: action.caseId, occurredAt: new Date(), actor: actor.name, action: check.violation ? "response.policy_violation" : "response.held", detail: `${ACTION_LABEL[action.actionType]}${action.target ? ` ${action.target}` : ""}: ${check.reason}`, evidence: { responseActionId: actionId } } });
+      await logAction({ actorId: actor.id, caseId: action.caseId, action: check.violation ? "response.blocked" : "response.held", detail: { responseActionId: actionId, actionType: action.actionType, target: action.target, source: action.source, reason: check.reason } });
+      if (check.violation) await reportViolation(action, check.reason);
+      return held;
+    }
+  }
   const kase = await db.case.findUniqueOrThrow({ where: { id: action.caseId } });
   const ctx = await buildActionContext(kase);
   const paramKey = PARAM_FOR[action.actionType];

@@ -34,6 +34,8 @@ const JOBS: Job[] = [
   { name: "approval escalation", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/rulebook/escalation")).escalatePendingApprovals() },
   // Follows connector requests until the vendor confirms them.
   { name: "connector verification", group: "core", everyMs: 30_000, run: async () => (await import("@/lib/connectors/safety")).verifyInProgress() },
+  // Re-checks containment the AI ran on its own; a violation pauses the client's automation.
+  { name: "containment monitor", group: "core", everyMs: 5 * 60_000, run: async () => (await import("@/lib/response/guard")).monitorAutonomousContainment() },
   // Rolls back time-boxed actions whose time is up.
   { name: "time boxes", group: "core", everyMs: 60_000, run: async () => (await import("@/lib/connectors/safety")).rollBackExpired() },
   // Connector credentials about to expire.

@@ -45,6 +45,17 @@ HELIOS ships no sample clients, no invented prices and no fake intelligence.
 
 See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit together, and [`docs/porting-notes.md`](docs/porting-notes.md) for the history of the original modules.
 
+## How AI containment is governed
+
+**AI executes. HELIOS governs. The client authorises. The audit trail proves.**
+
+- **The AI contains first.** When a threat is detected, HELIOS's AI agent investigates, picks the containment, and runs the *initial* steps itself when the rules allow it: isolating a host, blocking an IP or a sender, quarantining a file, collecting logs. Each is reversible from the case. Anything past that (disabling accounts, resetting passwords, killing processes, purging mail) is proposed for a person.
+- **The client authorises the rules.** Each client's rulebook sets what may run on its own, what needs approval, what never happens, the protected assets and accounts, severity thresholds, blast-radius limits, business hours, change freezes and the approver chain.
+- **HELIOS governs every action.** A deterministic policy engine checks every AI proposal against the rules in force: kill switch, plan, client consent, rulebook, autonomy ladder, agent profile, model evaluation and rate limits. The most restrictive rule wins, and the decision records the rulebook version and fingerprint it was made under. Just before acting, an AI action nobody approved is checked again against the rules in force *now*.
+- **No AI takeover.** No AI model, provider or agent can change a rule, raise its own autonomy, approve anything or reach the rulebook. Models supply analysis; HELIOS's code decides and executes. A rule change (new rulebook version, allowlist entry, more autonomy or consent) takes effect only once the client and HELIOS have both approved it, after a review of what changes and a dry run on the last 30 days. Until then the approved version stays in force.
+- **Continuous monitoring.** Every action the AI runs is verified with the security product, notified to the SOC and the client, and re-checked every five minutes. Anything outside the approved rules (an action beyond initial containment, rules that don't match what was approved) is blocked, pauses that client's automatic containment and pages the SOC.
+- **Proof.** Every proposal, decision, approval, rule change and action is in a hash-chained audit log that the app itself can add to but never alter.
+
 ## User guides
 
 [`docs/HELIOS-documentation.pdf`](docs/HELIOS-documentation.pdf) is the whole product in one document. It opens with a brochure (what HELIOS is and does, how it works, why it can be trusted, who uses it). Then comes the full documentation: getting started, how each part works, roles and access, every screen with screenshots, end-to-end procedures, guidelines and reference.

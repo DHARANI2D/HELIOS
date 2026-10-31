@@ -43,6 +43,54 @@ function Slot({ label, byName, at, note, waiting }: { label: string; byName: str
   );
 }
 
+const OUTCOMES: Array<[string, string]> = [["EXECUTED", "Automatic"], ["PENDING_APPROVAL", "Held for approval"], ["SUGGESTED", "Suggestion only"], ["BLOCKED", "Blocked"]];
+
+// A rulebook version's review: what changes against the version in force,
+// and how the last 30 days of AI proposals would have gone under it.
+function Impact({ impact }: { impact: NonNullable<ChangeView["impact"]> }) {
+  const shown = impact.diff.slice(0, 12);
+  return (
+    <div className="grid gap-2 md:grid-cols-2">
+      <div className="min-w-0 rounded-md border p-2 text-xs">
+        <p className="font-medium">What changes {impact.againstVersion ? `against v${impact.againstVersion} in force` : "(no version in force yet)"}</p>
+        {impact.diff.length === 0 ? (
+          <p className="text-muted-foreground">Nothing: the same rules as in force.</p>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-0.5 font-mono text-[11px]">
+            {shown.map((d, i) => (
+              <li key={i} className="break-words">
+                <span className={cn(d.kind === "added" ? "text-emerald-600" : d.kind === "removed" ? "text-destructive" : "text-amber-600")}>{d.kind === "added" ? "+" : d.kind === "removed" ? "−" : "~"}</span> {d.path}
+                {d.kind === "changed" ? `: ${d.before} → ${d.after}` : d.kind === "added" ? `: ${d.after ?? ""}` : `: ${d.before ?? ""}`}
+              </li>
+            ))}
+            {impact.diff.length > shown.length && <li className="text-muted-foreground">and {impact.diff.length - shown.length} more (see Versions on the rulebook page)</li>}
+          </ul>
+        )}
+      </div>
+      <div className="min-w-0 rounded-md border p-2 text-xs">
+        <p className="font-medium">Dry run{impact.dryRun ? `: last ${impact.dryRun.days} days, ${impact.dryRun.total} AI proposal${impact.dryRun.total === 1 ? "" : "s"}` : ""}</p>
+        {!impact.dryRun ? (
+          <p className="text-muted-foreground">Not available.</p>
+        ) : impact.dryRun.total === 0 ? (
+          <p className="text-muted-foreground">No AI containment proposals for this client yet.</p>
+        ) : (
+          <>
+            <table className="mt-1 w-full">
+              <thead className="text-left text-muted-foreground"><tr><th className="font-normal">Outcome</th><th className="text-right font-normal">At the time</th><th className="text-right font-normal">Under this version</th></tr></thead>
+              <tbody>
+                {OUTCOMES.map(([k, label]) => (
+                  <tr key={k}><td>{label}</td><td className="text-right tabular-nums">{impact.dryRun!.then[k] ?? 0}</td><td className={cn("text-right tabular-nums", (impact.dryRun!.now[k] ?? 0) !== (impact.dryRun!.then[k] ?? 0) && "font-semibold")}>{impact.dryRun!.now[k] ?? 0}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1 text-muted-foreground">{impact.dryRun.changed} decision{impact.dryRun.changed === 1 ? "" : "s"} would change.</p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ChangeCard({ change, compact = false }: { change: ChangeView; compact?: boolean }) {
   const router = useRouter();
   const [mode, setMode] = React.useState<null | "client" | "helios" | "reject">(null);
@@ -78,6 +126,7 @@ export function ChangeCard({ change, compact = false }: { change: ChangeView; co
         <Badge variant={s.variant}>{s.label}</Badge>
       </div>
       {!compact && <p className="text-xs break-words"><span className="text-muted-foreground">Why: </span>{change.reason}</p>}
+      {!compact && change.impact && <Impact impact={change.impact} />}
       <div className="flex flex-wrap gap-2">
         {change.needsClient && <Slot label="Client's approval" byName={change.client.byName} at={change.client.at} note={change.client.note} waiting={pending} />}
         <Slot label={change.platform ? "Second HELIOS approver" : "HELIOS's approval"} byName={change.helios.byName} at={change.helios.at} note={change.helios.note} waiting={pending} />

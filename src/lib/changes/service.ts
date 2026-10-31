@@ -29,7 +29,13 @@ export const AUTOMATIC_REVIEW = { name: "automatic review" } as const;
 
 // ---------------------------------------------------------------- payloads
 
-export interface RulebookPayload { policyId: string; version: number; contentHash: string }
+// What approvers see: the lines that change against the version in force,
+// and what the last 30 days of AI proposals would have become under it.
+export interface RulebookImpact {
+  diff: Array<{ path: string; kind: "changed" | "added" | "removed"; before?: string; after?: string }>;
+  dryRun: { days: number; total: number; then: Record<string, number>; now: Record<string, number>; changed: number } | null;
+}
+export interface RulebookPayload { policyId: string; version: number; contentHash: string; againstVersion?: number | null; impact?: RulebookImpact }
 export interface AllowlistAddPayload { kind: string; value: string; reason: string; owner: string; expiresAt: string | null }
 export interface AllowlistRemovePayload { entryId: string; kind: string; value: string }
 export interface AutonomyPayload { actionType: PlaybookActionType; from: number; to: number; stats?: unknown }

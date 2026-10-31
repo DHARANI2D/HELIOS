@@ -194,9 +194,20 @@ export async function submitForSignature(tenantId: string, author: ChangeActor) 
   const draft = await db.orgPolicy.findFirst({ where: { tenantId, status: "DRAFT" } });
   if (!draft) throw new Error("There's no draft to send");
   if (hashRulebook(draft.body) !== draft.contentHash) throw new Error("This draft changed since it was saved; save it again");
+  // The review and the dry run travel with the request, so every approver
+  // sees what changes and what it would have done.
+  const body = parseStored(draft);
+  const inForce = await db.orgPolicy.findFirst({ where: { tenantId, status: "ACTIVE" } });
+  const { diffRulebooks } = await import("@/lib/rulebook/diff");
+  const { dryRunRulebook } = await import("@/lib/rulebook/dry-run");
+  const run = await dryRunRulebook(tenantId, body).catch(() => null);
+  const impact = {
+    diff: diffRulebooks(inForce ? parseStored(inForce) : null, body).slice(0, 200),
+    dryRun: run ? { days: run.days, total: run.total, then: run.then, now: run.now, changed: run.changes.length } : null,
+  };
   await db.orgPolicy.update({ where: { id: draft.id }, data: { status: "AWAITING_SIGNATURE", submittedAt: new Date() } });
   const change = await requestChange(
-    { tenantId, kind: "RULEBOOK_VERSION", summary: `Rulebook v${draft.version}${draft.reason ? `: ${draft.reason}` : ""}`, reason: draft.reason ?? "New rulebook version", payload: { policyId: draft.id, version: draft.version, contentHash: draft.contentHash } },
+    { tenantId, kind: "RULEBOOK_VERSION", summary: `Rulebook v${draft.version}${draft.reason ? `: ${draft.reason}` : ""}`, reason: draft.reason ?? "New rulebook version", payload: { policyId: draft.id, version: draft.version, contentHash: draft.contentHash, againstVersion: inForce?.version ?? null, impact } },
     author,
   );
   await logAction({ actorId: author.id, action: "rulebook.submitted", detail: { tenantId, version: draft.version, hash: draft.contentHash, changeId: change.id } });
