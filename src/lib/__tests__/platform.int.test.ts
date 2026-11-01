@@ -59,6 +59,11 @@ import { platformSecret, platformSecretStatus, storePlatformSecret } from "@/lib
 import { adoptAsTestEnvironment } from "../../../prisma/seed-test";
 import { CaseReportPdf, loadCaseReport } from "@/lib/pdf/case-report";
 import { issueApiToken, revokeApiToken } from "@/lib/api/tokens";
+import { searchEvents } from "@/lib/explore/search";
+import { savedSearchesFor } from "@/lib/explore/saved";
+import { suggestSearch } from "@/lib/explore/assistant";
+import { parseQuery } from "@/lib/explore/query";
+import * as eventsRoute from "@/app/api/v1/events/route";
 import * as meRoute from "@/app/api/v1/me/route";
 import * as casesRoute from "@/app/api/v1/cases/route";
 import * as caseRoute from "@/app/api/v1/cases/[id]/route";
@@ -1105,6 +1110,82 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect(await db.case.count({ where: { tenantId: { in: [a.id, b.id] } } })).toBe(2);
     expect(dbFor({ isClient: false, tenantId: null })).toBe(db);
     delete process.env.HELIOS_DB_TENANT_ROLE;
+  });
+
+  it("searches each client's logs in Explore, and the database keeps a client to its own", async () => {
+    const [{ rolsuper }] = await db.$queryRaw<Array<{ rolsuper: boolean }>>`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`;
+    if (rolsuper) {
+      await db.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'helios_tenant') THEN CREATE ROLE helios_tenant NOLOGIN; END IF; END $$`);
+      await db.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO helios_tenant; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO helios_tenant`);
+      process.env.HELIOS_DB_TENANT_ROLE = "helios_tenant";
+    }
+    try {
+      const a = await db.tenant.create({ data: { name: "Test · Explore A", slug: "test-explore-a" } });
+      const b = await db.tenant.create({ data: { name: "Test · Explore B", slug: "test-explore-b" } });
+      const now = new Date();
+      const at = (min: number) => new Date(now.getTime() - min * 60_000);
+      await db.securityEvent.createMany({
+        data: [
+          { tenantId: a.id, timestamp: at(50), source: "auth", eventType: "LOGIN_FAIL", userName: "alice", hostName: "EXP-A-01", sourceIp: "203.0.113.9" },
+          { tenantId: a.id, timestamp: at(40), source: "auth", eventType: "LOGIN_FAIL", userName: "alice", hostName: "EXP-A-01", sourceIp: "203.0.113.9" },
+          { tenantId: a.id, timestamp: at(30), source: "process", eventType: "PROCESS_START", userName: "alice", hostName: "EXP-A-01", processName: "powershell.exe", commandLine: "powershell -enc SQBFAFgA" },
+          { tenantId: b.id, timestamp: at(20), source: "auth", eventType: "LOGIN_FAIL", userName: "bob", hostName: "EXP-B-01", sourceIp: "203.0.113.9" },
+        ],
+      });
+      const from = at(120);
+
+      // A client's search: its own events only.
+      const own = await searchEvents({ q: "type:LOGIN_FAIL", from, to: now, tenantId: a.id, rlsTenant: a.id });
+      expect(own.total).toBe(2);
+      expect(own.rows.every((r) => r.tenantId === a.id)).toBe(true);
+      expect(own.facets.find((f) => f.key === "user")?.values).toEqual([{ value: "alice", label: "alice", n: 2 }]);
+      expect(own.histogram.reduce((n, b2) => n + b2.n, 0)).toBe(2);
+      // Even if the application's own filter were lost, Postgres keeps it to A.
+      const forgot = await searchEvents({ q: "ip:203.0.113.9", from, to: now, tenantId: null, rlsTenant: a.id });
+      expect(forgot.rows.map((r) => r.hostName)).toEqual(["EXP-A-01", "EXP-A-01"]);
+      // Staff across clients.
+      const all = await searchEvents({ q: "ip:203.0.113.9", from, to: now, tenantId: null, rlsTenant: null });
+      expect(all.total).toBe(3);
+      expect(all.facets.find((f) => f.key === "client")?.values.map((v) => v.label).sort()).toEqual(["Test · Explore A", "Test · Explore B"]);
+      // Free text reaches the command line; exclusion keeps events without the field.
+      expect((await searchEvents({ q: "SQBFAFgA", from, to: now, tenantId: a.id, rlsTenant: null })).total).toBe(1);
+      expect((await searchEvents({ q: "-process:powershell.exe", from, to: now, tenantId: a.id, rlsTenant: null })).total).toBe(2);
+      // Paging: newest first, the cursor carries on where the page ended.
+      const p1 = await searchEvents({ q: "", from, to: now, tenantId: a.id, rlsTenant: a.id, limit: 2 });
+      expect(p1.more).toBe(true);
+      const last = p1.rows[1];
+      const p2 = await searchEvents({ q: "", from, to: now, tenantId: a.id, rlsTenant: a.id, limit: 2, cursor: { t: last.timestamp.toISOString(), id: last.id } });
+      expect(p2.rows).toHaveLength(1);
+      expect(p2.rows[0].timestamp.getTime()).toBeLessThan(last.timestamp.getTime());
+
+      // Saved searches: a client's shared search is for that client's users.
+      const aUser = await db.user.create({ data: { email: "explore@a.test", name: "Explore A", role: "CLIENT_ADMIN", tenantId: a.id } });
+      const aViewer = await db.user.create({ data: { email: "viewer@a.test", name: "Viewer A", role: "CLIENT_VIEWER", tenantId: a.id } });
+      const bUser = await db.user.create({ data: { email: "explore@b.test", name: "Explore B", role: "CLIENT_ADMIN", tenantId: b.id } });
+      await db.savedSearch.create({ data: { name: "Failed sign-ins", query: "type:LOGIN_FAIL", tenantId: a.id, ownerId: aUser.id, shared: true } });
+      await db.savedSearch.create({ data: { name: "Mine only", query: "user:alice", tenantId: a.id, ownerId: aUser.id, shared: false } });
+      expect((await savedSearchesFor({ id: aViewer.id, isClient: true, tenantId: a.id })).map((s) => s.name)).toEqual(["Failed sign-ins"]);
+      expect(await savedSearchesFor({ id: bUser.id, isClient: true, tenantId: b.id })).toEqual([]);
+      expect(await tenantDb(b.id).savedSearch.count()).toBe(0);
+
+      // The REST API: a client's token can't reach another client, whatever it asks.
+      const { token } = await issueApiToken({ id: aUser.id, role: "CLIENT_ADMIN", tenantId: a.id, tenantName: null, domains: [], isClient: true, name: null, email: null }, { name: "explore", canWrite: false, expiresInDays: 1 });
+      const res = await eventsRoute.GET(new Request(`http://helios.test/api/v1/events?q=type:LOGIN_FAIL&tenant=${b.id}&range=4h&facets=1`, { headers: { authorization: `Bearer ${token}` } }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.total).toBe(2);
+      expect(body.events.every((e: { tenantId: string }) => e.tenantId === a.id)).toBe(true);
+      const bad = await eventsRoute.GET(new Request("http://helios.test/api/v1/events?q=colour:red", { headers: { authorization: `Bearer ${token}` } }));
+      expect(bad.status).toBe(400);
+
+      // The assistant writes a search HELIOS can run (built-in here: no model in tests).
+      const s = await suggestSearch("failed sign-ins for user alice in the last hour", { tenantId: a.id, userId: aUser.id });
+      expect(s.query).toContain("type:LOGIN_FAIL");
+      expect(() => parseQuery(s.query)).not.toThrow();
+      expect((await searchEvents({ q: s.query, from, to: now, tenantId: a.id, rlsTenant: a.id })).total).toBe(2);
+    } finally {
+      delete process.env.HELIOS_DB_TENANT_ROLE;
+    }
   });
 
   it("seals each client's credentials with its own key, rotates it, and can destroy it", async () => {

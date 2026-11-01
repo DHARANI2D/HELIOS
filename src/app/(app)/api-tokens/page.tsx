@@ -17,6 +17,7 @@ const ENDPOINTS: Array<{ method: string; path: string; what: string; needs: stri
   { method: "PATCH", path: "/api/v1/cases/{id}", what: '{"status":"RESOLVED","disposition":"TRUE_POSITIVE","note":"why"} · {"severity":"HIGH"} · {"assignee":"analyst@…"}', needs: "write token, cases.triage (cases.assign for others)" },
   { method: "POST", path: "/api/v1/cases/{id}/comments", what: '{"body":"…","clientVisible":false}', needs: "write token, cases.comment" },
   { method: "GET", path: "/api/v1/indicators?value=203.0.113.7", what: "Indicator reputation from the shared store (&refresh=1 asks the providers)", needs: "intel.view" },
+  { method: "GET", path: "/api/v1/events?q=type:LOGIN_FAIL user:alice&range=24h", what: "Search the logs with the Explore query language, newest first (&cursor= for the next page, &facets=1 for top values, &tenant= for staff)", needs: "events.search" },
   { method: "GET", path: "/api/v1/metrics?range=30d", what: "Service metrics as on the Reports page (or &month=YYYY-MM)", needs: "reports.view" },
 ];
 

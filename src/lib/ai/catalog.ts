@@ -3,7 +3,7 @@ import type { AiAutonomy, PlaybookActionType } from "@prisma/client";
 // What AI agents exist, which providers can run them, and what they cost.
 // Client-safe: the AI Agents page and the pricing configurator both read it.
 
-export type AgentKey = "triage" | "phishing" | "threat_intel" | "investigator" | "report" | "containment" | "investigation" | "advisor";
+export type AgentKey = "triage" | "phishing" | "threat_intel" | "investigator" | "report" | "containment" | "investigation" | "advisor" | "search";
 
 export interface AgentType {
   key: AgentKey;
@@ -86,6 +86,15 @@ export const AGENT_TYPES: Record<AgentKey, AgentType> = {
     key: "advisor",
     name: "Stack advisor",
     description: "Suggests the protection stack for a client's endpoint mix, users and budget in Build & Price and the public estimator. It chooses among catalog tools the rules have already priced and checked, and explains the trade-offs and price differences.",
+    dispatchable: false,
+    defaultAutonomy: "SUGGEST",
+    defaultActions: [],
+    defaultMinConfidence: 0,
+  },
+  search: {
+    key: "search",
+    name: "Search assistant",
+    description: "Turns a question in plain words (\"failed sign-ins for alice from outside India this week\") into an Explore search over the client's logs, and explains it. It only writes the search: it never sees the logs and can't change anything.",
     dispatchable: false,
     defaultAutonomy: "SUGGEST",
     defaultActions: [],

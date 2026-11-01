@@ -85,6 +85,7 @@ model User {
   apiTokens              ApiToken[]
   alertDeliveries        AlertDelivery[]
   onCallShifts           OnCallShift[]
+  savedSearches          SavedSearch[]
 
   @@index([tenantId])
   @@map("users")
@@ -187,28 +188,29 @@ model Tenant {
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
 
-  plan         ServicePlan?           @relation(fields: [planId], references: [id], onDelete: SetNull)
-  users        User[]
-  cases        Case[]
-  events       SecurityEvent[]
-  endpoints    Endpoint[]
-  integrations Integration[]
-  agents       Agent[]
-  quotes       Quote[]
-  policies     OrgPolicy[]
-  allowlist    PolicyAllowlistEntry[]
-  aiProviders  AiProvider[]
-  aiPolicy     TenantAiPolicy?
-  autonomy     AutonomyLevel[]
-  ruleChanges  RuleChange[]
-  caseReports  CaseReport[]
-  keys         TenantKey[]
-  notices      RegulatoryNotice[]
-  tunings      DetectionTuning[]
-  archives     EventArchive[]
-  legalHolds   LegalHold[]
-  contracts    Contract[]
-  rulebookGit  RulebookGitSync?
+  plan          ServicePlan?           @relation(fields: [planId], references: [id], onDelete: SetNull)
+  users         User[]
+  cases         Case[]
+  events        SecurityEvent[]
+  endpoints     Endpoint[]
+  integrations  Integration[]
+  agents        Agent[]
+  quotes        Quote[]
+  policies      OrgPolicy[]
+  allowlist     PolicyAllowlistEntry[]
+  aiProviders   AiProvider[]
+  aiPolicy      TenantAiPolicy?
+  autonomy      AutonomyLevel[]
+  ruleChanges   RuleChange[]
+  caseReports   CaseReport[]
+  savedSearches SavedSearch[]
+  keys          TenantKey[]
+  notices       RegulatoryNotice[]
+  tunings       DetectionTuning[]
+  archives      EventArchive[]
+  legalHolds    LegalHold[]
+  contracts     Contract[]
+  rulebookGit   RulebookGitSync?
 
   @@map("tenants")
 }
@@ -2022,4 +2024,27 @@ model RulebookGitSync {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("rulebook_git_sync")
+}
+
+// A search saved in Explore. Client users' searches are their client's;
+// a shared one is seen by everyone on the same side (the client's users,
+// or the SOC).
+model SavedSearch {
+  id        String   @id @default(cuid())
+  name      String
+  query     String   @db.Text
+  range     String   @default("24h")
+  // The client it searches; null: every client (staff only).
+  tenantId  String?
+  ownerId   String
+  shared    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner  User    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@index([tenantId])
+  @@map("saved_searches")
 }

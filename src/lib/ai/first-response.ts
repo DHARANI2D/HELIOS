@@ -81,7 +81,7 @@ export interface DispatchOptions {
 }
 
 export async function runAgentOnCase(caseId: string, key: AgentKey, opts: DispatchOptions) {
-  if (key === "containment" || key === "investigation" || key === "advisor" || !AGENT_TYPES[key]?.dispatchable) throw new Error(`${key} can't be dispatched onto a case`);
+  if (key === "containment" || key === "investigation" || key === "advisor" || key === "search" || !AGENT_TYPES[key]?.dispatchable) throw new Error(`${key} can't be dispatched onto a case`);
   const scope = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { tenantId: true, severity: true } });
   const resolved = await resolveAgent(key, { tenantId: scope.tenantId, userId: opts.requestedBy?.id, severity: scope.severity });
   const { profile, resolution } = resolved;

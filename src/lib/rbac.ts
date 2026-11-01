@@ -56,6 +56,7 @@ export const PERMISSIONS = {
   "qa.review": "Review the weekly sample of what the AI did on its own",
   "billing.view": "See contracts, pilots and invoices (clients: their own)",
   "billing.manage": "Draft and record contracts, issue invoices and record payments",
+  "events.search": "Search the logs HELIOS holds in Explore (client users: their own)",
 } as const;
 
 export type Permission = keyof typeof PERMISSIONS;
@@ -98,7 +99,7 @@ export const ROLE_ORDER: UserRole[] = [
 ];
 
 const ALL = Object.keys(PERMISSIONS) as Permission[];
-const SOC_BASE: Permission[] = ["dashboard.view", "cases.view", "cases.comment", "intel.view", "playbooks.view", "mitre.view", "ai.view", "endpoints.view", "integrations.view", "tenants.view", "rulebook.view", "operations.view"];
+const SOC_BASE: Permission[] = ["dashboard.view", "cases.view", "cases.comment", "intel.view", "playbooks.view", "mitre.view", "ai.view", "endpoints.view", "integrations.view", "tenants.view", "rulebook.view", "operations.view", "events.search"];
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ADMIN: ALL,
@@ -149,10 +150,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   THREAT_HUNTER: [...SOC_BASE, "cases.view_all", "cases.escalate", "investigations.run", "forensics.run", "telemetry.ingest", "intel.manage", "ai.dispatch", "ai.feedback", "api.tokens"],
   DETECTION_ENGINEER: [...SOC_BASE, "cases.view_all", "playbooks.manage", "telemetry.ingest", "integrations.manage", "ai.dispatch", "detections.tune", "api.tokens", "rulebook.edit"],
-  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view", "compliance.view", "operations.view"],
+  AUDITOR: ["dashboard.view", "cases.view", "cases.view_all", "audit.view", "audit.export", "ai.view", "playbooks.view", "mitre.view", "intel.view", "integrations.view", "endpoints.view", "tenants.view", "reports.view", "api.tokens", "rulebook.view", "compliance.view", "operations.view", "events.search"],
   SALES: ["dashboard.view", "tenants.view", "tenants.manage", "pricing.view", "pricing.margin", "integrations.view", "rulebook.view", "rulebook.edit", "billing.view", "billing.manage"],
-  CLIENT_ADMIN: ["billing.view", "dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign", "compliance.view", "compliance.approve"],
-  CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view", "rulebook.view", "compliance.view"],
+  CLIENT_ADMIN: ["billing.view", "dashboard.view", "cases.view", "cases.comment", "containment.approve", "reports.view", "integrations.view", "integrations.manage", "endpoints.view", "api.tokens", "rulebook.view", "rulebook.edit", "rulebook.sign", "compliance.view", "compliance.approve", "events.search"],
+  CLIENT_VIEWER: ["dashboard.view", "cases.view", "reports.view", "endpoints.view", "rulebook.view", "compliance.view", "events.search"],
 };
 
 export interface AccessSubject {

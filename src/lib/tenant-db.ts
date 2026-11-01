@@ -1,3 +1,5 @@
+import type { Prisma } from "@prisma/client";
+
 import { db } from "@/lib/db";
 import type { SessionUser } from "@/lib/session";
 
@@ -52,4 +54,19 @@ export function dbFor(user: Pick<SessionUser, "isClient" | "tenantId">): ScopedD
   if (!user.isClient) return db;
   // A client account without a client can't see client data at all.
   return tenantDb(user.tenantId ?? "__none__");
+}
+
+// Raw SQL in one transaction, bounded by a statement timeout and, for a
+// client, under the same row-level scope as tenantDb. For read queries the
+// ORM can't express (time buckets, grouping sets); the caller still
+// filters by tenant itself.
+export async function rawInScope(tenantId: string | null, queries: Prisma.PrismaPromise<unknown>[], opts: { timeoutMs?: number } = {}): Promise<unknown[]> {
+  const role = tenantId ? tenantRole() : undefined;
+  const setup = [
+    db.$executeRaw`SELECT set_config('statement_timeout', ${String(opts.timeoutMs ?? 15_000)}, TRUE)`,
+    ...(tenantId ? [db.$executeRaw`SELECT set_config('helios.tenant_id', ${tenantId}, TRUE)`] : []),
+    ...(role ? [db.$executeRawUnsafe(`SET LOCAL ROLE ${role}`)] : []),
+  ];
+  const results = await db.$transaction([...setup, ...queries]);
+  return results.slice(setup.length);
 }

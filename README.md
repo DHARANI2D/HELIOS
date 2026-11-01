@@ -68,6 +68,16 @@ Nobody has to sit with a case. Once the AI has contained it, HELIOS carries on b
 
 The AI never lifts containment or changes people's access on its own. A background job picks up cases every 20 seconds (setting `ai.autopilot`: on by default, from medium severity); staff can ask for a fresh analysis with **Analyse again**.
 
+## Explore: one search over every log
+
+Explore (**Search logs** for clients) searches every event HELIOS holds, from all of a client's tools, in one place: the SOC across clients or one client at a time, a client's own users over their own logs only.
+
+- **The query language** (`lib/explore/query.ts`): `host:FIN-WS-04 type:LOGIN_FAIL -user:svc_*`. Terms side by side all match, `OR` joins two, `-` or `NOT` excludes, `*` is a wildcard, `port:>1024` compares, `ip:a,b` is any of a list, `hash:*` means it has a value, and a bare word or `"phrase"` searches everywhere in the event, raw fields included. Field names from other tools work too (`src_ip`, `dest_port`, `Image`, `CommandLine`, `sha256`).
+- **Results**: how many events matched, a histogram (click a bar to zoom in), the top hosts, accounts, event types, IPs, ports, processes, sources, products and tools (click to filter in or out), and the events newest first. Each event opens to every field, the raw record the tool sent and its OCSF form.
+- **Saved searches**, private or shared with the same side (a client's users, or the SOC); **CSV export** of up to 10,000 events (formula-safe); and `GET /api/v1/events` for scripts and other tools.
+- **The search assistant** turns a question ("PowerShell with encoded commands on FIN-WS-04 this week") into a search on the model the client chose for it, under the client's AI rules. It sees only the question and the field list, never the logs; what it writes is checked like anything typed. Without a model a built-in translator does it.
+- **Safe by construction**: field names map to a fixed list of columns and every value is a bound parameter; each search runs in one transaction with a 15-second statement timeout, and a client user's search also runs under the database's row-level isolation.
+
 ## User guides
 
 [`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 14-page product brochure, to give to clients and partners. It covers:
@@ -200,7 +210,7 @@ CI (`.github/workflows/ci.yml`) runs:
 | `GET /api/threat-intel/blocklist` | — | Plain-text blocklist for firewalls to pull |
 | `GET /api/health` | — | Liveness and database check |
 | `/` (signed out), `/home`, `/estimate` | — | The public website and estimator. Its two Server Actions (AI suggestion, quote request) are rate-limited per visitor; AI answers share a daily budget |
-| `/api/v1/…` | Bearer personal access token (API Tokens page) | REST API: cases (list, read, update, comment), indicator lookup, service metrics. The token acts as its owner, read-only unless created with write |
+| `/api/v1/…` | Bearer personal access token (API Tokens page) | REST API: cases (list, read, update, comment), event search (the Explore query language), indicator lookup, service metrics. The token acts as its owner, read-only unless created with write |
 
 Response connectors receive `POST`s with an `x-helios-timestamp` header and an `x-helios-signature: sha256=<HMAC(secret, "<timestamp>.<body>")>` header.
 

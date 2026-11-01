@@ -254,7 +254,7 @@ export function withRedaction(provider: LlmProvider, known: KnownEntities): { pr
 
 // The agents that work on a client's cases, and which model each would get
 // right now (without a case, so the budget fallback isn't applied).
-export const CLIENT_AGENTS: AgentKey[] = ["triage", "phishing", "threat_intel", "investigator", "report", "investigation"];
+export const CLIENT_AGENTS: AgentKey[] = ["triage", "phishing", "threat_intel", "investigator", "report", "investigation", "search"];
 
 export async function previewClientModels(tenantId: string, userId?: string | null) {
   const { loadProfile } = await import("@/lib/ai/resolve");

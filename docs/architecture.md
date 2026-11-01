@@ -195,6 +195,14 @@ After first response, a job claims each open case of the last 14 days (`analysis
 - **Final analysis** (`CaseReport`, versioned per case, row-level isolated). Lifting containment is proposed as the inverse action (`ROLLBACK_OF`) in `PENDING_APPROVAL` with its conditions; remediation by tactic and technique becomes actions in `PENDING_APPROVAL` or tasks with an owner. A request for something already in place is left out.
 - **Review.** SOC managers, incident responders, the assignee, watchers and the client's admins are notified. The SOC marks it reviewed (`cases.triage`); the client acknowledges it (`cases.comment`). It's listed in Approvals until then.
 
+### Explore (`lib/explore`, `app/(app)/explore`, `GET /api/v1/events`)
+
+- **Compiler** (`query.ts`, `search.ts`). The query parses into AND-ed groups of OR-ed terms and compiles to a parameterised `WHERE` over `security_events`: column names only from the field list, values as bound parameters (`ILIKE` with `*` → `%`, `%` and `_` escaped), an excluded value as `NOT COALESCE(…, false)` so events without the field still match. The time window always applies, so the monthly partitions prune.
+- **One round trip** (`rawInScope` in `tenant-db.ts`). The page of rows (keyset cursor on `timestamp, id`), the count, the histogram (`date_bin`, about 60 bars) and the facets (one `GROUPING SETS` scan, top 8 per field) run in one transaction with a statement timeout; for a client user, under `helios.tenant_id` and the tenant role like `tenantDb`.
+- **Scope** (`request.ts`). A client user's searches, exports and API calls are pinned to their client whatever they pass; staff pick a client or all, defaulting to the client selected in the header.
+- **Assistant** (`assistant.ts`). Agent `search`, resolved per client like the other agents; structured output (`query`, `range`, `explanation`), parsed before use, a built-in translator as the fallback; each call is an `AiRun` with its usage.
+- **Saved searches** (`SavedSearch`, row-level isolated). Permission `events.search`: every SOC role, auditors, client admins and viewers.
+
 ### Investigation agent (`lib/ai/investigator`)
 
 An analyst can send the investigation agent onto a case. It works the case on its own with tools, and every tool only reads:
