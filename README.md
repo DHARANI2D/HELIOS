@@ -129,7 +129,8 @@ Scanner reports are read with a small XML reader that never resolves DTDs or ext
 
 ```bash
 ./helios.sh                       # installs/starts Docker if needed, generates secrets, builds, starts, opens the browser
-./helios.sh --test-data           # the same, plus test clients, users and cases
+./helios.sh --test-data           # the same, plus the test data the guides were made with
+./helios.sh test-data             # add that test data to an existing installation, or bring it up to date
 ./helios.sh --with-ollama         # the same, plus a local AI model (Ollama) as HELIOS's default
 ```
 
@@ -188,11 +189,14 @@ The ingest workers (queue, pull collectors, source health) run in the web proces
 npm run db:seed:test
 ```
 
-This loads data for exercising the platform end to end:
-- two test clients, two test plans, and test values for any unset price-book items;
+This loads the data the user guides and the brochure were made with, for exercising the platform end to end:
+- three test clients (Clinic, Retail, Earlier sample data), two test plans, and test values for any unset price-book items;
 - one account per role under the reserved `.test` domain;
-- vendor alerts and attack telemetry from the fixtures in `src/lib/__tests__/fixtures`, pushed through the real ingest, detection and AI first-response pipeline;
-- a governed test agent driven through the real governance gate.
+- vendor alerts and attack telemetry from the fixtures in `src/lib/__tests__/fixtures`, pushed through the real ingest, detection and AI first-response pipeline, plus every attack scenario, a log investigation and email and file forensics;
+- a governed test agent driven through the real governance gate;
+- each client's rulebook in force after both approvals, a rule change waiting for them, HELIOS's final analysis on each client's worst case, saved searches in Explore, and two security tests (`prisma/seed-demos.ts`).
+
+It's safe to run again: it adds only what's missing, so on an older test database it brings the test data up to date. On a Mac, `./helios.sh test-data` does the same for the container setup.
 
 Everything is labelled "Test ·", and test clients are flagged: they're badged wherever they appear and left out of commercial figures. The command refuses to run with `NODE_ENV=production`. Use a separate database if you don't want test data next to real clients.
 

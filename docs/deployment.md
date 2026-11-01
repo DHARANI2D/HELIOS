@@ -43,7 +43,7 @@ Options:
 
 | Run | To |
 | --- | --- |
-| `./helios.sh --test-data` | Also load test clients, users and cases, each labelled *Test · …* and badged wherever it's listed. Their accounts are saved in `.helios/test-data`. |
+| `./helios.sh --test-data` | Also load the test data (below): test clients, users and cases, each labelled *Test · …* and badged wherever it's listed. Their accounts are saved in `.helios/test-data`. |
 | `./helios.sh --with-ollama` | Also run a local AI model: installs Ollama if needed, starts it, downloads a model sized to your Mac's memory (`qwen2.5:14b` with 32 GB or more, otherwise `llama3.1:8b`; `HELIOS_OLLAMA_MODEL` picks another), and adds it to HELIOS as the default model. Run Evaluations on it before relying on it. |
 
 ### Everyday commands
@@ -51,6 +51,7 @@ Options:
 | To | Run |
 | --- | --- |
 | Start again (no rebuild) | `./helios.sh start` |
+| Add the test data, or bring test data loaded earlier up to date | `./helios.sh test-data` (safe to run again) |
 | Stop (keeps every piece of data) | `./helios.sh stop` |
 | See what's running | `./helios.sh status` |
 | Follow the logs | `./helios.sh logs` (or `./helios.sh logs migrate`) |
@@ -78,13 +79,37 @@ open http://localhost:3000
 
 ### Test data (optional)
 
-To try HELIOS with test clients, users and cases, load the test seed (`./helios.sh --test-data` does it for you). Everything it adds is labelled *Test · …* and badged wherever it's listed:
+To try HELIOS with the same test data the user guides and the brochure were made with, load the test seed. Everything it adds is labelled *Test · …* and badged wherever it's listed:
+
+- three test clients (Clinic, Retail, Earlier sample data), test plans and prices, and one account per role (`…@helios.test`, `…@clinic.helios.test`, `…@retail.helios.test`);
+- their security tools, assets and cases from the synthetic vendor alerts and every attack scenario of the SIEM simulation, a log investigation, and email and file forensics, each with the AI's first response;
+- each client's rulebook in force (from its industry template, approved by the client's admin and the SOC manager) and a rule change waiting for both approvals;
+- HELIOS's final analysis on each client's worst open case;
+- saved searches in Explore;
+- two security tests for Test · Clinic: one run, with findings and a Nessus report (its probes simulated on reserved addresses), and one waiting for authorisation.
+
+**On a Mac with `helios.sh`:**
+
+| Situation | Run |
+| --- | --- |
+| A new installation | `./helios.sh --test-data` |
+| An installation without test data | `./helios.sh test-data` |
+| An installation that loaded test data before (older version) | `git pull`, then `./helios.sh test-data` |
+| The same, as a whole test environment like the one the guides show (a banner on every page, its records kept as test data, a Test Platform admin) | `./helios.sh test-data --as-test-environment` |
+
+`./helios.sh test-data` rebuilds the images if the code changed, starts HELIOS (which applies any new database migrations first), then runs the test seed. The seed is safe to run again: it adds only what's missing, never duplicates, and leaves everything you created alone. Test accounts that already exist keep their password; the first run's password stays in `.helios/test-data`.
+
+**By hand with Docker Compose** (after `docker compose up -d --build`, which applies the migrations):
 
 ```bash
 docker compose run --rm -e HELIOS_ALLOW_TEST_SEED=1 --entrypoint /nodejs/bin/node migrate node_modules/tsx/dist/cli.mjs prisma/seed.ts --test
 ```
 
-It prints the test accounts' passwords. To make the whole installation a test environment instead, with a banner on every page and whatever it already holds kept as test data, add `--adopt` after `--test`. Don't load test data into a database you'll use for real clients.
+It prints the new test accounts' password. To make the whole installation a test environment instead, with a banner on every page and whatever it already holds kept as test data, add `--adopt` after `--test`.
+
+**Developing with Postgres in Docker and the app on your Mac** (`docker-compose.dev.yml`): `npx prisma migrate deploy`, then `npm run db:seed:test` (or `npm run db:test-env` for a whole test environment).
+
+Don't load test data into a database you'll use for real clients.
 
 ### How the stack is locked down
 

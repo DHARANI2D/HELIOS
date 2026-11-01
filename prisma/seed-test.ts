@@ -8,7 +8,8 @@ import bcrypt from "bcryptjs";
 // a real mailbox), plans and prices it fills in say they're test values.
 // Alerts come from the synthetic vendor payloads and attack scenarios in
 // src/lib/__tests__/fixtures, pushed through the real ingest pipeline.
-// Refuses to run against production. Idempotent: re-running skips what exists.
+// Refuses to run against production. Idempotent: re-running skips what exists,
+// so running it again on an older test database adds only what's new.
 //
 // `npm run db:test-env` goes further and makes the whole database a test
 // environment (adoptAsTestEnvironment below) before loading the test data.
@@ -153,11 +154,12 @@ export async function adoptAsTestEnvironment(db: PrismaClient) {
   const marked = await db.tenant.updateMany({ where: { isTest: false }, data: { isTest: true } });
   // A test platform admin, so the whole environment can be driven with test
   // accounts — only here, never by the plain test seed next to real clients.
-  await db.user.upsert({ where: { email: "admin@helios.test" }, update: {}, create: { email: "admin@helios.test", name: "Test Platform admin", role: "ADMIN", title: "Platform admin (test account)", passwordHash: await bcrypt.hash(testPassword(), 10) } });
+  const hadTestAdmin = !!(await db.user.findUnique({ where: { email: "admin@helios.test" }, select: { id: true } }));
+  if (!hadTestAdmin) await db.user.create({ data: { email: "admin@helios.test", name: "Test Platform admin", role: "ADMIN", title: "Platform admin (test account)", passwordHash: await bcrypt.hash(testPassword(), 10) } });
   await setSetting("platform.environment", "test", admin.id);
   await logAction({ actorId: admin.id, action: "platform.environment_changed", detail: { to: "test", via: "npm run db:test-env", adopted: { cases, events, endpoints, agents }, clientsMarkedTest: marked.count } });
   console.log(`\n=== TEST ENVIRONMENT ===\nAdopted ${cases} cases, ${events} events, ${endpoints} endpoints and ${agents} agents that belonged to no client into "${EARLIER_DATA.name}"; ${marked.count} existing clients marked as test.`);
-  console.log(`Test platform admin: admin@helios.test (password below)`);
+  console.log(hadTestAdmin ? "Test platform admin: admin@helios.test (already there; keeps its password)" : `Test platform admin: admin@helios.test, password ${process.env.SEED_TEST_PASSWORD ? "from SEED_TEST_PASSWORD" : testPassword()}`);
 }
 
 export async function seedTest(db: PrismaClient) {
@@ -207,17 +209,24 @@ export async function seedTest(db: PrismaClient) {
     tenants.set(c.slug, t.id);
   }
 
+  // Accounts that already exist keep their password; only new ones get this run's.
   const accounts: string[] = [];
+  const existing: string[] = [];
+  const account = async (email: string, create: Prisma.UserCreateInput) => {
+    if (await db.user.findUnique({ where: { email }, select: { id: true } })) existing.push(email);
+    else {
+      await db.user.create({ data: create });
+      accounts.push(email);
+    }
+  };
   for (const u of STAFF) {
     const email = `${slug(u.role)}@helios.test`;
-    await db.user.upsert({ where: { email }, update: {}, create: { email, name: `Test ${label(u.role)}`, role: u.role, title: `${u.title} (test account)`, domains: u.domains ?? [], passwordHash } });
-    accounts.push(email);
+    await account(email, { email, name: `Test ${label(u.role)}`, role: u.role, title: `${u.title} (test account)`, domains: u.domains ?? [], passwordHash });
   }
   for (const c of CLIENTS) {
     for (const role of CLIENT_ROLES) {
       const email = `${slug(role)}@${c.domain}`;
-      await db.user.upsert({ where: { email }, update: {}, create: { email, name: `Test ${label(role)} (${c.name.replace("Test · ", "")})`, role, tenantId: tenants.get(c.slug)!, passwordHash } });
-      accounts.push(email);
+      await account(email, { email, name: `Test ${label(role)} (${c.name.replace("Test · ", "")})`, role, tenant: { connect: { id: tenants.get(c.slug)! } }, passwordHash });
     }
   }
 
@@ -259,13 +268,26 @@ export async function seedTest(db: PrismaClient) {
     }
   }
 
+  // A third client with sample cases from the test fixtures (prisma/seed-demos.ts).
+  const { seedSampleCases, seedFeatureDemos } = await import("./seed-demos");
+  const samples = await seedSampleCases(db, admin.id);
+
   // Every test client's open cases, including any adopted by db:test-env.
   const pending = await db.case.findMany({ where: { tenant: { isTest: true }, aiStatus: null, status: { notIn: ["RESOLVED", "FALSE_POSITIVE"] } }, select: { id: true } });
   for (const { id } of pending) await maybeRunFirstResponse(id);
 
+  // The newer screens: rulebooks and a rule change, final analyses, saved
+  // searches and security tests (prisma/seed-demos.ts).
+  const demos = await seedFeatureDemos(db, CLIENTS.map((c) => ({ slug: c.slug, tenantId: tenants.get(c.slug)!, domain: c.domain, template: c.slug === "test-clinic" ? "healthcare" : c.slug === "test-retail" ? "retail" : "general" })));
+
   await appDb.$disconnect();
   console.log("\n=== TEST DATA (do not use in production) ===");
-  console.log(`${CLIENTS.length} test clients, ${TEST_PLANS.length} test plans, ${pricesFilled} test prices filled, ${cases} new cases, ${pending.length} AI first responses`);
-  console.log(`${accounts.length} test accounts — password ${process.env.SEED_TEST_PASSWORD ? "from SEED_TEST_PASSWORD" : password}:`);
-  for (const a of accounts) console.log(`  ${a}`);
+  console.log(`${await db.tenant.count({ where: { isTest: true } })} test clients, ${TEST_PLANS.length} test plans, ${pricesFilled} test prices filled, ${cases} new cases, ${pending.length} AI first responses`);
+  if (samples) demos.unshift(samples);
+  console.log(demos.length ? `Added: ${demos.join("; ")}` : "Sample cases, rulebooks, rule changes, final analyses, saved searches and security tests were already there.");
+  if (accounts.length) {
+    console.log(`${accounts.length} new test accounts — password ${process.env.SEED_TEST_PASSWORD ? "from SEED_TEST_PASSWORD" : password}:`);
+    for (const a of accounts) console.log(`  ${a}`);
+  }
+  if (existing.length) console.log(`${existing.length} test accounts were already there and keep the password they were given when they were created.`);
 }

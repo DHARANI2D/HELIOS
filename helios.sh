@@ -7,6 +7,13 @@
 #   ./helios.sh --with-ollama    ...and a local AI model (Ollama) as HELIOS's
 #                                default model, running natively on the Mac.
 #
+#   ./helios.sh test-data        Add the test data to this installation, or bring
+#                                test data loaded earlier up to date (safe to run
+#                                again; rebuilds first if the code changed).
+#   ./helios.sh test-data --as-test-environment
+#                                ...and make the whole installation a test
+#                                environment: a banner on every page, its records
+#                                kept as test data, a Test Platform admin.
 #   ./helios.sh start            Start again (no rebuild).
 #   ./helios.sh stop             Stop (keeps every piece of data).
 #   ./helios.sh status           What's running, and whether HELIOS answers.
@@ -258,10 +265,19 @@ build_images() {
   [ -n "${HELIOS_BUILD_FLAGS:-}" ] && flags+=(${HELIOS_BUILD_FLAGS})
   export DOCKER_BUILDKIT=1
   info "Web server and worker image..."
-  docker build "${flags[@]}" --build-arg "HELIOS_DEPLOYMENT_ID=$id" --target runtime -t helios:local . \
+  docker build "${flags[@]}" --label "helios.commit=$id" --build-arg "HELIOS_DEPLOYMENT_ID=$id" --target runtime -t helios:local . \
     || die "The build failed (above). Behind a company proxy? Set HELIOS_EXTRA_CA to its CA certificate and try again."
   info "Migration image..."
-  docker build "${flags[@]}" --target tools -t helios-tools:local . || die "The build failed (above)."
+  docker build "${flags[@]}" --label "helios.commit=$id" --target tools -t helios-tools:local . || die "The build failed (above)."
+}
+
+# Are the images built from the code checked out here?
+images_current() {
+  local want have
+  docker image inspect helios:local >/dev/null 2>&1 && docker image inspect helios-tools:local >/dev/null 2>&1 || return 1
+  want=$(git rev-parse --short HEAD 2>/dev/null) || return 0
+  have=$(docker image inspect helios-tools:local --format '{{ index .Config.Labels "helios.commit" }}' 2>/dev/null)
+  [ "$want" = "$have" ] && [ -z "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]
 }
 
 start_stack() {
@@ -290,19 +306,35 @@ start_stack() {
   info "HELIOS answers on http://localhost:$port"
 }
 
+# The test seed is safe to run again: it adds only what's missing, so on
+# an installation that loaded test data before, it brings it up to date.
+# $1: "force" to run even if loaded before; $2: "adopt" to make the whole
+# installation a test environment.
 load_test_data() {
+  local mode=${1:-} adopt=${2:-} args=(--test) out
   step "Test data"
   mkdir -p -m 700 "$STATE_DIR"
-  if [ -f "$STATE_DIR/test-data" ]; then
-    info "Already loaded (the accounts are in .helios/test-data)."
+  if [ "$mode" != "force" ] && [ -f "$STATE_DIR/test-data" ]; then
+    info "Already loaded (the accounts are in .helios/test-data). ./helios.sh test-data brings it up to date."
     return 0
   fi
-  info "Loading test clients, users and cases, each labelled Test · ..."
-  compose run --rm -e HELIOS_ALLOW_TEST_SEED=1 --entrypoint /nodejs/bin/node migrate node_modules/tsx/dist/cli.mjs prisma/seed.ts --test > "$STATE_DIR/test-data.tmp" 2>&1 \
-    || { cat "$STATE_DIR/test-data.tmp"; rm -f "$STATE_DIR/test-data.tmp"; die "Loading test data failed (above)."; }
-  ( umask 077; mv "$STATE_DIR/test-data.tmp" "$STATE_DIR/test-data" )
+  [ "$adopt" = "adopt" ] && args+=(--adopt)
+  info "Loading test clients, users, cases and the newer screens' data, each labelled Test · ... (a minute or two)"
+  out="$STATE_DIR/test-data.tmp"
+  compose run --rm -e HELIOS_ALLOW_TEST_SEED=1 --entrypoint /nodejs/bin/node migrate node_modules/tsx/dist/cli.mjs prisma/seed.ts "${args[@]}" > "$out" 2>&1 \
+    || { cat "$out"; rm -f "$out"; die "Loading test data failed (above)."; }
+  chmod 600 "$out"
+  grep -E "test clients|Added:|already there|password|@|TEST ENVIRONMENT|Adopted" "$out" | sed 's/^/    /' | head -30
+  if [ -f "$STATE_DIR/test-data" ] && ! grep -q "new test accounts" "$out"; then
+    # Nothing new to sign in with: keep the first run's accounts and password.
+    { echo; echo "=== $(date '+%Y-%m-%d %H:%M') update ==="; cat "$out"; } >> "$STATE_DIR/test-data"
+    rm -f "$out"
+  else
+    [ -f "$STATE_DIR/test-data" ] && { echo; echo "=== earlier run ==="; cat "$STATE_DIR/test-data"; } >> "$out"
+    mv "$out" "$STATE_DIR/test-data"
+  fi
   chmod 600 "$STATE_DIR/test-data"
-  grep -iE "password|@" "$STATE_DIR/test-data" | sed 's/^/    /' | head -30
+  info "Sign-in details for the test accounts are kept in .helios/test-data."
 }
 
 summary() {
@@ -339,6 +371,23 @@ cmd_up() {
   build_images
   start_stack
   [ "$test_data" = 1 ] && load_test_data
+  summary
+}
+
+cmd_test_data() {
+  local adopt=""
+  for arg in "$@"; do
+    case "$arg" in
+      --as-test-environment) adopt=adopt ;;
+      *) die "Unknown option $arg (see ./helios.sh help)" ;;
+    esac
+  done
+  need_setup
+  ensure_docker
+  if images_current; then info "The images match this code; no rebuild needed."; else build_images; fi
+  # Starting runs the database migrations first, so the schema is current.
+  start_stack
+  load_test_data force "$adopt"
   summary
 }
 
@@ -425,6 +474,7 @@ case "$command" in
     cmd_up "$@" ;;
   --*) cmd_up "$@" ;;
   start) cmd_start ;;
+  test-data | testdata) shift; cmd_test_data "$@" ;;
   stop | down) cmd_stop ;;
   status | ps) cmd_status ;;
   logs) shift; cmd_logs "$@" ;;
