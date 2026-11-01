@@ -18,10 +18,11 @@ import { completeManualAction, decideResponseAction, performResponseAction, reco
 import { addAllowlistEntry, rulebookVerdict, saveDraft, signRulebook, submitForSignature } from "@/lib/rulebook/service";
 import { approveChange, rejectChange, requestChange, withdrawChange, type ChangeActor } from "@/lib/changes/service";
 import { monitorAutonomousContainment } from "@/lib/response/guard";
+import { reviewReport, runAutopilot } from "@/lib/ai/autopilot";
+import { runAgentOnCase } from "@/lib/ai/first-response";
 import { escalatePendingApprovals } from "@/lib/rulebook/escalation";
 import { resolveForClient } from "@/lib/ai/gateway";
 import { loadProfile, providerFromRow } from "@/lib/ai/resolve";
-import { runAgentOnCase } from "@/lib/ai/first-response";
 import { runEvaluation, saveScorecard, startEvaluation } from "@/lib/ai/evals/service";
 import { GOLDEN } from "@/lib/ai/evals/golden";
 import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startLadder, startShadowMode } from "@/lib/shadow/service";
@@ -680,6 +681,60 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     expect((await verdict("ISOLATE_HOST", "HIGH"))?.hits).toEqual([]);
     expect((await verdict("BLOCK_IP", "LOW"))?.hits.map((h) => h.outcome)).toContain("PENDING_APPROVAL");
     expect((await verdict("DISABLE_USER", "HIGH"))?.hits.map((h) => h.outcome)).toContain("PENDING_APPROVAL");
+  });
+
+  it("works a case end to end on its own: evidence from the client's sources, investigation, final analysis, review", async () => {
+    process.env.HELIOS_AI_FIRST_RESPONSE = "off";
+    try {
+      const tenant = await db.tenant.create({ data: { name: "Test · Autopilot", slug: "test-autopilot" } });
+      await startLadder(tenant.id, { id: adminId, name: "Test Admin" }, "autonomous");
+      await saveDraft(tenant.id, { body: {}, reason: "Onboarding: default rules" }, adminActor());
+      await putInForce(tenant.id);
+      const clientAdmin = await clientActor(tenant.id, "admin@autopilot.test");
+      const { integration } = await onboardIntegration({ tenantId: tenant.id, vendor: "helios_forwarder" }, adminId);
+      await enqueueBatch(integration, JSON.stringify(samplePayloadFor({ ingest: "forwarder", category: "siem" })), { channel: "forwarder" });
+      await drainQueue();
+      const kase = await db.case.findFirstOrThrow({ where: { tenantId: tenant.id } });
+
+      // First response (triage) as the job would run it; then the autopilot takes over.
+      await runAgentOnCase(kase.id, "triage", { trigger: "auto" });
+      expect((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).aiStatus).toBe("completed");
+      const host = (await db.securityEvent.findFirstOrThrow({ where: { caseId: kase.id, hostName: { not: null } } })).hostName!;
+      const isolated = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: host, source: "ai", status: "EXECUTED" });
+
+      // Earlier tests' cases are not this test's business.
+      await db.case.updateMany({ where: { id: { not: kase.id }, analysisStatus: null }, data: { analysisStatus: "skipped" } });
+      expect(await runAutopilot()).toBe(1);
+      const after = await db.case.findUniqueOrThrow({ where: { id: kase.id } });
+      expect(after.analysisStatus).toBe("ready");
+      const report = await db.caseReport.findFirstOrThrow({ where: { caseId: kase.id } });
+      expect(report).toMatchObject({ version: 1, status: "ready", tenantId: tenant.id });
+      const body = report.body as unknown as { evidence: { logTypes: Array<{ type: string; events: number; sources: string[] }>; events: number }; lift: Array<{ target: string; actionId: string; conditions: string[] }>; remediation: unknown[]; timeline: unknown[]; scope: { hosts: string[] } };
+
+      // Evidence from the client's own sources, by log type.
+      expect(body.evidence.events).toBeGreaterThan(0);
+      expect(body.evidence.logTypes.find((t) => t.type === "endpoint")?.events).toBeGreaterThan(0);
+      expect(body.evidence.logTypes.find((t) => t.type === "endpoint")?.sources).toContain(integration.name);
+      expect(body.scope.hosts).toContain(host);
+      // Lifting the isolation is proposed for a person, with its conditions; never done by the AI.
+      const lift = body.lift.find((l) => l.target === host)!;
+      expect(lift.conditions.join(" ")).toMatch(/scan .* clean/);
+      expect(await db.responseAction.findUniqueOrThrow({ where: { id: lift.actionId } })).toMatchObject({ actionType: "RELEASE_HOST", status: "PENDING_APPROVAL", parameters: { rollbackOf: isolated.id } });
+      expect(body.remediation.length).toBeGreaterThan(0);
+      // The investigation ran on its own, and the review is the only thing left for people.
+      expect(await db.aiRun.count({ where: { caseId: kase.id, agentKey: "investigator" } })).toBe(1);
+      expect(await db.timelineEntry.count({ where: { caseId: kase.id, action: { in: ["ai.evidence_collected", "ai.final_analysis"] } } })).toBe(2);
+      expect(await db.notification.count({ where: { userId: clientAdmin.id, caseId: kase.id, title: { startsWith: "Final analysis ready" } } })).toBe(1);
+      // Picked up once.
+      expect(await runAutopilot()).toBe(0);
+
+      await reviewReport(report.id, { id: clientAdmin.id, name: clientAdmin.name, isClient: true }, "");
+      await reviewReport(report.id, { id: adminId, name: "Test Admin", isClient: false }, "Matches what we see");
+      expect(await db.caseReport.findUniqueOrThrow({ where: { id: report.id } })).toMatchObject({ status: "reviewed", reviewedByName: "Test Admin", clientSeenByName: clientAdmin.name });
+      expect((await db.case.findUniqueOrThrow({ where: { id: kase.id } })).analysisStatus).toBe("reviewed");
+    } finally {
+      delete process.env.HELIOS_AI_FIRST_RESPONSE;
+    }
   });
 
   it("checks AI containment again at the moment of acting, and stops automation on a violation", async () => {

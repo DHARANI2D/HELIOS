@@ -10,7 +10,7 @@ import { CLOSED_STATUSES } from "@/lib/cases/labels";
 import { appendToCase, createCase, type NewIndicator } from "@/lib/cases/writer";
 import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
 import { applyInventory, touchEndpoints } from "@/lib/endpoints/service";
-import { getCategory } from "@/lib/integrations/catalog";
+import { getCategory, toolLabel } from "@/lib/integrations/catalog";
 import { getCatalogTool } from "@/lib/integrations/tools";
 import { inventoryFrom, mapRecord, recordsAndRejects, type Mapped, type VendorAlert } from "@/lib/integrations/mappers";
 import { MappingError } from "@/lib/ocsf/sources/util";
@@ -55,7 +55,7 @@ export async function onboardIntegration(input: OnboardInput, actorId: string) {
       tenantId: input.tenantId,
       vendor: tool.key,
       category: tool.category,
-      name: input.name?.trim() || `${tool.vendor} ${tool.name}`,
+      name: input.name?.trim() || toolLabel(tool),
       allowedRoles: input.allowedRoles?.length ? input.allowedRoles : category.defaultRoles,
       config: { telemetrySource: category.telemetry, ...(input.config ?? {}) } as Prisma.InputJsonValue,
       secretCipher: Object.keys(secrets).length ? await sealFor(input.tenantId, JSON.stringify(secrets)) : null,

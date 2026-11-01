@@ -23,3 +23,30 @@ export const ACTION_LABEL: Record<PlaybookActionType, string> = {
 
 // Actions analysts and playbooks can ask for that the AI doesn't propose.
 export const ANALYST_ONLY_ACTIONS = ["PURGE_EMAIL", "RESET_PASSWORD", "COLLECT_FORENSICS"] as const satisfies readonly PlaybookActionType[];
+
+// How each response action status reads to people.
+export const ACTION_STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "outline" | "soft" | "secondary"> = {
+  PENDING_APPROVAL: "warning",
+  MANUAL_REQUIRED: "warning",
+  EXECUTED: "success",
+  FAILED: "destructive",
+  BLOCKED: "destructive",
+  REJECTED: "outline",
+  SUGGESTED: "soft",
+  ROLLED_BACK: "secondary",
+  SHADOW: "outline",
+  IN_PROGRESS: "soft",
+};
+
+export const ACTION_STATUS_LABEL: Record<string, string> = {
+  PENDING_APPROVAL: "Awaiting approval",
+  MANUAL_REQUIRED: "Do by hand",
+  EXECUTED: "Executed",
+  FAILED: "Failed",
+  BLOCKED: "Blocked by guardrail",
+  REJECTED: "Rejected",
+  SUGGESTED: "Suggested",
+  ROLLED_BACK: "Rolled back",
+  SHADOW: "Shadow mode",
+  IN_PROGRESS: "Waiting for the vendor",
+};

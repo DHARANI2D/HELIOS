@@ -112,6 +112,31 @@ export async function runDueCollectors(now = new Date(), http?: Http) {
   return results;
 }
 
+// Every log stream of one client, now rather than on schedule: a case's
+// evidence sweep catches up with each of the client's own tools first
+// (lib/ai/evidence-sweep.ts). A stream another poll holds is skipped; a
+// polled stream's next scheduled poll moves on as usual.
+export async function pollTenantNow(tenantId: string, now = new Date(), http?: Http, budgetMs = 60_000) {
+  const started = Date.now();
+  const integrations = await db.integration.findMany({ where: { tenantId, enabled: true } });
+  const results: Array<PollSummary & { integration: string }> = [];
+  for (const integration of integrations) {
+    const setup = enabledStreams(integration);
+    if (!setup?.streams.length) continue;
+    if (missingFields(setup.collector, await collectorContext(integration)).length) continue;
+    for (const stream of setup.streams) {
+      if (Date.now() - started > budgetMs) return results;
+      const cp = await db.collectorCheckpoint.findUnique({ where: { integrationId_stream: { integrationId: integration.id, stream: stream.key } } });
+      if (cp) {
+        const claimed = await db.collectorCheckpoint.updateMany({ where: { integrationId: integration.id, stream: stream.key, nextPollAt: cp.nextPollAt }, data: { nextPollAt: new Date(now.getTime() + 5 * 60_000) } });
+        if (!claimed.count) continue;
+      }
+      results.push({ ...(await pollStream(integration, stream, now, http)), integration: integration.name });
+    }
+  }
+  return results;
+}
+
 // A read that changes nothing at the vendor, for the setup screen.
 export async function testCollector(integration: Integration, setup: CollectorSetup, actorId: string, http?: Http) {
   const collector = collectorByKey(setup.key) ?? collectorForTool(integration.vendor);

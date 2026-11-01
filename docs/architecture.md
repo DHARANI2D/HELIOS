@@ -186,6 +186,15 @@ A case's `slaDueAt` comes from its client's plan (`ackMinutes` by severity). Int
    - **Tested:** the Caddyfile and certificates were run with Caddy against a stand-in model server, through the provider code. Checked: the key, wrong key, path, method, size, missing or foreign client certificate, and untrusted server cases.
 5. **Decide.** Each proposed action goes through `response/policy.ts`, which returns SUGGESTED, PENDING_APPROVAL, EXECUTED or BLOCKED. That function is deterministic and pure. It is a fixed stack of layers, and the most restrictive one wins: grounding, AI safety, kill switch, circuit breaker, the plan's cap, the client's consent, the client's rulebook, the autonomy ladder, the agent profile, the model's evaluation, and the rate limit. The AI runs only *initial containment* on its own (`AI_INITIAL_CONTAINMENT`): isolating a host, blocking an IP or a sender, quarantining a file and collecting logs, each reversible from the case. Everything else it proposes waits for a person, whatever the rules allow. Every containment it runs notifies the SOC's managers and the case's watchers at once, and the client's admins (except at ladder level 4, which reports in the digest). Each decision stores its trace (the deciding rule first, then every other rule that restricted it) and the rulebook version and hash. Property tests check that no rulebook can make a decision more permissive.
 
+### Autonomous case pipeline (`lib/ai/autopilot.ts`, `evidence-sweep.ts`, `final-analysis.ts`)
+
+After first response, a job claims each open case of the last 14 days (`analysisStatus`: running, ready, reviewed, skipped, failed; a run left running for 30 minutes is picked up again) and works it to a final analysis:
+
+- **Evidence sweep.** `pollTenantNow` catches up with the client's pull collectors and the ingest queue is drained. Events touching the case's entities, from 24 hours before its first event to now, are grouped by log type and attached (up to 1,000). The client's integrations are mapped to the log types their category can send, so the sweep reports which tools cover what and which needed log types are missing.
+- **Investigation and narrative.** The investigation agent runs with `trigger: "auto"`; then the report agent writes the narrative. Both use the client's model selection.
+- **Final analysis** (`CaseReport`, versioned per case, row-level isolated). Lifting containment is proposed as the inverse action (`ROLLBACK_OF`) in `PENDING_APPROVAL` with its conditions; remediation by tactic and technique becomes actions in `PENDING_APPROVAL` or tasks with an owner. A request for something already in place is left out.
+- **Review.** SOC managers, incident responders, the assignee, watchers and the client's admins are notified. The SOC marks it reviewed (`cases.triage`); the client acknowledges it (`cases.comment`). It's listed in Approvals until then.
+
 ### Investigation agent (`lib/ai/investigator`)
 
 An analyst can send the investigation agent onto a case. It works the case on its own with tools, and every tool only reads:
@@ -319,6 +328,7 @@ Timers in the server process:
 | Approval escalation | Minute |
 | Connector verification | 30 seconds |
 | Containment monitor (AI actions outside the approved rules) | 5 minutes |
+| Autonomous analysis (evidence sweep, investigation, final analysis) | 20 seconds |
 | Time-box rollbacks | Minute |
 | Credential reminders | 6 hours |
 | Regulatory clocks (CERT-In and DPDP deadlines) | Minute |

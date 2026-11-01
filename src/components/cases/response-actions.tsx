@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { unwrap } from "@/lib/action-result";
+import { ACTION_STATUS_LABEL, ACTION_STATUS_VARIANT } from "@/lib/response/labels";
 
 export interface ResponseActionView {
   id: string;
@@ -51,32 +52,6 @@ const LAYER_LABEL: Record<string, string> = {
   model: "Model evaluation",
   rate_limit: "Rate limit",
 }
-
-const STATUS_VARIANT: Record<string, "warning" | "success" | "destructive" | "outline" | "soft" | "secondary"> = {
-  PENDING_APPROVAL: "warning",
-  MANUAL_REQUIRED: "warning",
-  EXECUTED: "success",
-  FAILED: "destructive",
-  BLOCKED: "destructive",
-  REJECTED: "outline",
-  SUGGESTED: "soft",
-  ROLLED_BACK: "secondary",
-  SHADOW: "outline",
-  IN_PROGRESS: "soft",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  PENDING_APPROVAL: "Awaiting approval",
-  MANUAL_REQUIRED: "Do by hand",
-  EXECUTED: "Executed",
-  FAILED: "Failed",
-  BLOCKED: "Blocked by guardrail",
-  REJECTED: "Rejected",
-  SUGGESTED: "Suggested",
-  ROLLED_BACK: "Rolled back",
-  SHADOW: "Shadow mode",
-  IN_PROGRESS: "Waiting for the vendor",
-};
 
 interface Props {
   caseId: string;
@@ -160,7 +135,7 @@ export function ResponseActions({ caseId, actions, canApprove, canRequest, reque
               {a.source === "ai" ? <Bot className="size-3.5 text-chart-4" /> : <UserRound className="size-3.5 text-muted-foreground" />}
               <span className="text-sm font-medium">{a.label}</span>
               {a.target && <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] break-all">{a.target}</code>}
-              <Badge variant={STATUS_VARIANT[a.status] ?? "outline"} className="ml-auto">{STATUS_LABEL[a.status] ?? a.status}</Badge>
+              <Badge variant={ACTION_STATUS_VARIANT[a.status] ?? "outline"} className="ml-auto">{ACTION_STATUS_LABEL[a.status] ?? a.status}</Badge>
             </div>
             {a.rationale && <p className="mt-1 text-xs text-muted-foreground">{a.rationale}</p>}
             <p className="mt-1 text-[11px] text-muted-foreground">

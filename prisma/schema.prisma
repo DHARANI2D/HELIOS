@@ -201,6 +201,7 @@ model Tenant {
   aiPolicy     TenantAiPolicy?
   autonomy     AutonomyLevel[]
   ruleChanges  RuleChange[]
+  caseReports  CaseReport[]
   keys         TenantKey[]
   notices      RegulatoryNotice[]
   tunings      DetectionTuning[]
@@ -269,6 +270,10 @@ model Case {
   acknowledgedAt     DateTime?
   containedAt        DateTime?
   aiStatus           String? // queued | running | completed | failed | skipped
+  // The autonomous analysis after first response (lib/ai/autopilot.ts):
+  // running | ready (final analysis waiting for review) | reviewed | failed | skipped
+  analysisStatus     String?
+  analysisUpdatedAt  DateTime?
   // The analyst's call when closing: the ground truth AI is measured against.
   disposition        CaseDisposition?
   dispositionReason  String?          @db.Text
@@ -296,6 +301,7 @@ model Case {
   runbooks        CaseRunbook[]
   qaReviews       QaReview[]
   notices         RegulatoryNotice[]
+  reports         CaseReport[]
 
   @@index([tenantId, status])
   @@index([domain, status])
@@ -1116,6 +1122,42 @@ enum ResponseActionStatus {
 // How far AI may go for one client and one action type, earned in shadow
 // mode (lib/shadow/ladder.ts): 0 observe, 1 suggest, 2 approve, 3 act and
 // notify, 4 act. A promotion waits for the client's approval.
+// The final analysis HELIOS writes on its own once a case has been
+// contained and investigated (lib/ai/autopilot.ts): what happened, the
+// evidence gathered from each of the client's sources, the containment in
+// place, when to lift it and the remediation plan. People review it; lifting
+// containment and remediation steps are actions they approve.
+model CaseReport {
+  id               String    @id @default(cuid())
+  caseId           String
+  tenantId         String?
+  version          Int       @default(1)
+  // ready | reviewed
+  status           String    @default("ready")
+  verdict          String?
+  confidence       Float?
+  summary          String    @db.Text
+  body             Json
+  engine           String
+  model            String?
+  createdAt        DateTime  @default(now())
+  reviewedById     String?
+  reviewedByName   String?
+  reviewedAt       DateTime?
+  reviewNote       String?   @db.Text
+  clientSeenById   String?
+  clientSeenByName String?
+  clientSeenAt     DateTime?
+
+  case   Case    @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([caseId, version])
+  @@index([tenantId, status])
+  @@index([status, createdAt])
+  @@map("case_reports")
+}
+
 // Change control for the rules containment runs under (lib/changes): a
 // rulebook version, an allowlist entry added or removed, a rise in AI
 // autonomy or consent, or a wider platform AI setting takes effect only once

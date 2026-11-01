@@ -32,6 +32,7 @@ import { SeverityBadge, SourceBadge, StatusBadge } from "@/components/shared/cas
 import { AiStatusBadge, DomainBadge, SlaChip, TierBadge } from "@/components/shared/case-chips";
 import { JsonView } from "@/components/shared/json-view";
 import { CaseTimeline } from "@/components/cases/case-timeline";
+import { FinalAnalysisPanel } from "@/components/cases/final-analysis";
 import { SourcePanel } from "@/components/cases/source-panel";
 import { TriagePanel } from "@/components/cases/triage-panel";
 import { CollabActions } from "@/components/cases/collab-actions";
@@ -98,7 +99,7 @@ async function loadCasePage(id: string, user: SessionUser) {
     ? await db.user.findMany({ where: { active: true, tenantId: kase.tenantId }, select: { id: true, name: true, email: true, role: true } })
     : [];
 
-  const [events, related, evidence, agents] = await Promise.all([
+  const [events, related, evidence, agents, finalReport, reportVersions] = await Promise.all([
     db.securityEvent.findMany({ where: { caseId: kase.id }, orderBy: { timestamp: "asc" }, take: 50 }),
     user.isClient ? Promise.resolve([]) : findRelatedCases(kase.id),
     gatherEvidence(kase.id),
@@ -108,6 +109,9 @@ async function loadCasePage(id: string, user: SessionUser) {
         return { key, name: profile.name, description: AGENT_TYPES[key].description, engine: provider ? `${provider.name} (${provider.model})` : "the built-in engine (no model configured)", enabled: profile.enabled && profile.autonomy !== "OFF" };
       }),
     ),
+    // HELIOS's own final analysis of the case, latest version.
+    dbFor(user).caseReport.findFirst({ where: { caseId: kase.id }, orderBy: { version: "desc" } }),
+    dbFor(user).caseReport.count({ where: { caseId: kase.id } }),
   ]);
 
   const recommended = user.isClient ? [] : await recommendPlaybooks(kase.id, evidence.entities);
@@ -122,14 +126,14 @@ async function loadCasePage(id: string, user: SessionUser) {
         onCallNow(now),
         db.onCallPage.findFirst({ where: { caseId: kase.id }, orderBy: { createdAt: "desc" } }),
       ]).then(([runbooks, available, qa, onCall, page]) => ({ runbooks, available, qa, onCall, page }));
-  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory, ops };
+  return { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory, ops, finalReport, reportVersions };
 }
 
 export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]">) {
   const { id } = await params;
   const user = await pageGuard("cases.view");
   await assertCaseAccess(user, id, "page");
-  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory, ops } = await loadCasePage(id, user);
+  const { now, kase, team, clientUsers, recommended, events, related, evidence, agents, regulatory, ops, finalReport, reportVersions } = await loadCasePage(id, user);
 
   const ranPlaybookIds = new Set(kase.playbookRuns.map((r) => r.playbookId));
   const suggestions = recommended.filter((p) => !ranPlaybookIds.has(p.id));
@@ -229,6 +233,19 @@ export default async function CaseDetailPage({ params }: PageProps<"/cases/[id]"
           <CardContent className="text-sm whitespace-pre-wrap">{kase.rootCauseNarrative}</CardContent>
         </Card>
       )}
+
+      <FinalAnalysisPanel
+        caseId={kase.id}
+        report={finalReport}
+        versions={reportVersions}
+        analysisStatus={kase.analysisStatus}
+        actionStatus={Object.fromEntries(kase.responseActions.map((a) => [a.id, a.status]))}
+        isClient={user.isClient}
+        canDecide={canApprove}
+        canReview={can(user, "cases.triage")}
+        canAcknowledge={can(user, "cases.comment")}
+        canReanalyse={can(user, "ai.dispatch")}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">

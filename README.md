@@ -56,6 +56,18 @@ See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit togeth
 - **Continuous monitoring.** Every action the AI runs is verified with the security product, notified to the SOC and the client, and re-checked every five minutes. Anything outside the approved rules (an action beyond initial containment, rules that don't match what was approved) is blocked, pauses that client's automatic containment and pages the SOC.
 - **Proof.** Every proposal, decision, approval, rule change and action is in a hash-chained audit log that the app itself can add to but never alter.
 
+## How HELIOS works a case on its own
+
+Nobody has to sit with a case. Once the AI has contained it, HELIOS carries on by itself (`lib/ai/autopilot.ts`):
+
+1. **Collect the logs.** It catches up with each of that client's own log sources, then gathers every event that touches the case's hosts, accounts, addresses, files and processes, from a day before the activity to now. Events are grouped by log type (endpoint, identity, network, email, cloud, tool alerts) and attached to the case. The log types the case needed but the client doesn't send are named as gaps.
+2. **Investigate.** The investigation agent works the case with read-only tools and the client's chosen AI model. Anything it recommends goes through the same containment rules as triage.
+3. **Write the final analysis.** Verdict and confidence, root cause, scope, timeline, cited findings, techniques, what's contained, the logs collected, and open questions; the report writer adds a client-readable narrative.
+4. **Propose lifting and remediation.** For each containment in place, HELIOS proposes the release with the conditions for it (for a laptop: the EDR scan is clean, persistence is removed, passwords are reset, 24 quiet hours). Remediation steps HELIOS can carry out (reset a password, purge a phishing mail, block a C2 address) wait as actions; the rest are tasks with an owner.
+5. **Review.** The SOC and the client are notified. Approving a release or a remediation step is one click on the case or in Approvals; the SOC marks the analysis reviewed and the client acknowledges it.
+
+The AI never lifts containment or changes people's access on its own. A background job picks up cases every 20 seconds (setting `ai.autopilot`: on by default, from medium severity); staff can ask for a fresh analysis with **Analyse again**.
+
 ## User guides
 
 [`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 14-page product brochure, to give to clients and partners. It covers:

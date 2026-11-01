@@ -19,6 +19,7 @@ import { isTelemetrySource } from "@/lib/siem/adapters";
 import { ingestTelemetry, type IngestItem } from "@/lib/siem/service";
 import { DISPATCHABLE_AGENTS, type AgentKey } from "@/lib/ai/catalog";
 import { runAgentOnCase } from "@/lib/ai/first-response";
+import { analyseCase, reviewReport } from "@/lib/ai/autopilot";
 import { PROPOSABLE_ACTIONS } from "@/lib/ai/triage";
 import { ANALYST_ONLY_ACTIONS } from "@/lib/response/labels";
 import { completeManualAction, decideResponseAction, requestAnalystAction, rollbackResponseAction } from "@/lib/response/service";
@@ -248,4 +249,44 @@ export const runPlaybookOnCaseAction = action(async function runPlaybookOnCaseAc
   await executePlaybook({ playbookId, caseId, triggeredBy: "manual", actorId: user.id });
   revalidateCases(caseId);
   return { queued: false };
+});
+
+// --- final analysis --------------------------------------------------------
+// HELIOS writes the final analysis on its own; people only review it. The
+// SOC marks it reviewed, the client acknowledges it, and staff who can
+// dispatch agents can ask for it again (after new evidence, say).
+
+export const reviewFinalAnalysisAction = action(async function reviewFinalAnalysisAction(reportId: string, note?: string) {
+  const user = await requirePermission("cases.view");
+  const report = await db.caseReport.findUniqueOrThrow({ where: { id: reportId }, select: { caseId: true } });
+  if (user.isClient) {
+    await caseActor(report.caseId, "cases.comment");
+    await reviewReport(reportId, { id: user.id, name: user.name ?? "client", isClient: true }, "");
+  } else {
+    await caseActor(report.caseId, "cases.triage");
+    await reviewReport(reportId, { id: user.id, name: user.name ?? "analyst", isClient: false }, z.string().max(2000).parse(note ?? ""));
+  }
+  revalidatePath(`/cases/${report.caseId}`);
+  revalidatePath("/approvals");
+});
+
+export const reanalyseCaseAction = action(async function reanalyseCaseAction(caseId: string) {
+  const user = await caseActor(caseId, "ai.dispatch");
+  if (user.isClient) throw new Error("Only the SOC can ask HELIOS to analyse a case again");
+  const claimed = await db.case.updateMany({ where: { id: caseId, OR: [{ analysisStatus: null }, { analysisStatus: { not: "running" } }] }, data: { analysisStatus: "running", analysisUpdatedAt: new Date() } });
+  if (!claimed.count) throw new Error("HELIOS is already analysing this case");
+  await logAction({ actorId: user.id, caseId, action: "ai.final_analysis_requested", detail: {} });
+  after(() =>
+    analyseCase(caseId).catch(async (err) => {
+      console.error("Final analysis failed", caseId, err);
+      await db.case.update({ where: { id: caseId }, data: { analysisStatus: "failed", analysisUpdatedAt: new Date() } });
+    }),
+  );
+  revalidatePath(`/cases/${caseId}`);
+});
+
+export const analysisStatusAction = action(async function analysisStatusAction(caseId: string) {
+  await caseActor(caseId, "cases.view");
+  const kase = await db.case.findUniqueOrThrow({ where: { id: caseId }, select: { analysisStatus: true } });
+  return kase.analysisStatus;
 });

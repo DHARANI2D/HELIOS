@@ -119,6 +119,9 @@ const SETTINGS = {
   "ai.killSwitch": z.boolean().default(false),
   "ai.firstResponse.enabled": z.boolean().default(true),
   "ai.firstResponse.minSeverity": z.enum(["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]).default("MEDIUM"),
+  // After first response: gather each client's evidence, investigate and
+  // write the final analysis on its own (lib/ai/autopilot.ts).
+  "ai.autopilot": z.object({ enabled: z.boolean().default(true), minSeverity: z.enum(["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"]).default("MEDIUM") }).default({ enabled: true, minSeverity: "MEDIUM" }),
   // Blast-radius cap on unattended containment, per tenant per hour.
   "ai.maxAutoActionsPerHour": z.number().int().min(0).max(100).default(5),
   // A test environment holds test data only; every page says so.

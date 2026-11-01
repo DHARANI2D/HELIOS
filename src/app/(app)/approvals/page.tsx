@@ -20,15 +20,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 // Everything waiting on someone's yes, in one place: containment the policy
 // held, playbooks that need approval, regulatory notices with the client,
-// and rule changes waiting for approval. Each links to where it's decided;
-// containment can be decided right here.
+// rule changes waiting for approval, and HELIOS's final analyses to review.
+// Each links to where it's decided; containment can be decided right here.
 export default async function ApprovalsPage() {
   const user = await pageGuard("containment.approve");
   const now = new Date();
   const scope = await caseScope(user);
   const tenantWhere = user.isClient ? { tenantId: user.tenantId ?? "__none__" } : {};
 
-  const [actions, playbooks, notices, rulebooks] = await Promise.all([
+  const [actions, playbooks, notices, rulebooks, analyses] = await Promise.all([
     db.responseAction.findMany({
       where: { status: "PENDING_APPROVAL", case: scope },
       include: { case: { select: { id: true, title: true, severity: true, tenant: { select: { name: true, isTest: true } } } } },
@@ -45,8 +45,19 @@ export default async function ApprovalsPage() {
       ? db.regulatoryNotice.findMany({ where: { ...tenantWhere, status: "AWAITING_APPROVAL" }, include: { case: { select: { id: true, title: true } }, tenant: { select: { name: true } } }, orderBy: { dueAt: { sort: "asc", nulls: "last" } } })
       : Promise.resolve([]),
     can(user, "rulebook.view") ? db.ruleChange.findMany({ where: { ...(user.isClient ? tenantWhere : can(user, "ai.configure") ? {} : { tenantId: { not: null } }), status: "PENDING" }, include: { tenant: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" } }) : Promise.resolve([]),
+    // HELIOS's final analyses: the SOC reviews them, the client acknowledges.
+    db.caseReport.findMany({
+      where: { case: scope, ...(user.isClient ? { clientSeenAt: null } : { status: "ready" }) },
+      include: { case: { select: { id: true, title: true, severity: true, tenant: { select: { name: true, isTest: true } } } } },
+      orderBy: { createdAt: "asc" },
+      take: 100,
+    }),
   ]);
-  const total = actions.length + playbooks.length + notices.length + rulebooks.length;
+  // Only the latest version of each case's analysis.
+  const latest = new Map<string, (typeof analyses)[number]>();
+  for (const r of analyses) if ((latest.get(r.caseId)?.version ?? 0) < r.version) latest.set(r.caseId, r);
+  const reviews = [...latest.values()];
+  const total = actions.length + playbooks.length + notices.length + rulebooks.length + reviews.length;
   const client = user.isClient;
 
   return (
@@ -59,7 +70,7 @@ export default async function ApprovalsPage() {
       {total === 0 && (
         <Card>
           <CardContent>
-            <EmptyState icon={CheckCircle2} title="Nothing is waiting for approval" description="Containment the policy holds, playbooks that need a yes, regulatory notices for you to approve and rule changes to approve all show up here." />
+            <EmptyState icon={CheckCircle2} title="Nothing is waiting for approval" description="Containment the policy holds, playbooks that need a yes, regulatory notices for you to approve, rule changes to approve and HELIOS's final analyses all show up here." />
           </CardContent>
         </Card>
       )}
@@ -92,6 +103,35 @@ export default async function ApprovalsPage() {
                 </div>
               );
             })}
+          </CardContent>
+        </Card>
+      )}
+
+      {reviews.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Final analyses to {client ? "acknowledge" : "review"}</CardTitle>
+            <CardDescription>
+              {client
+                ? "HELIOS's analysis of your incidents: what happened, what's contained, when to lift it and the remediation plan."
+                : "Written by HELIOS once it contained and investigated a case. Read it, approve the lifting and remediation steps it proposes, and mark it reviewed."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col divide-y">
+            {reviews.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-2 text-sm font-medium break-words">
+                    {client || !r.case.tenant ? r.case.title : `${r.case.tenant.name} · ${r.case.title}`}
+                    {r.case.tenant?.isTest && <TestBadge />}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    v{r.version} · {(r.verdict ?? "no verdict").replaceAll("_", " ")} · {Math.round((r.confidence ?? 0) * 100)}% confidence · written {formatRelative(r.createdAt, now)}
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" asChild><Link href={`/cases/${r.caseId}#final-analysis`}>Open</Link></Button>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
