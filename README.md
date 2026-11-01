@@ -92,14 +92,18 @@ Scanner reports are read with a small XML reader that never resolves DTDs or ext
 
 ## User guides
 
-[`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 14-page product brochure, to give to clients and partners. It covers:
+[`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 17-page product brochure, to give to clients and partners. It covers:
 - what HELIOS is and how it works;
 - AI-led containment and its governance, and change control;
-- capabilities, the client portal, trust and security, and roles;
-- AI models, deployment options and compliance in India;
+- cases worked to a final analysis on their own;
+- capabilities, Explore (one search over every log) and security testing on request;
+- the client portal, trust and security, and roles;
+- AI models, deployment options (one command on a Mac, Kubernetes, AWS Mumbai) and compliance in India;
 - getting started.
 
 [`docs/HELIOS-documentation.pdf`](docs/HELIOS-documentation.pdf) is the whole product in one document. It opens with a brochure (what HELIOS is and does, how it works, why it can be trusted, who uses it). Then comes the full documentation: getting started, how each part works, roles and access, every screen with screenshots, end-to-end procedures, guidelines and reference.
+
+[`docs/HELIOS-overview.pdf`](docs/HELIOS-overview.pdf) is the technical and product overview: what was built and how, the principles behind it, the architecture and data model, every module, the attack-surface model, Build & Price, the website, security, quality, and the known limits and next steps.
 
 `docs/guides/` has a PDF guide for each of the eleven roles. Each covers:
 - the role and its responsibilities;
@@ -108,7 +112,7 @@ Scanner reports are read with a small XML reader that never resolves DTDs or ext
 - every screen the role can open, with screenshots and how to use it;
 - step-by-step procedures, guidelines and a glossary.
 
-`HELIOS-guide-00-overview.pdf` compares the roles side by side. The screenshots were taken in the test environment with test data.
+`HELIOS-guide-00-overview.pdf` compares the roles side by side. All screenshots were taken on 1 November 2026 in the test environment, with test data.
 
 ## Stack
 

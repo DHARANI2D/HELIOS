@@ -297,7 +297,7 @@ load_test_data() {
     info "Already loaded (the accounts are in .helios/test-data)."
     return 0
   fi
-  info "Loading test clients, users and cases (every page will show a test banner)..."
+  info "Loading test clients, users and cases, each labelled Test · ..."
   compose run --rm -e HELIOS_ALLOW_TEST_SEED=1 --entrypoint /nodejs/bin/node migrate node_modules/tsx/dist/cli.mjs prisma/seed.ts --test > "$STATE_DIR/test-data.tmp" 2>&1 \
     || { cat "$STATE_DIR/test-data.tmp"; rm -f "$STATE_DIR/test-data.tmp"; die "Loading test data failed (above)."; }
   ( umask 077; mv "$STATE_DIR/test-data.tmp" "$STATE_DIR/test-data" )

@@ -43,7 +43,7 @@ Options:
 
 | Run | To |
 | --- | --- |
-| `./helios.sh --test-data` | Also load test clients, users and cases (every page then shows a test banner). Their accounts are saved in `.helios/test-data`. |
+| `./helios.sh --test-data` | Also load test clients, users and cases, each labelled *Test · …* and badged wherever it's listed. Their accounts are saved in `.helios/test-data`. |
 | `./helios.sh --with-ollama` | Also run a local AI model: installs Ollama if needed, starts it, downloads a model sized to your Mac's memory (`qwen2.5:14b` with 32 GB or more, otherwise `llama3.1:8b`; `HELIOS_OLLAMA_MODEL` picks another), and adds it to HELIOS as the default model. Run Evaluations on it before relying on it. |
 
 ### Everyday commands
@@ -78,13 +78,13 @@ open http://localhost:3000
 
 ### Test data (optional)
 
-To try HELIOS with test clients, users and cases, load the test seed. It marks the database as a test environment, and every page then shows a test banner:
+To try HELIOS with test clients, users and cases, load the test seed (`./helios.sh --test-data` does it for you). Everything it adds is labelled *Test · …* and badged wherever it's listed:
 
 ```bash
 docker compose run --rm -e HELIOS_ALLOW_TEST_SEED=1 --entrypoint /nodejs/bin/node migrate node_modules/tsx/dist/cli.mjs prisma/seed.ts --test
 ```
 
-It prints the test accounts' passwords. Don't load it into a database you'll use for real clients.
+It prints the test accounts' passwords. To make the whole installation a test environment instead, with a banner on every page and whatever it already holds kept as test data, add `--adopt` after `--test`. Don't load test data into a database you'll use for real clients.
 
 ### How the stack is locked down
 
