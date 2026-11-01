@@ -34,6 +34,9 @@ export interface PolicyInput {
   tenantCap: AiAutonomy;
   // The client's active rulebook and what it says about this action.
   rulebook?: { version: number; hash: string; hits: RuleHit[] } | null;
+  // A client's case: nothing runs on its own until the client and HELIOS
+  // have approved a rulebook for it.
+  requireRulebook?: boolean;
   // The client's autonomy ladder for this action (lib/shadow), when started.
   ladder?: { level: number } | null;
   // The case's evidence contains text aimed at the AI (lib/ai/safety).
@@ -99,6 +102,7 @@ export function decideResponse(input: PolicyInput): PolicyDecision {
   const consent = capOutcome(input.tenantCap);
   if (consent !== "EXECUTED") add("consent", "tenant.aiAutonomyCap", consent, consent === "SUGGESTED" ? "Client's AI consent allows suggestions only" : "Client requires approval for containment");
 
+  if (input.requireRulebook && !input.rulebook) add("rulebook", "rulebook.none", "PENDING_APPROVAL", "No rulebook approved for this client yet: automatic containment starts once the client and HELIOS have approved one");
   for (const hit of input.rulebook?.hits ?? []) add("rulebook", hit.rule, hit.outcome, input.rulebook ? `${hit.reason} (rulebook v${input.rulebook.version})` : hit.reason);
 
   if (input.ladder) {

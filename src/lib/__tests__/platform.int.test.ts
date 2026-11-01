@@ -24,7 +24,7 @@ import { loadProfile, providerFromRow } from "@/lib/ai/resolve";
 import { runAgentOnCase } from "@/lib/ai/first-response";
 import { runEvaluation, saveScorecard, startEvaluation } from "@/lib/ai/evals/service";
 import { GOLDEN } from "@/lib/ai/evals/golden";
-import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startShadowMode } from "@/lib/shadow/service";
+import { decidePromotion, ladderFor, observing, reviewLadders, setAutonomyLevel, startLadder, startShadowMode } from "@/lib/shadow/service";
 import { setCaseStatus } from "@/lib/cases/service";
 import { circuitBreakerFor, rollBackExpired, verifyInProgress } from "@/lib/connectors/safety";
 import { ingestForIntegration, onboardIntegration } from "@/lib/integrations/service";
@@ -662,6 +662,26 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     await setSetting("ai.killSwitch", false);
   });
 
+  it("starts new clients autonomous for initial containment, or in shadow mode on request", async () => {
+    const auto = await db.tenant.create({ data: { name: "Test · Autonomous", slug: "test-autonomous" } });
+    expect(auto.aiAutonomyCap).toBe("AUTO_CONTAIN");
+    await startLadder(auto.id, { id: adminId, name: "Test Admin" }, "autonomous");
+    const levels = await ladderFor(auto.id);
+    for (const a of ["ISOLATE_HOST", "BLOCK_IP", "QUARANTINE_FILE", "BLOCK_SENDER", "COLLECT_LOGS"] as const) expect(levels?.get(a)).toBe(3);
+    for (const a of ["DISABLE_USER", "RESET_PASSWORD", "KILL_PROCESS", "PURGE_EMAIL"] as const) expect(levels?.get(a)).toBe(2);
+    expect(observing(levels)).toBe(false);
+    const careful = await db.tenant.create({ data: { name: "Test · Careful", slug: "test-careful" } });
+    await startLadder(careful.id, { id: adminId, name: "Test Admin" }, "shadow");
+    expect(observing(await ladderFor(careful.id))).toBe(true);
+    // Under the default rules, initial containment from its threshold is automatic; account actions aren't.
+    await saveDraft(auto.id, { body: {}, reason: "Onboarding: default rules" }, adminActor());
+    await putInForce(auto.id);
+    const verdict = (actionType: "ISOLATE_HOST" | "DISABLE_USER" | "BLOCK_IP", severity: "HIGH" | "LOW") => rulebookVerdict({ tenantId: auto.id, actionType, target: "x", severity, fresh: true });
+    expect((await verdict("ISOLATE_HOST", "HIGH"))?.hits).toEqual([]);
+    expect((await verdict("BLOCK_IP", "LOW"))?.hits.map((h) => h.outcome)).toContain("PENDING_APPROVAL");
+    expect((await verdict("DISABLE_USER", "HIGH"))?.hits.map((h) => h.outcome)).toContain("PENDING_APPROVAL");
+  });
+
   it("checks AI containment again at the moment of acting, and stops automation on a violation", async () => {
     const tenant = await db.tenant.create({ data: { name: "Test · Guard", slug: "test-guard", aiAutonomyCap: "AUTO_CONTAIN" } });
     await saveDraft(tenant.id, { body: { actions: { BLOCK_IP: { mode: "auto", autoFrom: "HIGH" } } }, reason: "Auto-block from high" }, adminActor());
@@ -800,11 +820,15 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
       expect(dryDone.status).toBe("MANUAL_REQUIRED");
       expect((dryDone.result as { summary: string }).summary).toMatch(/Dry run/);
 
-      // Repeated connector failures trip the circuit breaker.
+      // Repeated connector failures trip the circuit breaker. The AI acts on its
+      // own only under a rulebook the client and HELIOS have approved.
+      await saveDraft(tenant.id, { body: {}, reason: "Onboarding: default rules" }, { id: adminId, name: "Test Admin" });
+      await putInForce(tenant.id);
       await db.integration.update({ where: { id: integration.id }, data: { config: { connector: "crowdstrike_falcon", connectorMode: "live", connectorConfig: { baseUrl: falconUrl, clientId: "id" } } } });
       failContain = true;
+      const inForce = await db.orgPolicy.findFirstOrThrow({ where: { tenantId: tenant.id, status: "ACTIVE" } });
       for (const host of ["TEST-CS-03", "TEST-CS-04", "TEST-CS-05"]) {
-        const a = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: host, source: "ai", status: "PENDING_APPROVAL" });
+        const a = await recordResponseAction({ caseId: kase.id, actionType: "ISOLATE_HOST", target: host, source: "ai", status: "PENDING_APPROVAL", decision: { trace: [], approvals: 1, policyVersion: inForce.version, policyHash: inForce.contentHash } });
         expect((await performResponseAction(a.id, { name: "AI (auto-contain)" })).status).toBe("FAILED");
       }
       const paused = await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } });

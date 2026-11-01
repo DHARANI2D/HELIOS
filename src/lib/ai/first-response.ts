@@ -246,6 +246,7 @@ async function applyTriage(
       planCap: kase.tenant?.plan?.defaultAutonomyCap,
       tenantCap: kase.tenant?.aiAutonomyCap ?? "AUTO_CONTAIN",
       rulebook,
+      requireRulebook: !!kase.tenantId,
       // Level 0 is decided as if allowed and recorded as shadow below.
       ladder: level != null && level > 0 ? { level } : null,
       modelCap,

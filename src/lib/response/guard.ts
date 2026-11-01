@@ -57,6 +57,7 @@ export async function checkAutonomousAction(action: ResponseAction): Promise<Gua
     return hold("PENDING_APPROVAL", `rulebook v${rb.version} came into force after the AI decided; a person decides`);
   }
   if (!rb && action.policyHash) return hold("PENDING_APPROVAL", "the rulebook it was decided under is no longer in force; a person decides");
+  if (!rb && action.tenantId) return hold("PENDING_APPROVAL", "no rulebook is approved for this client yet; a person decides");
 
   if (settings.killSwitch) return hold("SUGGESTED", "the AI kill switch is on");
   if (tenant?.automationPausedAt) return hold("PENDING_APPROVAL", "automatic containment is paused for this client");

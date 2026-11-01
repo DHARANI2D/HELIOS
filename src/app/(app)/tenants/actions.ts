@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { db } from "@/lib/db";
-import { startShadowMode } from "@/lib/shadow/service";
+import { startLadder } from "@/lib/shadow/service";
 import { goLiveBlockers } from "@/lib/ingest/health";
 import { logAction } from "@/lib/audit";
 import { requirePermission, requireUser } from "@/lib/session";
@@ -25,6 +25,8 @@ const tenantSchema = z.object({
   usersLicensed: z.number().int().min(0).max(1_000_000),
   notes: z.string().max(4000).optional(),
   isTest: z.boolean().default(false),
+  // New clients only: let the AI only observe at first instead of acting.
+  startInShadow: z.boolean().default(false),
 });
 
 function slugify(name: string) {
@@ -36,7 +38,8 @@ export const saveTenantAction = action(async function saveTenantAction(input: z.
   const data = tenantSchema.parse(input);
   const plan = data.planId ? await db.servicePlan.findUnique({ where: { id: data.planId } }) : null;
   if (data.planId && !plan) throw new Error("Unknown service plan");
-  const fields = { ...data, contactEmail: data.contactEmail || null, industry: data.industry || null, contactName: data.contactName || null, notes: data.notes || null };
+  const { startInShadow, ...rest } = data;
+  const fields = { ...rest, contactEmail: data.contactEmail || null, industry: data.industry || null, contactName: data.contactName || null, notes: data.notes || null };
   let saved;
   if (tenantId) {
     // Going live needs every log source sending: a pilot can't start with dead sources.
@@ -51,8 +54,9 @@ export const saveTenantAction = action(async function saveTenantAction(input: z.
     let slug = slugify(data.name);
     if (await db.tenant.findUnique({ where: { slug } })) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     saved = await db.tenant.create({ data: { ...fields, slug, ...(plan ? { aiAutonomyCap: plan.defaultAutonomyCap } : {}) } });
-    // New clients start in shadow mode: the AI observes and earns autonomy.
-    await startShadowMode(saved.id, { id: user.id, name: user.name ?? user.email ?? "user" });
+    // Autonomous from day one (initial containment acts and notifies, once
+    // the client's rulebook is approved), or shadow mode if asked for.
+    await startLadder(saved.id, { id: user.id, name: user.name ?? user.email ?? "user" }, startInShadow ? "shadow" : "autonomous");
   }
   await logAction({ actorId: user.id, action: tenantId ? "tenant.updated" : "tenant.created", detail: { tenantId: saved.id, name: saved.name, plan: plan?.key ?? null, status: saved.status, isTest: saved.isTest } });
   revalidatePath("/tenants");

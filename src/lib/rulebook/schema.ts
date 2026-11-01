@@ -106,16 +106,19 @@ export type Approver = z.infer<typeof approverSchema>;
 const contactSchema = z.object({ name: text(120), email: text(200), phone: text(40) });
 const NO_CONTACT = { name: "", email: "", phone: "" };
 
+// Initial containment (isolate, block, quarantine, collect logs) runs on its
+// own by default; everything that changes people's access or data needs a
+// person. A client changes any of it in its own rulebook.
 const DEFAULT_ACTIONS: Record<RuledAction, ActionRule> = {
-  ISOLATE_HOST: { mode: "approve", autoFrom: "HIGH" },
-  BLOCK_IP: { mode: "approve", autoFrom: "HIGH" },
+  ISOLATE_HOST: { mode: "auto", autoFrom: "HIGH" },
+  BLOCK_IP: { mode: "auto", autoFrom: "MEDIUM" },
   KILL_PROCESS: { mode: "approve", autoFrom: "HIGH" },
-  QUARANTINE_FILE: { mode: "approve", autoFrom: "HIGH" },
+  QUARANTINE_FILE: { mode: "auto", autoFrom: "MEDIUM" },
   DISABLE_USER: { mode: "approve", autoFrom: "CRITICAL" },
   RESET_PASSWORD: { mode: "approve", autoFrom: "CRITICAL" },
-  BLOCK_SENDER: { mode: "approve", autoFrom: "HIGH" },
+  BLOCK_SENDER: { mode: "auto", autoFrom: "MEDIUM" },
   PURGE_EMAIL: { mode: "approve", autoFrom: "HIGH" },
-  COLLECT_LOGS: { mode: "approve", autoFrom: "MEDIUM" },
+  COLLECT_LOGS: { mode: "auto", autoFrom: "LOW" },
   // Copies the device's forensic state to the EDR's console: changes
   // nothing on it, but carries personal data, so a person asks for it.
   COLLECT_FORENSICS: { mode: "approve", autoFrom: "HIGH" },

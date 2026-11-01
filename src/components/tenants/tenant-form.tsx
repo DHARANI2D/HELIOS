@@ -29,6 +29,7 @@ export interface TenantDraft {
   usersLicensed: number;
   notes: string;
   isTest: boolean;
+  startInShadow?: boolean;
 }
 
 const EMPTY: TenantDraft = { name: "", industry: "", planId: null, status: "ONBOARDING", contactName: "", contactEmail: "", endpointsLicensed: 0, usersLicensed: 0, notes: "", isTest: false };
@@ -113,6 +114,15 @@ export function TenantFormButton({ tenantId, initial, plans }: { tenantId?: stri
               <Textarea value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} className="min-h-16" aria-describedby="tenant-notes-hint" />
               <p id="tenant-notes-hint" className="text-[11px] text-muted-foreground">Escalation contacts, maintenance windows, business-critical systems.</p>
             </div>
+            {!tenantId && (
+              <label className="flex items-start gap-3 rounded-md border p-3 sm:col-span-2">
+                <Switch checked={!!d.startInShadow} onCheckedChange={(startInShadow) => setD({ ...d, startInShadow })} className="mt-0.5" />
+                <span className="grid gap-0.5">
+                  <span className="text-sm font-medium">Start in shadow mode</span>
+                  <span className="text-[11px] text-muted-foreground">Off: HELIOS contains on its own from day one (isolate, block, quarantine, collect logs), within the client&apos;s rulebook once it&apos;s approved. On: the AI only observes and earns autonomy on its record first.</span>
+                </span>
+              </label>
+            )}
             <label className="flex items-start gap-3 rounded-md border p-3 sm:col-span-2">
               <Switch checked={d.isTest} onCheckedChange={(isTest) => setD({ ...d, isTest })} className="mt-0.5" />
               <span className="grid gap-0.5">

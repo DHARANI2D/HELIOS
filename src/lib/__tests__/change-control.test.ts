@@ -111,6 +111,13 @@ describe("the AI's initial containment", () => {
     expect(decideResponse(input("DISABLE_USER")).trace[0].rule).toBe("agent.alwaysHuman");
   });
 
+  it("waits for a person until the client has an approved rulebook", () => {
+    const d = decideResponse({ ...input("ISOLATE_HOST"), requireRulebook: true, rulebook: null });
+    expect(d.status).toBe("PENDING_APPROVAL");
+    expect(d.trace[0].rule).toBe("rulebook.none");
+    expect(decideResponse({ ...input("ISOLATE_HOST"), requireRulebook: true, rulebook: { version: 1, hash: "h", hits: [] } }).status).toBe("EXECUTED");
+  });
+
   it("stops on a tampered rulebook", () => {
     const d = decideResponse({ ...input("BLOCK_IP"), rulebook: { version: 3, hash: "h", hits: [{ rule: "rulebook.integrity", outcome: "PENDING_APPROVAL", reason: "doesn't match", hard: false }] } });
     expect(d.status).toBe("PENDING_APPROVAL");

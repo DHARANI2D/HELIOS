@@ -23,7 +23,9 @@ const auto = { actions: Object.fromEntries(RULED_ACTIONS.map((a) => [a, { mode: 
 
 describe("rulebook schema and templates", () => {
   it("fills every default and every template is valid", () => {
-    expect(EMPTY_RULEBOOK.actions.ISOLATE_HOST.mode).toBe("approve");
+    // Initial containment runs on its own by default; what touches people's access needs a person.
+    for (const a of ["ISOLATE_HOST", "BLOCK_IP", "QUARANTINE_FILE", "BLOCK_SENDER", "COLLECT_LOGS"] as const) expect(EMPTY_RULEBOOK.actions[a].mode).toBe("auto");
+    for (const a of ["DISABLE_USER", "RESET_PASSWORD", "KILL_PROCESS", "PURGE_EMAIL", "COLLECT_FORENSICS", "REVOKE_AGENT"] as const) expect(EMPTY_RULEBOOK.actions[a].mode).toBe("approve");
     expect(EMPTY_RULEBOOK.blastRadius.twoPerson).toContain("DISABLE_USER");
     for (const key of Object.keys(TEMPLATES) as TemplateKey[]) expect(() => rulebookSchema.parse(buildTemplate(key))).not.toThrow();
     expect(buildTemplate("healthcare").assets.neverIsolate.some((m) => m.value === "medical")).toBe(true);
@@ -193,9 +195,9 @@ describe("response policy with a rulebook", () => {
 describe("rulebook diff", () => {
   it("lists changed settings and added or removed items, ignoring order", () => {
     const a = rb({ assets: { neverIsolate: [{ kind: "hostname", value: "DC-01" }, { kind: "hostname", value: "DC-02" }] } });
-    const b = rb({ assets: { neverIsolate: [{ kind: "hostname", value: "DC-02" }, { kind: "hostname", value: "DC-01" }, { kind: "assetType", value: "medical", note: "Medical" }] }, actions: { ISOLATE_HOST: { mode: "auto" } } });
+    const b = rb({ assets: { neverIsolate: [{ kind: "hostname", value: "DC-02" }, { kind: "hostname", value: "DC-01" }, { kind: "assetType", value: "medical", note: "Medical" }] }, actions: { KILL_PROCESS: { mode: "auto" } } });
     const lines = diffRulebooks(a, b);
-    expect(lines).toContainEqual({ path: "actions.ISOLATE_HOST.mode", kind: "changed", before: "approve", after: "auto" });
+    expect(lines).toContainEqual({ path: "actions.KILL_PROCESS.mode", kind: "changed", before: "approve", after: "auto" });
     expect(lines).toContainEqual({ path: "assets.neverIsolate", kind: "added", after: "assetType medical (Medical)" });
     expect(lines.filter((l) => l.path === "assets.neverIsolate")).toHaveLength(1);
     expect(diffRulebooks(a, a)).toEqual([]);

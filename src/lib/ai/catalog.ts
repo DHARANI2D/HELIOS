@@ -31,8 +31,10 @@ export const AGENT_TYPES: Record<AgentKey, AgentType> = {
     name: "Containment controller",
     description: "Decides what happens to the containment the other agents recommend: suggest only, queue for approval, or act on pre-approved actions above a confidence bar. Policy, not a model — it never improvises an action.",
     dispatchable: false,
-    defaultAutonomy: "CONTAIN_WITH_APPROVAL",
-    defaultActions: ["BLOCK_IP", "BLOCK_SENDER", "QUARANTINE_FILE", "COLLECT_LOGS"],
+    // AI-led initial containment: the first, reversible steps run on their
+    // own within each client's approved rulebook (response/policy.ts).
+    defaultAutonomy: "AUTO_CONTAIN",
+    defaultActions: ["ISOLATE_HOST", "BLOCK_IP", "BLOCK_SENDER", "QUARANTINE_FILE", "COLLECT_LOGS"],
     defaultMinConfidence: 0.85,
   },
   phishing: {

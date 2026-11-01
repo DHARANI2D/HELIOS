@@ -165,7 +165,8 @@ model Tenant {
   usersLicensed         Int          @default(0)
   // The most autonomy the client has consented to for AI agents acting on
   // its estate; caps every agent profile.
-  aiAutonomyCap         AiAutonomy   @default(CONTAIN_WITH_APPROVAL)
+  // AI-led initial containment by default, under the client's approved rulebook.
+  aiAutonomyCap         AiAutonomy   @default(AUTO_CONTAIN)
   // Circuit breaker: automatic containment paused for this client after
   // repeated connector failures, until someone resumes it.
   // Log retention (lib/retention): events stay searchable in the database
@@ -1333,7 +1334,7 @@ model ServicePlan {
   pricePerEndpoint   Float? // monthly sell price, USD
   costPerEndpoint    Float? // your monthly delivery cost, USD
   onboardingMinimum  Float?
-  defaultAutonomyCap AiAutonomy @default(CONTAIN_WITH_APPROVAL)
+  defaultAutonomyCap AiAutonomy @default(AUTO_CONTAIN)
   features           Json // { "threatHunting": "Monthly", ... }
   active             Boolean    @default(true)
   sortOrder          Int        @default(0)

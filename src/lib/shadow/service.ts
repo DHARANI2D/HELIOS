@@ -35,6 +35,27 @@ export function observing(ladder: Map<PlaybookActionType, number> | null) {
   return !!ladder && [...ladder.values()].every((l) => l === 0);
 }
 
+// A new client's ladder. By default HELIOS is autonomous from day one:
+// initial containment (isolate, block, quarantine, collect logs) at L3,
+// act and notify; everything else at L2, a person approves. Automatic
+// demotion still applies. A cautious client can start in shadow mode
+// instead, where the AI only observes until it earns autonomy.
+export async function startLadder(tenantId: string, actor: Actor, mode: "autonomous" | "shadow") {
+  if (mode === "shadow") return startShadowMode(tenantId, actor);
+  const { AI_INITIAL_CONTAINMENT } = await import("@/lib/response/policy");
+  await db.$transaction(
+    RULED_ACTIONS.map((actionType) => {
+      const level = AI_INITIAL_CONTAINMENT.includes(actionType) ? 3 : 2;
+      return db.autonomyLevel.upsert({
+        where: { tenantId_actionType: { tenantId, actionType } },
+        update: {},
+        create: { tenantId, actionType, level, changedByName: actor.name, reason: level === 3 ? "Autonomous from onboarding: initial containment acts and notifies" : "Needs a person: beyond initial containment" },
+      });
+    }),
+  );
+  await logAction({ actorId: actor.id, action: "autonomy.ladder_started", detail: { tenantId, mode } });
+}
+
 export async function startShadowMode(tenantId: string, actor: Actor) {
   await db.$transaction(
     RULED_ACTIONS.map((actionType) =>
