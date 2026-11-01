@@ -203,6 +203,15 @@ After first response, a job claims each open case of the last 14 days (`analysis
 - **Assistant** (`assistant.ts`). Agent `search`, resolved per client like the other agents; structured output (`query`, `range`, `explanation`), parsed before use, a built-in translator as the fallback; each call is an `AiRun` with its usage.
 - **Saved searches** (`SavedSearch`, row-level isolated). Permission `events.search`: every SOC role, auditors, client admins and viewers.
 
+### Security testing (`lib/testing`, `app/(app)/testing`)
+
+- **`SecurityTest`** (row-level isolated): targets with their proof, checks, window, rules of engagement, both authorisations (the client's attestation stored verbatim), runs, the last run's probes, findings and imports. Status: requested → authorised → (queued →) running → completed, or rejected / cancelled.
+- **Scope** (`scope.ts`): DNS TXT proof per name, parents cover children, IPs only through verified names; private addresses refused at parse time, after resolution, and again in `net.ts` before any socket opens.
+- **Exposure check** (`exposure.ts`) over an injectable `Net` (`net.ts` is the real one): services, TLS, web, email. `shouldStop` is polled between probes: the window closing or a person stopping the test ends it.
+- **Findings** (`findings.ts`): a stable id per source, target, port and title. Merging keeps an accepted risk accepted, re-opens one found again, and marks fixed only what a run looked at and didn't find (a target skipped for lost proof proves nothing).
+- **Imports** (`imports.ts`, `xml.ts`): Nessus, Greenbone/OpenVAS, ZAP, Nuclei, kept to the verified targets.
+- **Permissions**: `testing.view` (SOC, auditors, client users), `testing.request` (incident responders, threat hunters, client admins), `testing.authorise` (client admins for the client; SOC managers and admins for HELIOS).
+
 ### Investigation agent (`lib/ai/investigator`)
 
 An analyst can send the investigation agent onto a case. It works the case on its own with tools, and every tool only reads:
@@ -337,6 +346,7 @@ Timers in the server process:
 | Connector verification | 30 seconds |
 | Containment monitor (AI actions outside the approved rules) | 5 minutes |
 | Autonomous analysis (evidence sweep, investigation, final analysis) | 20 seconds |
+| Security tests (authorised tests whose window has opened, re-tests) | 30 seconds |
 | Time-box rollbacks | Minute |
 | Credential reminders | 6 hours |
 | Regulatory clocks (CERT-In and DPDP deadlines) | Minute |

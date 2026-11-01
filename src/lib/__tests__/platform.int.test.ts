@@ -64,6 +64,10 @@ import { savedSearchesFor } from "@/lib/explore/saved";
 import { suggestSearch } from "@/lib/explore/assistant";
 import { parseQuery } from "@/lib/explore/query";
 import * as eventsRoute from "@/app/api/v1/events/route";
+import { authoriseTest, closeTest, importResults, requestTest, retest, runDueTests, setFindingStatus, verifyTest, findingsOf, targetsOf } from "@/lib/testing/service";
+import { SecurityTestPdf } from "@/lib/testing/report-pdf";
+import type { Net } from "@/lib/testing/exposure";
+import { renderPdf } from "@/lib/pdf/kit";
 import * as meRoute from "@/app/api/v1/me/route";
 import * as casesRoute from "@/app/api/v1/cases/route";
 import * as caseRoute from "@/app/api/v1/cases/[id]/route";
@@ -1186,6 +1190,108 @@ describe.skipIf(!enabled)("HELIOS platform (integration)", () => {
     } finally {
       delete process.env.HELIOS_DB_TENANT_ROLE;
     }
+  });
+
+  it("runs a security test only on proven targets, inside the window, once the client and HELIOS have both authorised it", async () => {
+    const tenant = await db.tenant.create({ data: { name: "Test · Pentest", slug: "test-pentest" } });
+    const other = await db.tenant.create({ data: { name: "Test · Pentest other", slug: "test-pentest-other" } });
+    const admin = await db.user.create({ data: { email: "admin@pentest.test", name: "Pentest Admin", role: "CLIENT_ADMIN", tenantId: tenant.id } });
+    const viewer = await db.user.create({ data: { email: "viewer@pentest.test", name: "Pentest Viewer", role: "CLIENT_VIEWER", tenantId: tenant.id } });
+    const manager = await db.user.create({ data: { email: "manager.pentest@test.local", name: "SOC Manager", role: "SOC_MANAGER" } });
+    const hunter = await db.user.create({ data: { email: "hunter.pentest@test.local", name: "Hunter", role: "THREAT_HUNTER" } });
+    const actor = (u: { id: string; name: string | null; role: UserRole; tenantId: string | null }) => ({ id: u.id, name: u.name ?? "x", role: u.role, isClient: !!u.tenantId, tenantId: u.tenantId });
+    const t0 = new Date();
+    const start = new Date(t0.getTime() + 60 * 60_000);
+    const end = new Date(t0.getTime() + 2 * 86_400_000);
+
+    // Someone from another client can't ask for a test on this one.
+    await expect(requestTest({ tenantId: tenant.id, title: "x", targets: "example.com", checks: ["services"], rulesOfEngagement: "x", windowStart: start, windowEnd: end }, actor({ ...admin, tenantId: other.id }))).rejects.toThrow(/Not found/);
+    await expect(requestTest({ tenantId: tenant.id, title: "x", targets: "10.1.2.3", checks: ["services"], rulesOfEngagement: "x", windowStart: start, windowEnd: end }, actor(admin))).rejects.toThrow(/private/);
+
+    const test = await requestTest({ tenantId: tenant.id, title: "External exposure Q4", targets: "pentest.example vpn.pentest.example 203.0.113.50", checks: ["services", "tls", "web", "email"], rulesOfEngagement: "Call the duty manager on +91 00000 00000. Nothing outside these targets.", windowStart: start, windowEnd: end }, actor(hunter));
+    expect(test.status).toBe("requested");
+    expect(await db.notification.count({ where: { userId: admin.id, title: { startsWith: "Security test requested" } } })).toBe(1);
+
+    // The proof: a TXT record on the domain; the IP through a verified name.
+    let txt: Record<string, string[]> = { "pentest.example": [`helios-verify=${test.verifyToken}`, "v=spf1 -all"] };
+    const addrs: Record<string, string[]> = { "pentest.example": ["203.0.113.40"], "vpn.pentest.example": ["203.0.113.50"] };
+    const probes: string[] = [];
+    let openPorts: Record<string, number[]> = { "203.0.113.50": [3389, 443] };
+    const net: Net = {
+      txt: async (n) => (txt[n] ?? []).map((r) => [r]),
+      addresses: async (n) => addrs[n] ?? [],
+      connect: async (ip, port) => {
+        probes.push(`${ip}:${port}`);
+        return { open: !!openPorts[ip]?.includes(port), banner: null };
+      },
+      tls: async () => ({ subject: "vpn.pentest.example", issuer: "Test CA", validTo: new Date(t0.getTime() + 200 * 86_400_000).toISOString(), names: ["vpn.pentest.example"], selfSigned: false, authorized: true, authorizationError: null, protocol: "TLSv1.3" }),
+      http: async () => ({ status: 200, headers: { "strict-transport-security": "max-age=31536000", "content-security-policy": "frame-ancestors 'self'", "x-content-type-options": "nosniff" } }),
+    };
+    // Not authorisable until every target is verified.
+    await expect(authoriseTest(test.id, actor(admin), { attest: true })).rejects.toThrow(/Verify every target/);
+    const targets = await verifyTest(test.id, actor(admin), net);
+    expect(targets.every((t) => t.verified)).toBe(true);
+
+    // The client's admin, attesting; never a viewer.
+    await expect(authoriseTest(test.id, actor(viewer), { attest: true })).rejects.toThrow(/client's admin/);
+    await expect(authoriseTest(test.id, actor(admin), {})).rejects.toThrow(/Confirm/);
+    await authoriseTest(test.id, actor(admin), { attest: true });
+    // HELIOS: a SOC manager or admin who didn't ask for it.
+    await expect(authoriseTest(test.id, actor(hunter), {})).rejects.toThrow(/HELIOS approver/);
+    const authorised = await authoriseTest(test.id, actor(manager), {});
+    expect(authorised.status).toBe("authorised");
+    expect(authorised.clientAttestation).toContain("pentest.example, vpn.pentest.example, 203.0.113.50");
+
+    // Before the window: nothing runs.
+    expect(await runDueTests(net, t0)).toBe(0);
+    expect(probes).toHaveLength(0);
+    // In the window: it runs on its own, only against the verified addresses.
+    expect(await runDueTests(net, new Date(start.getTime() + 60_000))).toBe(1);
+    expect(new Set(probes.map((p) => p.split(":")[0]))).toEqual(new Set(["203.0.113.40", "203.0.113.50"]));
+    const after = await db.securityTest.findUniqueOrThrow({ where: { id: test.id } });
+    expect(after).toMatchObject({ status: "completed", runs: 1 });
+    let fs = findingsOf(after);
+    expect(fs.map((f) => f.title)).toEqual(expect.arrayContaining(["Remote Desktop reachable from the internet", "No DMARC record"]));
+    expect(await db.notification.count({ where: { userId: admin.id, title: { startsWith: "Security test report ready" } } })).toBe(1);
+
+    // A scanner's report: only what's in scope is kept.
+    const nessus = `<NessusClientData_v2><Report><ReportHost name="203.0.113.50"><ReportItem port="443" svc_name="www" severity="3" pluginID="1" pluginName="Outdated web server"><solution>Upgrade</solution></ReportItem></ReportHost><ReportHost name="198.51.100.200"><ReportItem port="22" severity="4" pluginID="2" pluginName="Someone else's server"><solution>-</solution></ReportItem></ReportHost></Report></NessusClientData_v2>`;
+    const imported = await importResults(test.id, actor(hunter), { name: "q4.nessus", text: nessus });
+    expect(imported).toMatchObject({ tool: "nessus", kept: 1, outOfScope: 1 });
+
+    // The client fixes RDP and accepts the missing DMARC for now; a re-test confirms the fix.
+    const dmarc = findingsOf(await db.securityTest.findUniqueOrThrow({ where: { id: test.id } })).find((f) => f.title === "No DMARC record")!;
+    await expect(setFindingStatus(test.id, dmarc.id, "accepted", "", actor(admin))).rejects.toThrow(/Say why/);
+    await setFindingStatus(test.id, dmarc.id, "accepted", "Mail moves to the new provider in January", actor(admin));
+    openPorts = { "203.0.113.50": [443] };
+    const inWindow = new Date(start.getTime() + 2 * 3_600_000);
+    await retest(test.id, actor(admin), inWindow);
+    expect(await runDueTests(net, inWindow)).toBe(1);
+    const retested = await db.securityTest.findUniqueOrThrow({ where: { id: test.id }, include: { tenant: { select: { name: true } } } });
+    fs = findingsOf(retested);
+    expect(fs.find((f) => f.title === "Remote Desktop reachable from the internet")?.status).toBe("fixed");
+    expect(fs.find((f) => f.title === "No DMARC record")).toMatchObject({ status: "accepted", statusNote: "Mail moves to the new provider in January" });
+    expect(fs.find((f) => f.title === "Outdated web server")?.status).toBe("open");
+
+    // The proof is checked again before every run: lose it and the target is skipped.
+    txt = {};
+    probes.length = 0;
+    await retest(test.id, actor(admin), inWindow);
+    await runDueTests(net, inWindow);
+    expect(probes).toHaveLength(0);
+    const skipped = await db.securityTest.findUniqueOrThrow({ where: { id: test.id } });
+    expect(targetsOf(skipped).every((t) => !t.verified)).toBe(true);
+    // Skipped targets prove nothing: what was open stays open.
+    expect(findingsOf(skipped).filter((f) => f.status === "open").map((f) => f.title).sort()).toEqual(findingsOf(retested).filter((f) => f.status === "open").map((f) => f.title).sort());
+
+    // The report renders, and either side can stop the test.
+    const pdf = await renderPdf(createElement(SecurityTestPdf, { test: retested, tenantName: retested.tenant.name, company: await getSetting("company.profile") }));
+    expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
+    await closeTest(test.id, actor(admin), "Done for this quarter");
+    expect((await db.securityTest.findUniqueOrThrow({ where: { id: test.id } })).status).toBe("cancelled");
+    await expect(retest(test.id, actor(admin), inWindow)).rejects.toThrow(/cancelled/);
+    // Row-level isolation: another client sees none of it.
+    expect(await tenantDb(other.id).securityTest.count()).toBe(0);
   });
 
   it("seals each client's credentials with its own key, rotates it, and can destroy it", async () => {

@@ -78,6 +78,18 @@ Explore (**Search logs** for clients) searches every event HELIOS holds, from al
 - **The search assistant** turns a question ("PowerShell with encoded commands on FIN-WS-04 this week") into a search on the model the client chose for it, under the client's AI rules. It sees only the question and the field list, never the logs; what it writes is checked like anything typed. Without a model a built-in translator does it.
 - **Safe by construction**: field names map to a fixed list of columns and every value is a bound parameter; each search runs in one transaction with a 15-second statement timeout, and a client user's search also runs under the database's row-level isolation.
 
+## Security testing on request
+
+A client (or the SOC for a client) can ask HELIOS to test the client's own internet-facing assets, and gets a findings report (`lib/testing`, **Security testing**):
+
+1. **Ask**: the targets (domains, host names, public IPs, URLs; up to 25, no ranges, no private addresses), the checks, the window (up to 30 days) and the rules of engagement.
+2. **Prove control**: a DNS TXT record `helios-verify=<token>` on each name or on `_helios-verify.<name>`. A host under a verified name, and an address a verified name resolves to, count as verified. Nothing else is touched.
+3. **Authorise, twice**: the client's admin, attesting they may permit testing of exactly these assets in this window; and a HELIOS approver (SOC manager or admin) who didn't ask for it. Either side can stop it at any time.
+4. **HELIOS runs it on its own** when the window opens, checking the DNS proof again first. It looks; it doesn't exploit: a TCP connect to well-known ports (and the banner a service volunteers), the TLS certificate and protocol, the HTTPS redirect and security headers, SPF and DMARC. A few probes at a time with short timeouts, never to a private address, stopping when the window closes or someone cancels; every probe is logged.
+5. **The report**: findings worst first with evidence and how to fix them, as a page and a PDF. Results from established scanners run under the same authorisation (Tenable Nessus, Greenbone/OpenVAS, OWASP ZAP, Nuclei) are imported into the same report; findings outside the verified scope are left out. A re-test in the window marks what it no longer finds as fixed; a risk the client chooses to carry is accepted with the reason.
+
+Scanner reports are read with a small XML reader that never resolves DTDs or external entities.
+
 ## User guides
 
 [`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 14-page product brochure, to give to clients and partners. It covers:

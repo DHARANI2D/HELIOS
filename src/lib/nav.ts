@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import type { UserRole } from "@prisma/client";
 import {
   ScanSearch,
+  ShieldHalf,
   Archive,
   BarChart3,
   Bot,
@@ -59,6 +60,7 @@ export const NAV_ITEMS: NavItem[] = [
   { title: "AI Agents", href: "/ai", icon: Bot, group: "Operate", permission: "ai.view", description: "AI first responders, providers, autonomy and run log" },
   { title: "SOC Operations", href: "/operations", icon: PhoneCall, group: "Operate", permission: "operations.view", description: "Who is on call and the pages they get, weekly QA of what the AI did on its own, and the daily digests" },
   { title: "Explore", clientTitle: "Search logs", href: "/explore", icon: ScanSearch, group: "Analyze", permission: "events.search", description: "Search every log from every tool in one place, with an AI assistant that writes the search" },
+  { title: "Security testing", href: "/testing", icon: ShieldHalf, group: "Analyze", permission: "testing.view", description: "Authorised tests of internet-facing assets: exposed services, TLS, web and email, with scanner results, in one report" },
   { title: "Investigations", href: "/investigations", icon: Search, group: "Analyze", permission: "investigations.run", description: "Multi-agent root-cause analysis" },
   { title: "Email & File Forensics", href: "/forensics", icon: Mail, group: "Analyze", permission: "forensics.run", description: "Sandbox detonation and document forensics" },
   { title: "Response Playbooks", href: "/playbooks", icon: Workflow, group: "Analyze", permission: "playbooks.view", description: "Automated containment workflows" },

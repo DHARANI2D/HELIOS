@@ -204,6 +204,7 @@ model Tenant {
   ruleChanges   RuleChange[]
   caseReports   CaseReport[]
   savedSearches SavedSearch[]
+  securityTests SecurityTest[]
   keys          TenantKey[]
   notices       RegulatoryNotice[]
   tunings       DetectionTuning[]
@@ -2047,4 +2048,50 @@ model SavedSearch {
   @@index([ownerId])
   @@index([tenantId])
   @@map("saved_searches")
+}
+
+// An authorised security test of a client's own internet-facing assets:
+// HELIOS's exposure check and imported scanner results, in one report.
+// It runs only on targets the client proved it controls, inside the window
+// both the client and HELIOS signed, and stops if either cancels it.
+model SecurityTest {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  title                  String
+  // ScopeTarget[] (lib/testing/scope.ts)
+  targets                Json
+  checks                 String[]
+  rulesOfEngagement      String    @db.Text
+  windowStart            DateTime
+  windowEnd              DateTime
+  // requested | authorised | queued | running | completed | rejected | cancelled
+  status                 String    @default("requested")
+  verifyToken            String
+  requestedById          String?
+  requestedByName        String
+  clientAuthorisedById   String?
+  clientAuthorisedByName String?
+  clientAuthorisedAt     DateTime?
+  clientAttestation      String?   @db.Text
+  heliosAuthorisedById   String?
+  heliosAuthorisedByName String?
+  heliosAuthorisedAt     DateTime?
+  closedByName           String?
+  closedReason           String?
+  runs                   Int       @default(0)
+  startedAt              DateTime?
+  finishedAt             DateTime?
+  // The last run's probes, and every finding so far (TestFinding[]).
+  probes                 Json?
+  findings               Json?
+  // Scanner reports brought in: tool, file, who, when, kept, out of scope.
+  imports                Json?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([status, windowStart])
+  @@map("security_tests")
 }

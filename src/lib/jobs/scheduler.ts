@@ -36,6 +36,8 @@ const JOBS: Job[] = [
   { name: "connector verification", group: "core", everyMs: 30_000, run: async () => (await import("@/lib/connectors/safety")).verifyInProgress() },
   // After first response: collect evidence, investigate and write the final analysis on its own.
   { name: "autonomous analysis", group: "core", everyMs: 20_000, run: async () => (await import("@/lib/ai/autopilot")).runAutopilot() },
+  // Authorised security tests whose window has opened (lib/testing).
+  { name: "security tests", group: "core", everyMs: 30_000, run: async () => (await import("@/lib/testing/service")).runDueTests((await import("@/lib/testing/net")).liveNet) },
   // Re-checks containment the AI ran on its own; a violation pauses the client's automation.
   { name: "containment monitor", group: "core", everyMs: 5 * 60_000, run: async () => (await import("@/lib/response/guard")).monitorAutonomousContainment() },
   // Rolls back time-boxed actions whose time is up.
