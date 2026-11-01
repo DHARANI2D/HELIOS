@@ -121,7 +121,15 @@ Scanner reports are read with a small XML reader that never resolves DTDs or ext
 
 ## Getting started
 
-**Run it in containers** (on your Mac or a server): Postgres, migrations, the web server and the worker, hardened and ready.
+**On your Mac, one command:**
+
+```bash
+./helios.sh                       # installs/starts Docker if needed, generates secrets, builds, starts, opens the browser
+./helios.sh --test-data           # the same, plus test clients, users and cases
+./helios.sh --with-ollama         # the same, plus a local AI model (Ollama) as HELIOS's default
+```
+
+It's safe to run again; `./helios.sh stop`, `start`, `status`, `logs`, `update` and `reset` do the rest (`./helios.sh help`). It runs the hardened container stack: Postgres, migrations, the web server and the worker. By hand on any machine with Docker:
 
 ```bash
 ./deploy/compose/setup.sh         # fresh secrets in .env.db and .env.docker; prints the first admin's password

@@ -119,8 +119,23 @@ async function seedAgentProfiles() {
   console.log(`Seeded ${created} AI agent profile(s)`);
 }
 
+// A local model server (Ollama, LM Studio) as a platform provider, when the
+// installer set one up: SEED_AI_BASE_URL and SEED_AI_MODEL. It becomes the
+// default only if there is none; an existing provider is never touched.
+async function seedLocalModel() {
+  const baseUrl = process.env.SEED_AI_BASE_URL?.trim();
+  const model = process.env.SEED_AI_MODEL?.trim();
+  if (!baseUrl || !model) return;
+  const name = process.env.SEED_AI_NAME?.trim() || "Local model on this machine";
+  if (await db.aiProvider.findUnique({ where: { name } })) return;
+  const hasDefault = await db.aiProvider.count({ where: { isDefault: true, tenantId: null } });
+  await db.aiProvider.create({ data: { name, kind: "openai_compatible", baseUrl, model, isLocal: true, enabled: true, isDefault: hasDefault === 0 } });
+  console.log(`Added the local model provider ${name} (${model} at ${baseUrl})${hasDefault ? "" : " as the default"}`);
+}
+
 async function main() {
   await seedAdmin();
+  await seedLocalModel();
   await seedMitre();
   await seedPlaybooks();
   await seedAgentProfiles();

@@ -7,6 +7,8 @@
 # Every container runs as an unprivileged user with no Linux capabilities,
 # can't gain privileges, and (web, worker) has a read-only filesystem.
 
+name: helios
+
 x-hardened: &hardened
   restart: unless-stopped
   read_only: true
@@ -32,10 +34,9 @@ services:
       POSTGRES_DB: helios
       POSTGRES_USER: postgres
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
-    # Only from this machine (psql, a database tool); containers use the
-    # internal network.
-    ports:
-      - "127.0.0.1:${HELIOS_DB_PORT:-5433}:5432"
+    # No port on the host: Postgres is only on the internal network (Docker
+    # can't publish from one). To open it: ./helios.sh psql, or
+    # docker compose exec postgres psql -U postgres -d helios
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./deploy/db/roles.sql:/helios-db/roles.sql:ro

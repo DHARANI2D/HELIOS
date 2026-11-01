@@ -22,3 +22,7 @@ tsconfig.tsbuildinfo
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+# The Mac installer script
+helios.sh
+.helios

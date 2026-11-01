@@ -24,17 +24,49 @@ Both images build for Apple Silicon (arm64) and Intel/AMD (amd64) from the same 
 
 ## 1. On your Mac
 
-### What you need
+### One command
 
-- **Docker Desktop for Mac** (Apple Silicon or Intel). Give it at least 6 GB of memory and 20 GB of disk (Settings → Resources).
-- **This repository**, cloned.
-- **`openssl`**, which macOS already has.
+```bash
+git clone <this repository> helios && cd helios
+./helios.sh
+```
 
-### Start it
+That's all. `helios.sh` works out what's missing and does it, and is safe to run again at any time:
+
+1. **Docker**: installs Docker Desktop with Homebrew if it isn't there (it asks first), starts it and waits until it's ready. The first time, accept Docker's terms in the window that opens. It warns if Docker has less than 6 GB of memory (Settings → Resources) or the disk less than 15 GB free.
+2. **Secrets**: generates `.env.db` and `.env.docker` with fresh random passwords and keys (mode 600, never committed), and picks port 3000, or the next free one.
+3. **Build**: the web/worker image and the migration image (5–10 minutes the first time, much faster after).
+4. **Start**: Postgres, then migrations, database grants and reference data, then the web server and the worker. It waits until HELIOS answers.
+5. **Open**: your browser at `http://localhost:3000`, and prints the first admin's email and password. Change the password and set up two-step sign-in (Account) after signing in, then work through the setup checklist on the Overview.
+
+Options:
+
+| Run | To |
+| --- | --- |
+| `./helios.sh --test-data` | Also load test clients, users and cases (every page then shows a test banner). Their accounts are saved in `.helios/test-data`. |
+| `./helios.sh --with-ollama` | Also run a local AI model: installs Ollama if needed, starts it, downloads a model sized to your Mac's memory (`qwen2.5:14b` with 32 GB or more, otherwise `llama3.1:8b`; `HELIOS_OLLAMA_MODEL` picks another), and adds it to HELIOS as the default model. Run Evaluations on it before relying on it. |
+
+### Everyday commands
+
+| To | Run |
+| --- | --- |
+| Start again (no rebuild) | `./helios.sh start` |
+| Stop (keeps every piece of data) | `./helios.sh stop` |
+| See what's running | `./helios.sh status` |
+| Follow the logs | `./helios.sh logs` (or `./helios.sh logs migrate`) |
+| Get the latest code, rebuild, restart | `./helios.sh update` (migrations run on the way up) |
+| Delete everything and start over | `./helios.sh reset`, then `./helios.sh` |
+| Open the database | `./helios.sh psql` (Postgres has no port on the Mac: it sits on an internal network only) |
+
+Settings, all optional: `HELIOS_PORT` (first run), `HELIOS_EXTRA_CA` (your company proxy's CA certificate, see below), `HELIOS_NO_OPEN=1`, `HELIOS_YES=1` (don't ask before installing). `./helios.sh help` lists them all.
+
+### By hand, without the script
+
+What `helios.sh` runs, if you'd rather do it yourself (Docker Desktop already running):
 
 ```bash
 ./deploy/compose/setup.sh        # writes .env.db and .env.docker with fresh secrets, prints the first admin's password
-docker compose up -d --build     # builds the images (5–10 minutes the first time), then starts everything
+docker compose up -d --build     # builds the images, then starts everything
 open http://localhost:3000
 ```
 
@@ -43,24 +75,6 @@ open http://localhost:3000
 1. **Postgres** starts. On first start it creates the `helios_owner` and `helios_app` roles (`deploy/db/docker-init.sh`).
 2. **migrate** applies every migration as `helios_owner`, then narrows `helios_app` (`grants.sql`), then seeds reference data and the first admin. It exits when done.
 3. **web** (port 3000) and **worker** start once migrate has succeeded.
-
-Sign in as `admin@helios.local` with the password `setup.sh` printed. Then:
-
-- change the password (Account);
-- set up two-step sign-in (Account → Security);
-- work through the setup checklist on the Overview.
-
-### Everyday commands
-
-| To | Run |
-| --- | --- |
-| See status | `docker compose ps` |
-| Follow logs | `docker compose logs -f web worker` |
-| Stop (keeps data) | `docker compose down` |
-| Start again | `docker compose up -d` |
-| Rebuild after pulling new code | `docker compose up -d --build` (migrations run on the way up) |
-| Open the database | `psql "postgresql://postgres:<POSTGRES_PASSWORD from .env.db>@localhost:5433/helios"` |
-| Start over from nothing | `docker compose down -v && rm .env.db .env.docker && ./deploy/compose/setup.sh` |
 
 ### Test data (optional)
 
@@ -77,7 +91,7 @@ It prints the test accounts' passwords. Don't load it into a database you'll use
 These settings come with `docker-compose.yml`; nothing to configure:
 
 - **Users and privileges:** web and worker run as an unprivileged user, with no Linux capabilities, `no-new-privileges`, and a read-only root filesystem (only `/tmp` and Next's cache are writable, in memory).
-- **Ports:** the web and Postgres ports listen on `127.0.0.1` only, so other machines on your network can't reach them.
+- **Ports:** only the web port is published, on `127.0.0.1`, so other machines on your network can't reach it. Postgres has no port on the host at all.
 - **Network:** Postgres sits on an internal Docker network with no way out.
 - **Database login:** the app signs in as `helios_app`. It can read and write rows but can't create, alter or drop tables, switch off row-level security, or change or delete audit entries. The owner's password is only in `.env.db`, which only Postgres and migrate read.
 - **Secrets:** `.env.db` and `.env.docker` are created with mode 600 and are gitignored.
@@ -85,6 +99,12 @@ These settings come with `docker-compose.yml`; nothing to configure:
 ### Behind a company proxy
 
 If your Mac's traffic goes through a proxy that inspects TLS (Zscaler, Netskope and the like), the build needs the proxy's CA certificate. The certificate is mounted only for the build and isn't stored in the image.
+
+```bash
+HELIOS_EXTRA_CA=$HOME/proxy-ca.pem ./helios.sh
+```
+
+Or by hand:
 
 ```bash
 docker build --secret id=extra_ca,src=$HOME/proxy-ca.pem --target runtime -t helios:local .

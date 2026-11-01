@@ -24,3 +24,5 @@ coverage/
 # Kubernetes overlay secrets (deploy/k8s/overlays/*/secrets.sh)
 deploy/k8s/overlays/*/secrets.env
 deploy/k8s/overlays/*/db.env
+# ./helios.sh state (test accounts, Ollama log)
+.helios/
