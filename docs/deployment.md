@@ -86,7 +86,8 @@ To try HELIOS with the same test data the user guides and the brochure were made
 - each client's rulebook in force (from its industry template, approved by the client's admin and the SOC manager) and a rule change waiting for both approvals;
 - HELIOS's final analysis on each client's worst open case;
 - saved searches in Explore;
-- two security tests for Test · Clinic: one run, with findings and a Nessus report (its probes simulated on reserved addresses), and one waiting for authorisation.
+- two security tests for Test · Clinic: one run, with findings and a Nessus report (its probes simulated on reserved addresses), and one waiting for authorisation;
+- AI Security: a patient chatbot (enforcing) and a records search (monitor mode) for the Clinic, an order-support agent for Retail, a day of guard decisions with the cases they opened, and an AI red-team test of the chatbot (against a simulated chatbot).
 
 **On a Mac with `helios.sh`:**
 
@@ -399,6 +400,8 @@ No system is free of flaws, and this one is no exception. These are known and ha
 | `HELIOS_ARCHIVE_S3_BUCKET` / `_REGION` |  | ✓ | The log archive |
 | `ANTHROPIC_API_KEY` | ✓ | ✓ | Optional; providers can also be set in the app |
 | `HELIOS_SMTP_URL` | ✓ | ✓ | Outgoing mail (or set it in Settings) |
+| `HELIOS_AI_GATEWAY_ALLOW_PRIVATE` | ✓ | | `1` lets AI systems use a model provider on http:// or a private address (a local model) through the AI gateway; off, providers must be public https |
+| `HELIOS_AI_REDTEAM_DELAY_MS` |  | ✓ | Pause between the AI red team's requests to a client's endpoint (default 500) |
 
 `.env.example` lists the rest.
 

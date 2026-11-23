@@ -8,6 +8,9 @@ import { CHECKS, SOURCE, runExposureCheck, type CheckKey, type Net } from "@/lib
 import { mergeFindings, finding, severityCounts, type TestFinding } from "@/lib/testing/findings";
 import { IMPORT_TOOLS, ImportError, detectTool, parseImport, type ImportTool } from "@/lib/testing/imports";
 import { ScopeError, hostOf, inScope, parseTargets, verifyRecord, verifyScope, type Resolver, type ScopeTarget } from "@/lib/testing/scope";
+import { openSealed } from "@/lib/keys";
+import { readPolicy } from "@/lib/aisec/policy";
+import { AI_SOURCE, runAiRedTeam, type ChatTarget, type SystemResult } from "@/lib/aisec/redteam";
 
 // Security tests on request, under written authorisation:
 //   1. someone asks (the client's admin, or the SOC for the client): what,
@@ -22,7 +25,9 @@ import { ScopeError, hostOf, inScope, parseTargets, verifyRecord, verifyScope, t
 //      confirms fixes.
 // Nothing is exploited: HELIOS looks at what is exposed. Deeper tests run
 // in established scanners under the same authorisation, and their results
-// come in through the import.
+// come in through the import. The one active check is the AI red team
+// (check "ai"): it sends adversarial prompts to the client's own AI
+// applications, through their verified chat endpoints (lib/aisec/redteam).
 
 export interface TestActor {
   id: string;
@@ -57,6 +62,8 @@ export interface TestRequest {
   rulesOfEngagement: string;
   windowStart: Date;
   windowEnd: Date;
+  // The client's AI systems for the AI red team (check "ai").
+  aiSystems?: string[];
 }
 
 export async function requestTest(input: TestRequest, actor: TestActor, now = new Date()) {
@@ -64,15 +71,27 @@ export async function requestTest(input: TestRequest, actor: TestActor, now = ne
   const tenant = await db.tenant.findUniqueOrThrow({ where: { id: input.tenantId }, select: { id: true, name: true } });
   const title = input.title.trim();
   if (!title) throw new TestError("Give the test a name");
+  const checks = [...new Set(input.checks)].filter((c) => c in CHECKS);
+  if (!checks.length) throw new TestError("Pick at least one check");
+  // AI systems: their chat endpoints join the scope, proved like any other target.
+  let targetText = input.targets;
+  let aiSystems: string[] = [];
+  if (input.aiSystems?.length || checks.includes("ai")) {
+    const systems = await db.aiSystem.findMany({ where: { tenantId: tenant.id, id: { in: input.aiSystems ?? [] }, status: { not: "retired" } }, select: { id: true, name: true, endpoint: true } });
+    if (!systems.length) throw new TestError("Pick the AI systems to red-team (register them under AI Security, with their chat endpoint)");
+    const missing = systems.filter((x) => !x.endpoint);
+    if (missing.length) throw new TestError(`${missing.map((x) => x.name).join(", ")}: no chat endpoint yet; add it under AI Security`);
+    aiSystems = systems.map((x) => x.id);
+    if (!checks.includes("ai")) checks.push("ai");
+    targetText = `${input.targets} ${systems.map((x) => x.endpoint).join(" ")}`;
+  }
   let targets: ScopeTarget[];
   try {
-    targets = parseTargets(input.targets);
+    targets = parseTargets(targetText);
   } catch (err) {
     if (err instanceof ScopeError) throw new TestError(err.message);
     throw err;
   }
-  const checks = [...new Set(input.checks)].filter((c) => c in CHECKS);
-  if (!checks.length) throw new TestError("Pick at least one check");
   if (!input.rulesOfEngagement.trim()) throw new TestError("Write the rules of engagement: who to call, what's out of bounds, any times to avoid");
   if (!(input.windowEnd > input.windowStart)) throw new TestError("The window must end after it starts");
   if (input.windowStart.getTime() < now.getTime() - 3_600_000) throw new TestError("The window can't start in the past");
@@ -89,6 +108,7 @@ export async function requestTest(input: TestRequest, actor: TestActor, now = ne
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
       verifyToken: randomBytes(16).toString("hex"),
+      aiSystems,
       requestedById: actor.id,
       requestedByName: actor.name,
     },
@@ -215,10 +235,15 @@ export async function runTest(testId: string, net: Net) {
     if (new Date() >= t.windowEnd) return "the authorised window closed";
     return null;
   };
-  const { findings, probes, stopped } = await runExposureCheck(targets, { checks: test.checks as CheckKey[], net, shouldStop });
+  const exposure = await runExposureCheck(targets, { checks: test.checks as CheckKey[], net, shouldStop });
+  const ai = await runAiChecks(test, targets, net, shouldStop, exposure.stopped);
+  const stopped = exposure.stopped ?? ai.stopped;
+  const findings = [...exposure.findings, ...ai.findings];
+  const probes = [...exposure.probes, ...ai.probes];
   // Only what this run actually looked at can be confirmed fixed.
   const checked = new Set(targets.filter((t) => t.verified).flatMap((t) => [hostOf(t), ...t.addresses]));
-  const merged = mergeFindings(findingsOf(test), findings, (f) => !stopped && f.source === SOURCE && checked.has(f.target.toLowerCase()), new Date());
+  const aiChecked = new Set(ai.results.filter((r) => !r.skipped).map((r) => r.name));
+  const merged = mergeFindings(findingsOf(test), findings, (f) => !stopped && ((f.source === SOURCE && checked.has(f.target.toLowerCase())) || (f.source === AI_SOURCE && !!f.system && aiChecked.has(f.system))), new Date());
   const current = await db.securityTest.findUniqueOrThrow({ where: { id: testId }, select: { status: true } });
   await db.securityTest.update({
     where: { id: testId },
@@ -231,12 +256,13 @@ export async function runTest(testId: string, net: Net) {
       probes: json([...lost.map((t) => ({ at: new Date().toISOString(), target: t.value, check: "scope", result: `skipped: ${t.problem}` })), ...probes].slice(0, 2000)),
     },
   });
+  await syncAiResults(test.id, test.tenantId, merged, ai.results);
   const counts = severityCounts(merged);
-  await logAction({ action: "testing.finished", detail: { testId, probes: probes.length, findings: findings.length, open: counts, skipped: lost.map((t) => t.value), stopped } });
+  await logAction({ action: "testing.finished", detail: { testId, probes: probes.length, findings: findings.length, open: counts, skipped: lost.map((t) => t.value), stopped, ai: ai.results.map((r) => ({ system: r.name, attacks: r.attacks, bypassed: r.bypassed })) } });
   await notify([...(await clientAdmins(test.tenantId)), ...(await staffFor(["SOC_MANAGER"])), ...(test.requestedById ? [test.requestedById] : [])], {
     kind: "testing",
     title: `Security test report ready: ${test.title}`,
-    body: `${test.tenant.name}: ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low open${stopped ? ` (stopped: ${stopped})` : ""}${lost.length ? `; ${lost.length} target(s) skipped: proof no longer found` : ""}.`,
+    body: `${test.tenant.name}: ${counts.critical} critical, ${counts.high} high, ${counts.medium} medium, ${counts.low} low open${ai.results.length ? `; AI red team: ${ai.results.map((r) => `${r.name} ${r.bypassed} of ${r.attacks} attacks got through`).join(", ")}` : ""}${stopped ? ` (stopped: ${stopped})` : ""}${lost.length ? `; ${lost.length} target(s) skipped: proof no longer found` : ""}.`,
     href: `/testing/${test.id}`,
     actorName: "HELIOS",
   });
@@ -282,7 +308,65 @@ export async function setFindingStatus(testId: string, findingId: string, status
   if (!f) throw new TestError("Not found");
   const next = fs.map((x) => (x.id === findingId ? { ...x, status, statusNote: note.trim().slice(0, 1000) || null } : x));
   await db.securityTest.update({ where: { id: testId }, data: { findings: json(next) } });
+  if (f.source === AI_SOURCE) await syncAiResults(testId, test.tenantId, next, null);
   await logAction({ actorId: actor.id, action: "testing.finding_status", detail: { testId, findingId, title: f.title, target: f.target, from: f.status, to: status, note: note.trim() || null } });
 }
 
 export { verifyRecord };
+
+// ---------------------------------------------------------------- AI red team
+
+type Probe = { at: string; target: string; check: string; result: string };
+
+async function runAiChecks(test: SecurityTest, targets: ScopeTarget[], net: Net, shouldStop: () => Promise<string | null>, stoppedAlready: string | null) {
+  const none = { findings: [] as TestFinding[], probes: [] as Probe[], results: [] as SystemResult[], stopped: null as string | null };
+  if (!test.checks.includes("ai") || !test.aiSystems.length || stoppedAlready) return none;
+  const at = () => new Date().toISOString();
+  const skipped: Probe[] = [];
+  const systems = await db.aiSystem.findMany({ where: { tenantId: test.tenantId, id: { in: test.aiSystems } } });
+  const chat: ChatTarget[] = [];
+  for (const s of systems) {
+    if (!s.endpoint) {
+      skipped.push({ at: at(), target: s.name, check: "ai", result: "skipped: no chat endpoint" });
+      continue;
+    }
+    const host = new URL(s.endpoint).hostname.toLowerCase();
+    // Only an endpoint whose host this test proved is the client's.
+    if (!inScope(targets, host)) {
+      skipped.push({ at: at(), target: host, check: "ai", result: `${s.name}: skipped: ${host} isn't a verified target of this test` });
+      continue;
+    }
+    const headers = s.authHeader && s.authCipher ? { [s.authHeader]: await openSealed(s.authCipher) } : {};
+    chat.push({ systemId: s.id, name: s.name, endpoint: s.endpoint, format: s.endpointFormat === "json" ? "json" : "openai", model: s.endpointModel, template: s.requestTemplate, responsePath: s.responsePath, headers, canary: s.canary, topics: readPolicy(s.policy).topics.blocked });
+  }
+  if (!chat.length) return { ...none, probes: skipped };
+  if (!net.post) return { ...none, probes: [...skipped, { at: at(), target: "-", check: "ai", result: "skipped: this runner can't send requests to AI endpoints" }] };
+  const post = net.post.bind(net);
+  const r = await runAiRedTeam(chat, { net: { post }, shouldStop, delayMs: Number(process.env.HELIOS_AI_REDTEAM_DELAY_MS ?? 500) });
+  return { ...r, probes: [...skipped, ...r.probes] };
+}
+
+// Each AI system's latest red-team result, with what's still open per OWASP category.
+async function syncAiResults(testId: string, tenantId: string, findings: TestFinding[], results: SystemResult[] | null) {
+  const openFor = (name: string) => {
+    const out: Record<string, number> = {};
+    for (const f of findings) if (f.source === AI_SOURCE && f.system === name && f.status === "open") for (const o of f.owasp ?? []) out[o] = (out[o] ?? 0) + 1;
+    return out;
+  };
+  if (results) {
+    for (const r of results.filter((x) => !x.skipped)) {
+      const open = openFor(r.name);
+      const categories = Object.fromEntries(Object.entries(r.categories).map(([k, v]) => [k, { ...v, open: open[k] ?? 0 }]));
+      await db.aiSystem.updateMany({ where: { id: r.systemId, tenantId }, data: { redTeam: json({ ...r, testId, categories }), redTeamAt: new Date(r.at) } });
+    }
+    return;
+  }
+  const systems = await db.aiSystem.findMany({ where: { tenantId }, select: { id: true, name: true, redTeam: true } });
+  for (const s of systems) {
+    const rt = s.redTeam as unknown as (SystemResult & { testId?: string }) | null;
+    if (!rt || rt.testId !== testId) continue;
+    const open = openFor(s.name);
+    const categories = Object.fromEntries(Object.entries(rt.categories ?? {}).map(([k, v]) => [k, { ...v, open: open[k] ?? 0 }]));
+    await db.aiSystem.update({ where: { id: s.id }, data: { redTeam: json({ ...rt, categories }) } });
+  }
+}

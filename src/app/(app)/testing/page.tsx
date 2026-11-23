@@ -19,9 +19,10 @@ import { TestStatusBadge } from "@/components/testing/status-badge";
 // written authorisation from both the client and HELIOS.
 export default async function TestingPage() {
   const user = await pageGuard("testing.view");
-  const [tests, tenants] = await Promise.all([
+  const [tests, tenants, aiSystems] = await Promise.all([
     dbFor(user).securityTest.findMany({ where: user.isClient ? { tenantId: user.tenantId ?? "__none__" } : {}, include: { tenant: { select: { name: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
     user.isClient ? Promise.resolve([]) : db.tenant.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    dbFor(user).aiSystem.findMany({ where: { ...(user.isClient ? { tenantId: user.tenantId ?? "__none__" } : {}), status: { not: "retired" } }, select: { id: true, name: true, tenantId: true, endpoint: true }, orderBy: { name: "asc" } }),
   ]);
   return (
     <div className="flex flex-col gap-6">
@@ -30,11 +31,11 @@ export default async function TestingPage() {
           <p className="flex items-center gap-2 text-sm text-muted-foreground"><ShieldCheck className="size-4" /> Authorised by {user.isClient ? "you" : "the client"} and HELIOS, on assets {user.isClient ? "you" : "the client"} proved {user.isClient ? "you" : "it"} control{user.isClient ? "" : "s"}</p>
           <h2 className="text-xl font-semibold tracking-tight">Security testing</h2>
         </div>
-        {can(user, "testing.request") && <RequestTestForm tenants={tenants} isClient={user.isClient} checks={{ ...CHECKS }} />}
+        {can(user, "testing.request") && <RequestTestForm tenants={tenants} isClient={user.isClient} checks={{ ...CHECKS }} aiSystems={aiSystems} />}
       </div>
       <Card>
         <CardContent className="flex flex-col divide-y">
-          {tests.length === 0 && <EmptyState icon={ShieldCheck} title="No security tests yet" description="Ask for one: HELIOS checks what your internet-facing assets expose (services, TLS, web headers, email spoofing protection) and reports what to fix. Results from Nessus, Greenbone, ZAP or Nuclei can be added to the same report." />}
+          {tests.length === 0 && <EmptyState icon={ShieldCheck} title="No security tests yet" description="Ask for one: HELIOS checks what your internet-facing assets expose (services, TLS, web headers, email spoofing protection), red-teams your AI applications, and reports what to fix. Results from Nessus, Greenbone, ZAP or Nuclei can be added to the same report." />}
           {tests.map((t) => {
             const c = severityCounts(findingsOf(t));
             return (

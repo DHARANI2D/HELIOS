@@ -90,6 +90,19 @@ A client (or the SOC for a client) can ask HELIOS to test the client's own inter
 
 Scanner reports are read with a small XML reader that never resolves DTDs or external entities.
 
+## AI Security: guard, gateway and red team for the AI clients run
+
+Clients' chatbots, agents and RAG applications are an attack surface of their own. **AI Security** (`lib/aisec`, guide in [`docs/ai-security.md`](docs/ai-security.md)) secures them from before launch to every request:
+
+- **AI systems**: each one registered with what it does, the data it handles and the tools it may call. It starts with a guard policy for its data (baseline plus privacy, healthcare, finance or IT packs) and gets a key (`hgs_…`) its application calls HELIOS with.
+- **Runtime guard** (`POST /api/v1/ai/guard`): the application checks each step (what a person types, the documents it is about to read, a tool call, a tool's result, its answer) and does what HELIOS says: allow, watch (allow and record), redact (use the masked version) or block. It catches prompt injection (typed, or hidden in documents and tool results, encoded or in hidden characters), jailbreaks, requests for the system prompt, a planted canary that proves a leak, personal data (checksummed where the format has one: cards, Aadhaar, IBAN), credentials, scripts and data-carrying images in answers, ruled-out topics, unlisted tools (deny by default), tool arguments outside their rules, risky actions that need the person's confirmation, tools outside the agent's declared task, and documents the person's roles don't allow. Monitor mode decides the same and blocks nothing. Every decision is a security event (Explore: `platform:helios-ai-guard`) with an Ed25519-signed receipt anyone can check (`/api/v1/ai/receipts`).
+- **AI gateway** (`POST /api/v1/ai/gateway/chat/completions`, OpenAI-compatible): the application sends its model calls through HELIOS, which holds the provider key (sealed with the client's key), masks personal data with placeholders before the request leaves and restores it in the answer, and checks the prompt, the answer and each tool call the model asks for.
+- **AI red team**: a check in **Security testing**, under the same proof of control and dual authorisation. HELIOS sends adversarial prompts to the system's chat endpoint (injection, fake system messages, jailbreak personas, system prompt extraction, requests for other people's data and credentials, scripts and tracking images, unconfirmed actions, made-up facts, enormous answers, the client's ruled-out topics). When the AI refuses, it tries the same goal in other forms (base64, role-play, hypothetical, split up, another language, fake examples, false authority) and reports the form that worked. Payloads are harmless codes and the canary. Findings map to the OWASP Top 10 for LLM applications (2025) and MITRE ATLAS, and become guard settings in one click.
+- **Cases**: a leaked system prompt or credential, a data-carrying image, instructions planted in documents or tool results, an agent steered off its task, and five blocked attacks from one person in ten minutes open a case for the SOC (one per system, detections deduplicated by the hour).
+- **Posture**: the OWASP Top 10 for LLMs across a client's systems (protected, tested, partly, gap), and where HELIOS records evidence for the NIST AI RMF, ISO/IEC 42001 and the EU AI Act. Evidence, not certification.
+
+Personal data is masked, not encrypted for computation: HELIOS sees prompts in clear while it checks them, and keeps only verdicts and a masked excerpt unless the client turns on content retention (sealed with its own key; each opening is audited). Detection is pattern-based: it stops the common forms of each attack, and the red team is how a client learns what still gets through.
+
 ## User guides
 
 [`docs/HELIOS-brochure.pdf`](docs/HELIOS-brochure.pdf) is the 17-page product brochure, to give to clients and partners. It covers:
@@ -194,7 +207,8 @@ This loads the data the user guides and the brochure were made with, for exercis
 - one account per role under the reserved `.test` domain;
 - vendor alerts and attack telemetry from the fixtures in `src/lib/__tests__/fixtures`, pushed through the real ingest, detection and AI first-response pipeline, plus every attack scenario, a log investigation and email and file forensics;
 - a governed test agent driven through the real governance gate;
-- each client's rulebook in force after both approvals, a rule change waiting for them, HELIOS's final analysis on each client's worst case, saved searches in Explore, and two security tests (`prisma/seed-demos.ts`).
+- each client's rulebook in force after both approvals, a rule change waiting for them, HELIOS's final analysis on each client's worst case, saved searches in Explore, and two security tests;
+- AI Security: a chatbot and a records search for the Clinic, an order-support agent for Retail, a day of guard decisions with the cases they opened, and an AI red-team test of the Clinic's chatbot against a simulated chatbot (`prisma/seed-demos.ts`).
 
 It's safe to run again: it adds only what's missing, so on an older test database it brings the test data up to date. On a Mac, `./helios.sh test-data` does the same for the container setup.
 
@@ -235,6 +249,9 @@ CI (`.github/workflows/ci.yml`) runs:
 |---|---|---|
 | `POST /api/ingest/<integrationId>` | Bearer ingest token (shown once at onboarding) | A client tool or the HELIOS forwarder pushes alerts, telemetry or inventory in its own format, plain or `Content-Encoding: gzip`; answered 202 with a batch id once queued (429 with Retry-After when the client's queue is full). Inventory rows can carry `assetClass` and `assetType` (e.g. `network`/`firewall`, `iot_ot`/`plc`) |
 | `POST /api/governance/evaluate` | Bearer agent token (shown once at identity issue) | A governed AI agent asks before acting |
+| `POST /api/v1/ai/guard` | Bearer AI system key (`hgs_…`, shown once on the system's page) | A client's AI application checks a prompt, documents, a tool call, a tool result or an answer |
+| `POST /api/v1/ai/gateway/chat/completions` | Bearer AI system key | OpenAI-compatible model calls through HELIOS, checked both ways, personal data masked before the provider |
+| `GET`, `POST /api/v1/ai/receipts` | — | The public key guard receipts are signed with; check a receipt |
 | `GET /api/threat-intel/blocklist` | — | Plain-text blocklist for firewalls to pull |
 | `GET /api/health` | — | Liveness and database check |
 | `/` (signed out), `/home`, `/estimate` | — | The public website and estimator. Its two Server Actions (AI suggestion, quote request) are rate-limited per visitor; AI answers share a daily budget |

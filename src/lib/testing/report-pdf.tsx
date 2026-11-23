@@ -6,6 +6,7 @@ import { Bullets, DataTable, KeyValues, Paragraph, PdfDocument, Section, Stats, 
 import { CHECKS, type CheckKey } from "@/lib/testing/exposure";
 import { SEVERITIES, SEVERITY_RANK, severityCounts, type TestFinding } from "@/lib/testing/findings";
 import type { ScopeTarget } from "@/lib/testing/scope";
+import { OWASP_LLM } from "@/lib/aisec/frameworks";
 
 // The security test report: who authorised what, what was in scope, what
 // was found (worst first) with evidence and how to fix it, and what was
@@ -24,6 +25,16 @@ export function SecurityTestPdf({ test, tenantName, company }: { test: SecurityT
   const imports = (test.imports as unknown as Import[] | null) ?? [];
   const probes = (test.probes as unknown as Probe[] | null) ?? [];
   const detailed = open.filter((f) => f.severity !== "info").slice(0, 60);
+  // The AI red team's last run, from its probes ("ai/LLM01", result "GOT THROUGH" or not).
+  const aiProbes = probes.filter((p) => p.check.startsWith("ai/"));
+  const aiRows = OWASP_LLM.flatMap((o) => {
+    const ps = aiProbes.filter((p) => p.check === `ai/${o.id}`);
+    if (!ps.length) return [];
+    const attacks = new Set(ps.map((p) => p.result.replace(/ \([^)]*\):.*$/, ""))).size;
+    const through = ps.filter((p) => p.result.endsWith("GOT THROUGH")).length;
+    const openN = open.filter((f) => f.owasp?.includes(o.id)).length;
+    return [[`${o.id} ${o.name}`, attacks, through, openN] as Array<string | number>];
+  });
 
   return (
     <PdfDocument title={`Security test report: ${test.title}`} subtitle={`${tenantName} · ${pdfDate(test.windowStart)} to ${pdfDate(test.windowEnd)} UTC`} docLabel="Security test report" company={company}>
@@ -70,7 +81,7 @@ export function SecurityTestPdf({ test, tenantName, company }: { test: SecurityT
             { label: "Source", width: "14%" },
             { label: "Status", width: "10%" },
           ]}
-          rows={findings.filter((f) => f.severity !== "info").map((f) => [SEV_LABEL[f.severity], f.title, `${f.target}${f.port ? `:${f.port}` : ""}`, f.source, f.status])}
+          rows={findings.filter((f) => f.severity !== "info").map((f) => [SEV_LABEL[f.severity], f.owasp?.length ? `${f.title} (${f.owasp.join(", ")})` : f.title, `${f.target}${f.port ? `:${f.port}` : ""}`, f.source, f.status])}
           empty="Nothing found beyond information."
         />
       </Section>
@@ -92,6 +103,21 @@ export function SecurityTestPdf({ test, tenantName, company }: { test: SecurityT
       {findings.some((f) => f.status !== "open") && (
         <Section title="Fixed and accepted">
           <Bullets items={findings.filter((f) => f.status !== "open").map((f) => `${f.status === "fixed" ? "Fixed" : "Accepted"}: ${f.title} (${f.target}${f.port ? `:${f.port}` : ""})${f.statusNote ? `. ${f.statusNote}` : ""}`)} />
+        </Section>
+      )}
+
+      {aiRows.length > 0 && (
+        <Section title="AI red team (OWASP Top 10 for LLM applications)">
+          <DataTable
+            columns={[
+              { label: "Category", width: "52%" },
+              { label: "Attacks", width: "16%", align: "right" },
+              { label: "Got through", width: "16%", align: "right" },
+              { label: "Open", width: "16%", align: "right" },
+            ]}
+            rows={aiRows}
+          />
+          <Paragraph muted>{"Adversarial prompts sent to each AI system's verified chat endpoint in the last run. When the AI refused, HELIOS tried the same goal in other forms (encoded, role-play, split, another language, false authority) before giving up. Payloads were harmless codes and markers."}</Paragraph>
         </Section>
       )}
 

@@ -19,6 +19,9 @@ const ENDPOINTS: Array<{ method: string; path: string; what: string; needs: stri
   { method: "GET", path: "/api/v1/indicators?value=203.0.113.7", what: "Indicator reputation from the shared store (&refresh=1 asks the providers)", needs: "intel.view" },
   { method: "GET", path: "/api/v1/events?q=type:LOGIN_FAIL user:alice&range=24h", what: "Search the logs with the Explore query language, newest first (&cursor= for the next page, &facets=1 for top values, &tenant= for staff)", needs: "events.search" },
   { method: "GET", path: "/api/v1/metrics?range=30d", what: "Service metrics as on the Reports page (or &month=YYYY-MM)", needs: "reports.view" },
+  { method: "POST", path: "/api/v1/ai/guard", what: '{"stage":"prompt|retrieval|tool_call|tool_output|output","content":"…","tool":{"name":"…","args":{}},"documents":[…],"user":{"id":"…","roles":[]}} → decision, action, findings, masked content, signed receipt', needs: "an AI system's key (hgs_…, AI Security), not a personal token" },
+  { method: "POST", path: "/api/v1/ai/gateway/chat/completions", what: "The OpenAI chat-completions request and answer, through HELIOS: prompt, answer and tool calls checked, personal data masked before the provider", needs: "an AI system's key (hgs_…) and a provider set up on the system" },
+  { method: "GET", path: "/api/v1/ai/receipts", what: "The public key guard receipts are signed with (Ed25519); POST a receipt to check it", needs: "nothing" },
 ];
 
 async function origin() {

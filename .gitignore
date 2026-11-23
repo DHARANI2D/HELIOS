@@ -14,6 +14,8 @@ build/
 coverage/
 .pytest_cache/
 *.log
+# A test fixture (the ZIP reader tests compare against it), not a log.
+!src/lib/__tests__/fixtures/archives/notes.log
 *.pem
 .vercel
 # Local databases (the legacy apps' SQLite dev DBs are generated, not source)

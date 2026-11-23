@@ -22,6 +22,11 @@ export interface TestFinding {
   statusNote: string | null;
   firstSeen: string;
   lastSeen: string;
+  // AI red team (lib/aisec/redteam): the AI system, and the OWASP Top 10
+  // for LLM applications and MITRE ATLAS references.
+  system?: string;
+  owasp?: string[];
+  atlas?: string[];
 }
 
 export type NewFinding = Omit<TestFinding, "id" | "status" | "statusNote" | "firstSeen" | "lastSeen">;

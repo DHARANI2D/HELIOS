@@ -86,19 +86,27 @@ const keyIdOf = (sealed: string | null) => (sealed?.startsWith("v2.") ? sealed.s
 
 // Every sealed credential that belongs to a client.
 async function clientSecrets(tenantId?: string) {
-  const [integrations, providers] = await Promise.all([
+  const [integrations, providers, aiSystems] = await Promise.all([
     db.integration.findMany({ where: { tenantId: tenantId ?? { not: null }, secretCipher: { not: null } }, select: { id: true, tenantId: true, secretCipher: true } }),
     db.aiProvider.findMany({ where: { tenantId: tenantId ?? { not: null }, apiKeyCipher: { not: null } }, select: { id: true, tenantId: true, apiKeyCipher: true } }),
+    // AI systems' endpoint credentials and model-provider keys (lib/aisec).
+    db.aiSystem.findMany({ where: { ...(tenantId ? { tenantId } : {}), OR: [{ authCipher: { not: null } }, { upstreamCipher: { not: null } }] }, select: { id: true, tenantId: true, authCipher: true, upstreamCipher: true } }),
   ]);
   return [
     ...integrations.map((i) => ({ kind: "integration" as const, id: i.id, tenantId: i.tenantId!, sealed: i.secretCipher! })),
     ...providers.map((p) => ({ kind: "provider" as const, id: p.id, tenantId: p.tenantId!, sealed: p.apiKeyCipher! })),
+    ...aiSystems.flatMap((s) => [
+      ...(s.authCipher ? [{ kind: "ai-endpoint" as const, id: s.id, tenantId: s.tenantId, sealed: s.authCipher }] : []),
+      ...(s.upstreamCipher ? [{ kind: "ai-upstream" as const, id: s.id, tenantId: s.tenantId, sealed: s.upstreamCipher }] : []),
+    ]),
   ];
 }
 
 async function reseal(item: Awaited<ReturnType<typeof clientSecrets>>[number], sealed: string) {
   if (item.kind === "integration") await db.integration.update({ where: { id: item.id }, data: { secretCipher: sealed } });
-  else await db.aiProvider.update({ where: { id: item.id }, data: { apiKeyCipher: sealed } });
+  else if (item.kind === "provider") await db.aiProvider.update({ where: { id: item.id }, data: { apiKeyCipher: sealed } });
+  else if (item.kind === "ai-endpoint") await db.aiSystem.update({ where: { id: item.id }, data: { authCipher: sealed } });
+  else await db.aiSystem.update({ where: { id: item.id }, data: { upstreamCipher: sealed } });
 }
 
 // Moves clients' credentials still sealed with the master key onto their own keys.
@@ -139,6 +147,7 @@ export async function destroyTenantKeys(tenantId: string, actorId: string) {
   for (const k of keys) cache.delete(k.id);
   await db.integration.updateMany({ where: { tenantId }, data: { secretCipher: null } });
   await db.aiProvider.updateMany({ where: { tenantId }, data: { apiKeyCipher: null } });
+  await db.aiSystem.updateMany({ where: { tenantId }, data: { authCipher: null, upstreamCipher: null } });
   await logAction({ actorId, action: "keys.tenant_keys_destroyed", detail: { tenantId, name: tenant.name, keys: keys.length } });
   return { destroyed: keys.length };
 }

@@ -6,6 +6,7 @@ import {
   ArrowRight,
   BellRing,
   Bot,
+  BrainCircuit,
   Calculator,
   Check,
   Cloud,
@@ -18,6 +19,7 @@ import {
   ScrollText,
   ShieldCheck,
   Sparkles,
+  Swords,
   UserCheck,
   Users,
   Workflow,
@@ -28,6 +30,7 @@ import { CONTROLS } from "@/lib/endpoints/controls";
 import { ASSET_CLASSES } from "@/lib/assets/surface";
 import { capabilityName } from "@/lib/assets/capabilities";
 import { AGENT_TYPES, AGENT_KEYS } from "@/lib/ai/catalog";
+import { OWASP_LLM } from "@/lib/aisec/frameworks";
 import { PLAN_FEATURES, PLAN_FEATURE_LABEL, formatMinutes } from "@/lib/plans";
 import { formatMoney } from "@/lib/pricing/calculator";
 import { ROLES, ROLE_ORDER } from "@/lib/rbac";
@@ -45,6 +48,19 @@ const STEPS = [
   { icon: Bot, title: "AI first response", body: "An AI agent triages every new alert the moment it lands: verdict, confidence, the evidence behind it, and the containment it recommends, within the autonomy you allow." },
   { icon: UserCheck, title: "Analysts investigate", body: "A human analyst does the primary analysis on every case, confirms or overrides the AI, contains the threat and escalates to incident response when needed." },
   { icon: FileCheck2, title: "You stay in control", body: "Your portal shows every case and what was done about it. Your admins can approve containment on your estate, AI never acts beyond the autonomy you consent to, and monthly service reports are a click away." },
+];
+
+const AI_SECURITY = [
+  { icon: ShieldCheck, title: "Runtime guard", body: "Every step your chatbot or agent takes is checked against its policy: what people type, the documents it reads, the tools it calls, and its answers. Prompt injection and jailbreaks are blocked, personal data and credentials masked, risky tool actions held for the person's confirmation. Each decision carries a signed receipt." },
+  { icon: Lock, title: "AI gateway", body: "One OpenAI-compatible endpoint for all your model calls. We hold the provider keys, mask personal data before it leaves for the provider and put it back in the answer, and check both directions. Your application changes one URL." },
+  { icon: Swords, title: "AI red team", body: "Under your written authorisation, we attack your AI the way an attacker would: injection, jailbreaks, system prompt extraction, data leaks, unsafe output. When it refuses, we try other forms of the same attack. You get what got through, mapped to the OWASP Top 10 for LLMs and MITRE ATLAS." },
+];
+
+const AI_FLOW = [
+  { title: "Register", body: "Each AI system: what it does, the data it handles, the tools it may use. It starts with a policy for its industry." },
+  { title: "Red-team before launch", body: "We test it under your authorisation and turn each finding into a guard setting, in one click." },
+  { title: "Guard at runtime", body: "Enforcing, or monitor mode first to see what the policy would do. Every change is a new version." },
+  { title: "Our SOC watches", body: "Leaks, poisoned documents, agents steered off their task and sustained attacks open a case, worked like any other incident." },
 ];
 
 const TRUST = [
@@ -241,6 +257,49 @@ export default async function HomePage() {
                 <p className="mt-1 text-xs text-muted-foreground">{AGENT_TYPES[k].description}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Security for the AI you run */}
+      <section id="ai-security" className="scroll-mt-16 border-b bg-muted/20">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <SectionHeading
+            eyebrow="Security for the AI you run"
+            title="Guard, test and watch your chatbots and AI agents"
+            body="The AI applications you put in front of customers and staff are a new attack surface: people try to talk them out of their rules, plant instructions in the documents they read, and trick agents into actions nobody asked for. We secure them from before launch to every request in production."
+          />
+          <div className="mt-10 grid gap-4 md:grid-cols-3">
+            {AI_SECURITY.map((o) => (
+              <div key={o.title} className="flex flex-col gap-2 rounded-xl border bg-card p-5">
+                <o.icon className="size-5 text-primary" />
+                <h3 className="font-semibold">{o.title}</h3>
+                <p className="text-sm text-muted-foreground">{o.body}</p>
+              </div>
+            ))}
+          </div>
+          <ol className="mt-8 grid gap-3 md:grid-cols-4">
+            {AI_FLOW.map((s, i) => (
+              <li key={s.title} className="rounded-lg border bg-card p-4">
+                <p className="text-xs font-medium text-muted-foreground">Step {i + 1}</p>
+                <p className="mt-1 text-sm font-medium">{s.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{s.body}</p>
+              </li>
+            ))}
+          </ol>
+          <div className="mt-8 rounded-xl border bg-card p-5">
+            <p className="flex items-center gap-2 text-sm font-medium"><BrainCircuit className="size-4 text-chart-4" /> The OWASP Top 10 for LLM applications, and what we do about each</p>
+            <ul className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+              {OWASP_LLM.map((o) => (
+                <li key={o.id} className="flex items-start gap-2 text-xs">
+                  <span className="mt-0.5 w-12 shrink-0 font-mono text-muted-foreground">{o.id}</span>
+                  <span>
+                    <span className="font-medium">{o.name}</span>
+                    <span className="text-muted-foreground"> · {[o.test ? "red-teamed" : null, o.guard ? "guarded at runtime" : null].filter(Boolean).join(", ") || (o.id === "LLM04" ? "poisoned documents caught when your AI reads them" : "models and providers recorded in your AI inventory")}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </section>

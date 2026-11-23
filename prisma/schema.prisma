@@ -205,6 +205,7 @@ model Tenant {
   caseReports   CaseReport[]
   savedSearches SavedSearch[]
   securityTests SecurityTest[]
+  aiSystems     AiSystem[]
   keys          TenantKey[]
   notices       RegulatoryNotice[]
   tunings       DetectionTuning[]
@@ -411,6 +412,7 @@ enum DetectionSource {
   EMAIL_SANDBOX_DETONATION
   VENDOR_ALERT // raised by an onboarded tool (EDR, identity, email gateway)
   SIGMA_RULE // an imported Sigma rule (lib/detections)
+  AI_GUARD // a client's AI application, from its guard decisions (lib/aisec)
 }
 
 model Detection {
@@ -2086,6 +2088,8 @@ model SecurityTest {
   findings               Json?
   // Scanner reports brought in: tool, file, who, when, kept, out of scope.
   imports                Json?
+  // The client's AI systems the AI red team checks (check "ai").
+  aiSystems              String[]  @default([])
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
@@ -2094,4 +2098,84 @@ model SecurityTest {
   @@index([tenantId, createdAt])
   @@index([status, windowStart])
   @@map("security_tests")
+}
+
+// An AI application a client runs (a chatbot, an agent, a RAG app, a model
+// API), registered so HELIOS can guard it at runtime (the guard API and the
+// AI gateway), red-team it under a security test, and show where it stands
+// against the OWASP Top 10 for LLM applications (lib/aisec).
+model AiSystem {
+  id              String    @id @default(cuid())
+  tenantId        String
+  name            String
+  // CHATBOT | AGENT | RAG | MODEL_API
+  kind            String
+  description     String?   @db.Text
+  owner           String?
+  // What it handles: pii, phi, pci, secrets, source_code, internal.
+  dataClasses     String[]
+  // Its chat endpoint, for the red team: an https URL and how to call it
+  // (openai: chat completions; json: requestTemplate with {{prompt}}, the
+  // answer at responsePath).
+  endpoint        String?
+  endpointFormat  String    @default("openai")
+  endpointModel   String?
+  requestTemplate String?   @db.Text
+  responsePath    String?
+  // A header the endpoint needs: its name, and the value sealed with the client's key.
+  authHeader      String?
+  authCipher      String?
+  // The AI gateway: an OpenAI-compatible upstream, its key sealed.
+  upstreamUrl     String?
+  upstreamModel   String?
+  upstreamCipher  String?
+  // Mask personal data before it reaches the upstream model.
+  privacyMode     Boolean   @default(true)
+  // Keep prompts and answers, sealed with the client's key (off: only verdicts).
+  retainContent   Boolean   @default(false)
+  // GuardPolicy (lib/aisec/policy), the version in force, and the mode.
+  policy          Json
+  policyVersion   Int       @default(1)
+  // enforce | monitor
+  mode            String    @default("enforce")
+  // Planted in the system prompt: seen in an answer, the prompt leaked.
+  canary          String
+  // The key the application calls the guard and the gateway with (hash only).
+  keyHash         String?   @unique
+  keyPrefix       String?
+  // active | paused | retired
+  status          String    @default("active")
+  // The last red-team result per OWASP category (lib/aisec/redteam).
+  redTeam         Json?
+  redTeamAt       DateTime?
+  lastSeenAt      DateTime?
+  createdByName   String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  versions AiPolicyVersion[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("ai_systems")
+}
+
+// Every guard policy an AI system has had: what changed, why, who.
+model AiPolicyVersion {
+  id        String   @id @default(cuid())
+  systemId  String
+  tenantId  String
+  version   Int
+  policy    Json
+  mode      String
+  reason    String   @db.Text
+  byName    String
+  createdAt DateTime @default(now())
+
+  system AiSystem @relation(fields: [systemId], references: [id], onDelete: Cascade)
+
+  @@unique([systemId, version])
+  @@index([tenantId])
+  @@map("ai_policy_versions")
 }

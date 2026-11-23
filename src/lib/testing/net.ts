@@ -78,4 +78,26 @@ export const liveNet: Net = {
     await res.body?.cancel().catch(() => undefined);
     return { status: res.status, headers: Object.fromEntries([...res.headers.entries()].map(([k, v]) => [k.toLowerCase(), v])) };
   },
+  // The AI red team: one chat request to the client's verified endpoint.
+  // https only, public addresses only, no redirects, the answer capped.
+  async post(url, body, headers, timeoutMs) {
+    const u = new URL(url);
+    if (u.protocol !== "https:") return null;
+    const addrs = await this.addresses(u.hostname);
+    if (!addrs.length || addrs.some(isPrivateAddress)) return null;
+    const res = await fetch(u, { method: "POST", body, headers, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) });
+    const reader = res.body?.getReader();
+    let text = "";
+    const decoder = new TextDecoder();
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (text.length > 400_000) {
+        await reader.cancel().catch(() => undefined);
+        break;
+      }
+    }
+    return { status: res.status, text };
+  },
 };

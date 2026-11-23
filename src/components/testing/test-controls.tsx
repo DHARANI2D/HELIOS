@@ -18,7 +18,22 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 
 const toLocalInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
-export function RequestTestForm({ tenants, isClient, checks }: { tenants: Array<{ id: string; name: string }>; isClient: boolean; checks: Record<string, string> }) {
+export interface AiSystemOption {
+  id: string;
+  name: string;
+  tenantId: string;
+  endpoint: string | null;
+}
+
+export interface TestDefaults {
+  tenantId?: string;
+  title?: string;
+  targets?: string;
+  checks?: CheckKey[];
+  aiSystems?: string[];
+}
+
+export function RequestTestForm({ tenants, isClient, checks, aiSystems = [], defaults, trigger }: { tenants: Array<{ id: string; name: string }>; isClient: boolean; checks: Record<string, string>; aiSystems?: AiSystemOption[]; defaults?: TestDefaults; trigger?: React.ReactNode }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
   const [form, setForm] = React.useState(() => {
@@ -26,18 +41,22 @@ export function RequestTestForm({ tenants, isClient, checks }: { tenants: Array<
     const start = new Date(Date.now() + 86_400_000);
     start.setMinutes(0, 0, 0);
     return {
-      tenantId: tenants[0]?.id ?? "",
-      title: "",
-      targets: "",
-      checks: Object.keys(checks) as CheckKey[],
+      tenantId: defaults?.tenantId ?? tenants[0]?.id ?? "",
+      title: defaults?.title ?? "",
+      targets: defaults?.targets ?? "",
+      // The AI red team only when asked for: it needs AI systems picked.
+      checks: defaults?.checks ?? (Object.keys(checks).filter((c) => c !== "ai") as CheckKey[]),
+      aiSystems: defaults?.aiSystems ?? ([] as string[]),
       rulesOfEngagement: "Contact during the test: \nOut of bounds: \nAvoid these times: ",
       windowStart: toLocalInput(start),
       windowEnd: toLocalInput(new Date(start.getTime() + 7 * 86_400_000)),
     };
   });
   const set = (k: keyof typeof form, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
+  const aiOn = form.checks.includes("ai");
+  const systems = aiSystems.filter((s) => isClient || s.tenantId === form.tenantId);
   const submit = useMutation({
-    mutationFn: () => unwrap(requestTestAction({ ...form, windowStart: new Date(form.windowStart).toISOString(), windowEnd: new Date(form.windowEnd).toISOString() })),
+    mutationFn: () => unwrap(requestTestAction({ ...form, aiSystems: aiOn ? form.aiSystems.filter((id) => systems.some((s) => s.id === id)) : [], windowStart: new Date(form.windowStart).toISOString(), windowEnd: new Date(form.windowEnd).toISOString() })),
     onSuccess: ({ id }) => {
       toast.success("Requested. Next: verify the targets and authorise it.");
       setOpen(false);
@@ -45,10 +64,11 @@ export function RequestTestForm({ tenants, isClient, checks }: { tenants: Array<
     },
     onError: (err: Error) => toast.error(err.message),
   });
+  const hasScope = !!form.targets.trim() || (aiOn && form.aiSystems.length > 0);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button><ShieldCheck /> Request a test</Button>
+        {trigger ?? <Button><ShieldCheck /> Request a test</Button>}
       </DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
@@ -73,7 +93,7 @@ export function RequestTestForm({ tenants, isClient, checks }: { tenants: Array<
           <div className="grid gap-1.5">
             <Label htmlFor="t-targets">Targets</Label>
             <Textarea id="t-targets" value={form.targets} onChange={(e) => set("targets", e.target.value)} rows={3} className="font-mono text-xs" placeholder={"example.com\nvpn.example.com\n203.0.113.10\nhttps://portal.example.com"} />
-            <p className="text-xs text-muted-foreground">Domains, host names, public IP addresses or URLs, up to 25. No ranges, no private addresses.</p>
+            <p className="text-xs text-muted-foreground">Domains, host names, public IP addresses or URLs, up to 25. No ranges, no private addresses.{aiOn ? " The chat endpoints of the AI systems you pick are added for you." : ""}</p>
           </div>
           <div className="grid gap-1.5">
             <Label>Checks</Label>
@@ -84,6 +104,25 @@ export function RequestTestForm({ tenants, isClient, checks }: { tenants: Array<
               </label>
             ))}
           </div>
+          {aiOn && (
+            <div className="grid gap-1.5 rounded-md border p-3">
+              <Label>AI systems to red-team</Label>
+              {systems.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No AI systems registered for this client yet: add them under AI Security, with their chat endpoint.</p>
+              ) : (
+                systems.map((s) => (
+                  <label key={s.id} className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" className="mt-1" disabled={!s.endpoint} checked={form.aiSystems.includes(s.id)} onChange={(e) => set("aiSystems", e.target.checked ? [...form.aiSystems, s.id] : form.aiSystems.filter((x) => x !== s.id))} />
+                    <span>
+                      {s.name}
+                      <span className="block font-mono text-[11px] text-muted-foreground">{s.endpoint ?? "No chat endpoint yet (set it under AI Security)"}</span>
+                    </span>
+                  </label>
+                ))
+              )}
+              <p className="text-xs text-muted-foreground">HELIOS sends adversarial prompts (injection, jailbreaks, leak attempts, unsafe-output requests) to each endpoint, a few at a time, and reports what got through against the OWASP Top 10 for LLM applications. Payloads are harmless codes and markers; nothing is exploited.</p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
               <Label htmlFor="t-start">Window starts</Label>
@@ -100,7 +139,7 @@ export function RequestTestForm({ tenants, isClient, checks }: { tenants: Array<
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={() => submit.mutate()} disabled={submit.isPending || !form.title.trim() || !form.targets.trim()}>
+          <Button onClick={() => submit.mutate()} disabled={submit.isPending || !form.title.trim() || !hasScope}>
             {submit.isPending && <Loader2 className="animate-spin" />} Request
           </Button>
         </DialogFooter>

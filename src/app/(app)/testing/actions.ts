@@ -32,11 +32,12 @@ const done = (testId?: string) => {
 const requestSchema = z.object({
   tenantId: z.string().max(64),
   title: z.string().trim().min(1).max(200),
-  targets: z.string().max(5000),
+  targets: z.string().max(5000).default(""),
   checks: z.array(z.enum(Object.keys(CHECKS) as [CheckKey, ...CheckKey[]])).min(1),
   rulesOfEngagement: z.string().trim().min(1).max(5000),
   windowStart: z.string().datetime({ offset: true }),
   windowEnd: z.string().datetime({ offset: true }),
+  aiSystems: z.array(z.string().max(64)).max(20).optional(),
 });
 
 export const requestTestAction = action(async function requestTestAction(input: z.input<typeof requestSchema>) {

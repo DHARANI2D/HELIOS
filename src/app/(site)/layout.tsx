@@ -28,6 +28,7 @@ export default async function SiteLayout({ children }: LayoutProps<"/">) {
             <Link href="/home#surface" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">What we protect</Link>
             <Link href="/home#how" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">How it works</Link>
             <Link href="/home#ai" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">AI first response</Link>
+            <Link href="/home#ai-security" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">AI security</Link>
             {site.estimator && <Link href="/home#plans" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">Plans</Link>}
             <Link href="/home#integrations" className="rounded-md px-2.5 py-1.5 hover:bg-accent hover:text-foreground">Integrations</Link>
           </nav>

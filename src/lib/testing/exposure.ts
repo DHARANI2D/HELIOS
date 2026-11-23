@@ -20,6 +20,7 @@ export const CHECKS = {
   tls: "TLS certificates and protocol",
   web: "Web: HTTPS redirect and security headers",
   email: "Email: SPF and DMARC",
+  ai: "AI applications: prompt injection, jailbreaks, data leaks and unsafe output (OWASP Top 10 for LLMs)",
 } as const;
 export type CheckKey = keyof typeof CHECKS;
 
@@ -81,6 +82,8 @@ export interface Net {
   connect(ip: string, port: number, timeoutMs: number): Promise<{ open: boolean; banner: string | null }>;
   tls(ip: string, port: number, servername: string | null, timeoutMs: number): Promise<CertInfo | null>;
   http(url: string, timeoutMs: number): Promise<{ status: number; headers: Record<string, string> } | null>;
+  // The AI red team's requests to a client's chat endpoint (lib/aisec/redteam).
+  post?(url: string, body: string, headers: Record<string, string>, timeoutMs: number): Promise<{ status: number; text: string } | null>;
 }
 
 export interface Probe {

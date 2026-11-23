@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CheckCircle2, Clock, Download, FileUp, Globe, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BrainCircuit, CheckCircle2, Clock, Download, FileUp, Globe, ShieldCheck } from "lucide-react";
 
 import { dbFor } from "@/lib/tenant-db";
 import { pageGuard } from "@/lib/session";
@@ -11,6 +11,8 @@ import { IMPORT_TOOLS } from "@/lib/testing/imports";
 import { SEVERITIES, severityCounts } from "@/lib/testing/findings";
 import { verifyRecord } from "@/lib/testing/scope";
 import { attestationText, findingsOf, targetsOf } from "@/lib/testing/service";
+import { OWASP_LLM } from "@/lib/aisec/frameworks";
+import type { SystemResult } from "@/lib/aisec/redteam";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +44,7 @@ export default async function SecurityTestPage({ params }: PageProps<"/testing/[
   const canAuthClient = user.isClient && user.role === "CLIENT_ADMIN" && can(user, "testing.authorise") && !test.clientAuthorisedAt && test.status === "requested";
   const canAuthHelios = !user.isClient && (user.role === "ADMIN" || user.role === "SOC_MANAGER") && !test.heliosAuthorisedAt && test.status === "requested" && test.requestedById !== user.id;
   const canAccept = user.isClient ? user.role === "CLIENT_ADMIN" : user.role === "ADMIN" || user.role === "SOC_MANAGER";
+  const aiSystems = test.aiSystems.length ? await dbFor(user).aiSystem.findMany({ where: { id: { in: test.aiSystems }, tenantId: test.tenantId }, select: { id: true, name: true, endpoint: true, redTeam: true } }) : [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,8 +95,8 @@ export default async function SecurityTestPage({ params }: PageProps<"/testing/[
               <TableBody>
                 {targets.map((t) => (
                   <TableRow key={t.value}>
-                    <TableCell className="font-mono text-xs">{t.value}{t.addresses.length > 0 && t.kind !== "ip" && <div className="text-[10px] text-muted-foreground">{t.addresses.slice(0, 4).join(", ")}</div>}</TableCell>
-                    <TableCell className="text-xs">{t.verified ? <span className="flex items-center gap-1 text-success-ink"><CheckCircle2 className="size-3.5" /> {t.via}</span> : <span className="text-muted-foreground">{t.problem ?? "Not checked yet"}</span>}</TableCell>
+                    <TableCell className="font-mono text-xs break-all whitespace-normal">{t.value}{t.addresses.length > 0 && t.kind !== "ip" && <div className="text-[10px] text-muted-foreground">{t.addresses.slice(0, 4).join(", ")}</div>}</TableCell>
+                    <TableCell className="text-xs whitespace-normal">{t.verified ? <span className="flex items-center gap-1 text-success-ink"><CheckCircle2 className="size-3.5" /> {t.via}</span> : <span className="text-muted-foreground">{t.problem ?? "Not checked yet"}</span>}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -142,6 +145,45 @@ export default async function SecurityTestPage({ params }: PageProps<"/testing/[
         </Card>
       </div>
 
+      {aiSystems.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base"><BrainCircuit className="size-4" /> AI red team</CardTitle>
+            <CardDescription>Adversarial prompts sent to each AI system&apos;s chat endpoint, by OWASP Top 10 for LLM applications category. When the AI refused, HELIOS tried the same goal in other forms (encoded, role-play, split, another language) before giving up.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {aiSystems.map((s) => {
+              const rt = s.redTeam as unknown as (SystemResult & { testId?: string }) | null;
+              const mine = rt && rt.testId === test.id ? rt : null;
+              return (
+                <div key={s.id} className="flex flex-col gap-2">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                    <Link href={`/ai-security/${s.id}`} className="hover:underline">{s.name}</Link>
+                    <span className="font-mono text-xs text-muted-foreground">{s.endpoint}</span>
+                    {mine && <Badge variant={mine.bypassed ? "warning" : "success"}>{mine.bypassed} of {mine.attacks} attacks got through · withstood {mine.resilience}%</Badge>}
+                  </p>
+                  {mine ? (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {OWASP_LLM.filter((o) => mine.categories[o.id]).map((o) => {
+                        const c = mine.categories[o.id];
+                        return (
+                          <div key={o.id} className={`rounded-md border p-2 text-xs ${c.open ? "border-warning/50 bg-warning/5" : ""}`}>
+                            <div className="font-medium">{o.id} · {o.name}</div>
+                            <div className="text-muted-foreground">{c.bypassed} of {c.attempts} got through{c.open ? ` · ${c.open} open` : ""}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Not run yet{rt?.testId ? " in this test (its latest result is from another test)" : ""}.</p>
+                  )}
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Findings ({findings.length})</CardTitle>
@@ -159,8 +201,9 @@ export default async function SecurityTestPage({ params }: PageProps<"/testing/[
                       <Badge variant={SEV_VARIANT[f.severity]} className="capitalize">{f.severity}</Badge>
                       <span className={f.status !== "open" ? "text-muted-foreground line-through" : ""}>{f.title}</span>
                       <span className="font-mono text-xs text-muted-foreground">{f.target}{f.port ? `:${f.port}` : ""}</span>
+                      {f.owasp?.map((o) => <Badge key={o} variant="outline" className="font-mono text-[10px]">{o}</Badge>)}
                     </p>
-                    <p className="text-xs whitespace-pre-wrap text-muted-foreground">{f.evidence}</p>
+                    <p className="text-xs whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">{f.evidence}</p>
                     <p className="text-xs"><span className="font-medium">Fix:</span> {f.remediation}</p>
                     <p className="text-[11px] text-muted-foreground">{f.source} · first seen {formatDateTime(f.firstSeen)}{f.references.length ? ` · ${f.references.slice(0, 4).join(", ")}` : ""}{f.statusNote ? ` · ${f.statusNote}` : ""}</p>
                   </div>
